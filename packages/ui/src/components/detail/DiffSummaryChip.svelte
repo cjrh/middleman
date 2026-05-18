@@ -4,6 +4,7 @@
     summarizeDiffFiles,
     type DiffLineSummary,
   } from "./diff-summary.js";
+  import DiffStats from "../shared/DiffStats.svelte";
 
   interface Props {
     additions: number;
@@ -46,10 +47,6 @@
           return (totals?.additions ?? 0) > 0 || (totals?.deletions ?? 0) > 0;
         }),
   );
-
-  function formatTotals(value: { additions: number; deletions: number }): string {
-    return `+${value.additions}/-${value.deletions}`;
-  }
 
   async function ensureSummary(): Promise<void> {
     const requestedKey = summaryKey;
@@ -125,7 +122,7 @@
     onfocus={showPopover}
     onblur={hidePopover}
   >
-    +{additions}/-{deletions}
+    <DiffStats {additions} {deletions} />
   </button>
 
   {#if open}
@@ -145,7 +142,10 @@
           {#each visibleRows as row (row.key)}
             <div class="diff-summary-row">
               <span>{row.label}</span>
-              <span>{formatTotals(summary[row.key])}</span>
+              <DiffStats
+                additions={summary[row.key].additions}
+                deletions={summary[row.key].deletions}
+              />
             </div>
           {/each}
         </div>
@@ -175,10 +175,9 @@
     font-size: var(--font-size-xs);
     font-weight: 600;
     line-height: 1;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
     white-space: nowrap;
     cursor: default;
+    gap: 4px;
   }
 
   .diff-summary-trigger:focus-visible {
@@ -231,12 +230,6 @@
 
   .diff-summary-row {
     color: var(--text-secondary);
-  }
-
-  .diff-summary-row span:last-child {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-    white-space: nowrap;
   }
 
   .diff-summary-state {

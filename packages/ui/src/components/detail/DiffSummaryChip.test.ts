@@ -28,6 +28,19 @@ function file(
   };
 }
 
+function rowText(popover: HTMLElement, label: string): string {
+  const row = Array.from(popover.querySelectorAll(".diff-summary-row"))
+    .find((candidate) => candidate.textContent?.includes(label));
+  expect(row).toBeTruthy();
+  return row?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function statLabel(additions: number, deletions: number): string {
+  const additionLabel = additions === 1 ? "addition" : "additions";
+  const deletionLabel = deletions === 1 ? "deletion" : "deletions";
+  return `${additions} ${additionLabel}, ${deletions} ${deletionLabel}`;
+}
+
 describe("DiffSummaryChip", () => {
   afterEach(() => {
     cleanup();
@@ -53,24 +66,24 @@ describe("DiffSummaryChip", () => {
     });
 
     await fireEvent.mouseEnter(
-      screen.getByRole("button", { name: /\+74\/-20/i }),
+      screen.getByRole("button", { name: statLabel(74, 20) }),
     );
 
     const popover = await screen.findByRole("status");
-    const labels = Array.from(popover.querySelectorAll(".diff-summary-row span:first-child"))
+    const labels = Array.from(popover.querySelectorAll(".diff-summary-row > span:first-child"))
       .map((label) => label.textContent);
     expect(labels).toEqual(["Plans/docs", "Code", "Tests", "Other", "Generated"]);
     expect(screen.getByText("Plans/docs")).toBeTruthy();
     expect(screen.queryByText("Total")).toBeNull();
-    expect(screen.getByText("+10/-2")).toBeTruthy();
+    expect(rowText(popover, "Plans/docs")).toBe("Plans/docs +10 −2");
     expect(screen.getByText("Code")).toBeTruthy();
-    expect(screen.getByText("+40/-6")).toBeTruthy();
+    expect(rowText(popover, "Code")).toBe("Code +40 −6");
     expect(screen.getByText("Tests")).toBeTruthy();
-    expect(screen.getByText("+20/-8")).toBeTruthy();
+    expect(rowText(popover, "Tests")).toBe("Tests +20 −8");
     expect(screen.getByText("Other")).toBeTruthy();
-    expect(screen.getByText("+1/-1")).toBeTruthy();
+    expect(rowText(popover, "Other")).toBe("Other +1 −1");
     expect(screen.getByText("Generated")).toBeTruthy();
-    expect(screen.getByText("+3/-3")).toBeTruthy();
+    expect(rowText(popover, "Generated")).toBe("Generated +3 −3");
     expect(loadFiles).toHaveBeenCalledTimes(1);
   });
 
@@ -91,13 +104,14 @@ describe("DiffSummaryChip", () => {
     });
 
     await fireEvent.mouseEnter(
-      screen.getByRole("button", { name: /\+60\/-14/i }),
+      screen.getByRole("button", { name: statLabel(60, 14) }),
     );
 
-    expect(await screen.findByText("Code")).toBeTruthy();
-    expect(screen.getByText("+40/-6")).toBeTruthy();
+    const popover = await screen.findByRole("status");
+    expect(within(popover).getByText("Code")).toBeTruthy();
+    expect(rowText(popover, "Code")).toBe("Code +40 −6");
     expect(screen.getByText("Tests")).toBeTruthy();
-    expect(screen.getByText("+20/-8")).toBeTruthy();
+    expect(rowText(popover, "Tests")).toBe("Tests +20 −8");
     expect(screen.queryByText("Plans/docs")).toBeNull();
     expect(screen.queryByText("Generated")).toBeNull();
     expect(screen.queryByText("Other")).toBeNull();
@@ -119,7 +133,7 @@ describe("DiffSummaryChip", () => {
       },
     });
 
-    const trigger = screen.getByRole("button", { name: /\+4\/-1/i });
+    const trigger = screen.getByRole("button", { name: statLabel(4, 1) });
     await fireEvent.mouseEnter(trigger);
 
     expect(await screen.findByText("Changed files are still refreshing."))
@@ -129,7 +143,7 @@ describe("DiffSummaryChip", () => {
 
     const popover = await screen.findByRole("status");
     expect(within(popover).getByText("Code")).toBeTruthy();
-    expect(within(popover).getByText("+4/-1")).toBeTruthy();
+    expect(rowText(popover, "Code")).toBe("Code +4 −1");
     expect(loadFiles).toHaveBeenCalledTimes(2);
   });
 
@@ -159,7 +173,7 @@ describe("DiffSummaryChip", () => {
     });
 
     await fireEvent.mouseEnter(
-      screen.getByRole("button", { name: /\+10\/-0/i }),
+      screen.getByRole("button", { name: statLabel(10, 0) }),
     );
     await rerender({
       additions: 5,
@@ -178,7 +192,7 @@ describe("DiffSummaryChip", () => {
 
     const popover = await screen.findByRole("status");
     expect(within(popover).getByText("Code")).toBeTruthy();
-    expect(within(popover).getByText("+5/-1")).toBeTruthy();
+    expect(rowText(popover, "Code")).toBe("Code +5 −1");
     expect(screen.queryByText("Plans/docs")).toBeNull();
   });
 
@@ -202,7 +216,7 @@ describe("DiffSummaryChip", () => {
     });
 
     await fireEvent.mouseEnter(
-      screen.getByRole("button", { name: /\+10\/-0/i }),
+      screen.getByRole("button", { name: statLabel(10, 0) }),
     );
     expect(await screen.findByText("Plans/docs")).toBeTruthy();
 
@@ -215,8 +229,9 @@ describe("DiffSummaryChip", () => {
 
     const popover = await screen.findByRole("status");
     expect(within(popover).getByText("Code")).toBeTruthy();
-    expect(within(popover).getByText("+5/-1")).toBeTruthy();
+    expect(rowText(popover, "Code")).toBe("Code +5 −1");
     await waitFor(() => expect(loadFiles).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("Plans/docs")).toBeNull();
   });
+
 });
