@@ -195,6 +195,85 @@ func TestCreatePRHeadRepoClassification(t *testing.T) {
 	}
 }
 
+func TestCreateIssueDefaultBranchSluggified(t *testing.T) {
+	tests := []struct {
+		name      string
+		title     string
+		slugStyle bool
+		want      string
+	}{
+		{
+			name:      "slug style with usable title",
+			title:     "Add foo to bar",
+			slugStyle: true,
+			want:      "middleman/issue-7-add-foo-to-bar",
+		},
+		{
+			name:      "slug style with empty title falls back to bare",
+			title:     "",
+			slugStyle: true,
+			want:      "middleman/issue-7",
+		},
+		{
+			name:      "slug style with all-punctuation falls back to bare",
+			title:     "?!@#",
+			slugStyle: true,
+			want:      "middleman/issue-7",
+		},
+		{
+			name:      "bare style ignores title",
+			title:     "Add foo to bar",
+			slugStyle: false,
+			want:      "middleman/issue-7",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert := Assert.New(t)
+			require := require.New(t)
+
+			d := openTestDB(t)
+			ctx := t.Context()
+			repoID := seedRepo(t, d, "github.com", "acme", "widget")
+			seedIssue(t, d, repoID, 7, tt.title)
+
+			mgr := NewManager(d, t.TempDir())
+			mgr.SetIssueBranchSlugEnabled(tt.slugStyle)
+
+			ws, err := mgr.CreateIssue(
+				ctx, "github.com", "acme", "widget", 7,
+				CreateIssueOptions{},
+			)
+			require.NoError(err)
+			require.NotNil(ws)
+
+			assert.Equal(tt.want, ws.GitHeadRef)
+			assert.Equal(tt.want, ws.WorkspaceBranch)
+		})
+	}
+}
+
+func TestCreateIssueExplicitGitHeadRefBypassesSlug(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+
+	d := openTestDB(t)
+	ctx := t.Context()
+	repoID := seedRepo(t, d, "github.com", "acme", "widget")
+	seedIssue(t, d, repoID, 7, "Add foo to bar")
+
+	mgr := NewManager(d, t.TempDir())
+
+	ws, err := mgr.CreateIssue(
+		ctx, "github.com", "acme", "widget", 7,
+		CreateIssueOptions{GitHeadRef: "custom/branch"},
+	)
+	require.NoError(err)
+	require.NotNil(ws)
+	assert.Equal("custom/branch", ws.GitHeadRef)
+}
+
 func TestCreateRepoNotTracked(t *testing.T) {
 	d := openTestDB(t)
 	mgr := NewManager(d, t.TempDir())
@@ -2332,4 +2411,33 @@ func (f *fakePtyOwnerClient) Snapshot(
 		Output: f.SnapshotOutput,
 		Title:  f.SnapshotTitle,
 	}, nil
+}
+
+func TestWorkspaceBranchCandidatesDoesNotIncludeBareForSluggedWorkspace(t *testing.T) {
+	// Slug-style issue workspace whose bare-form branch name might
+	// be a user-owned local branch unrelated to middleman. Cleanup
+	// must return only the persisted GitHeadRef so the unrelated
+	// branch is not deleted.
+	assert := Assert.New(t)
+	ws := &Workspace{
+		ItemType:   db.WorkspaceItemTypeIssue,
+		ItemNumber: 10,
+		GitHeadRef: "middleman/issue-10-widget-rendering-broken",
+	}
+	got := workspaceBranchCandidates(ws, workspaceBranchUnknown)
+	assert.Equal([]string{"middleman/issue-10-widget-rendering-broken"}, got)
+}
+
+func TestWorkspaceBranchCandidatesUsesBareFallbackOnlyForLegacyWorkspace(t *testing.T) {
+	// Pre-feature issue workspaces have no recorded GitHeadRef.
+	// Cleanup must still find the bare middleman/issue-<n> branch
+	// those workspaces actually use.
+	assert := Assert.New(t)
+	ws := &Workspace{
+		ItemType:   db.WorkspaceItemTypeIssue,
+		ItemNumber: 10,
+		GitHeadRef: "",
+	}
+	got := workspaceBranchCandidates(ws, workspaceBranchUnknown)
+	assert.Equal([]string{"middleman/issue-10"}, got)
 }

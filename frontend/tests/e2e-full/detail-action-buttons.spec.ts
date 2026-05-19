@@ -108,7 +108,9 @@ test.describe("detail action buttons", () => {
       expect(createdWorkspace.platform_host).toBe("github.com");
       expect(createdWorkspace.item_type).toBe("issue");
       expect(createdWorkspace.item_number).toBe(10);
-      expect(createdWorkspace.git_head_ref).toBe("middleman/issue-10");
+      expect(createdWorkspace.git_head_ref).toBe(
+        "middleman/issue-10-widget-rendering-broken-on-safari",
+      );
 
       await expect(page).toHaveURL(
         new RegExp(`/terminal/${createdWorkspace.id}$`),
@@ -121,7 +123,7 @@ test.describe("detail action buttons", () => {
       await access(readyWorkspace.worktree_path);
       expect(
         gitOutput(readyWorkspace.worktree_path, ["branch", "--show-current"]),
-      ).toBe("middleman/issue-10");
+      ).toBe("middleman/issue-10-widget-rendering-broken-on-safari");
     } finally {
       await api?.dispose();
       await isolatedServer?.stop();
