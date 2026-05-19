@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -789,7 +790,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: host %q is not loopback; only loopback addresses are supported", c.Host)
 	}
 
-	if c.Port < 1 || c.Port > 65535 {
+	if c.Port < 0 || c.Port > 65535 {
 		return fmt.Errorf("config: invalid port %d", c.Port)
 	}
 
@@ -969,10 +970,18 @@ func (c *Config) SyncDuration() time.Duration {
 }
 
 func (c *Config) GitHubToken() string {
+	return c.gitHubTokenForHost(platformpkg.DefaultGitHubHost)
+}
+
+// gitHubTokenForHost resolves a github token for a specific host. The
+// configured GitHubTokenEnv env var wins when non-empty, otherwise
+// the helper falls back to `gh auth token --hostname <host>`. Internal
+// callers go through GitHubToken() or TokenForPlatformHost.
+func (c *Config) gitHubTokenForHost(host string) string {
 	if token := os.Getenv(c.GitHubTokenEnv); token != "" {
 		return token
 	}
-	return ghAuthToken()
+	return ghAuthTokenForHost(host)
 }
 
 func (c *Config) TokenForPlatformHost(platform, host, repoTokenEnv string) string {
@@ -1001,7 +1010,7 @@ func (c *Config) TokenForPlatformHost(platform, host, repoTokenEnv string) strin
 		return os.Getenv(defaultTokenEnv)
 	}
 	if p == defaultPlatform {
-		return c.GitHubToken()
+		return c.gitHubTokenForHost(h)
 	}
 	return ""
 }
@@ -1087,14 +1096,62 @@ func appendTokenEnvName(names []string, name string) []string {
 	return append(names, name)
 }
 
-var execCommand = exec.Command
+var execCommand = exec.CommandContext
 
-func ghAuthToken() string {
-	out, err := execCommand("gh", "auth", "token").Output()
-	if err != nil {
-		return ""
+// ghAuthExecTimeout bounds each gh subprocess invocation. gh auth
+// token is a local lookup and returns in milliseconds; 5s is generous
+// and prevents a hung gh from stalling startup.
+const ghAuthExecTimeout = 5 * time.Second
+
+// ghAuthTokenForHost returns the token gh has stored for host, or "".
+// Older gh versions that do not recognize --hostname trigger a fallback
+// to bare `gh auth token` only when host is the default github.com.
+// Any other host returns empty without retry so the caller surfaces a
+// missing-token error rather than the wrong host's token.
+func ghAuthTokenForHost(host string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), ghAuthExecTimeout)
+	defer cancel()
+
+	out, stderr, err := runGHAuthToken(ctx, "--hostname", host)
+	if err == nil {
+		return strings.TrimSpace(string(out))
 	}
-	return strings.TrimSpace(string(out))
+	if host == platformpkg.DefaultGitHubHost &&
+		isUnsupportedHostnameFlag(err, stderr) {
+		out, _, err = runGHAuthToken(ctx)
+		if err == nil {
+			return strings.TrimSpace(string(out))
+		}
+	}
+	return ""
+}
+
+// runGHAuthToken invokes `gh auth token` with the given extra args
+// under ctx. stderr is captured explicitly so the caller can inspect
+// the rejection text from older gh versions (cmd.Output() only fills
+// *ExitError.Stderr when cmd.Stderr is unset).
+func runGHAuthToken(ctx context.Context, extraArgs ...string) ([]byte, []byte, error) {
+	args := append([]string{"auth", "token"}, extraArgs...)
+	cmd := execCommand(ctx, "gh", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	return out, stderr.Bytes(), err
+}
+
+// isUnsupportedHostnameFlag reports whether the gh invocation failed
+// specifically because the installed gh does not recognize the
+// --hostname flag (cobra/pflag rejection text). Missing-binary,
+// context-deadline, auth-failure, and unrelated nonzero exits all
+// return false so the caller does not retry bare.
+func isUnsupportedHostnameFlag(err error, stderr []byte) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	text := string(stderr)
+	return strings.Contains(text, "unknown flag: --hostname") ||
+		strings.Contains(text, "unknown shorthand flag")
 }
 
 func (c *Config) BudgetPerHour() int {
