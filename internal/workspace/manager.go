@@ -35,6 +35,7 @@ type Manager struct {
 	db                     *db.DB
 	worktreeDir            string
 	clones                 *gitclone.Manager
+	locks                  *FileLockManager
 	tmuxCmd                []string
 	ptyOwner               PtyOwnerClient
 	preferPtyOwner         bool
@@ -102,6 +103,7 @@ func NewManager(
 	return &Manager{
 		db:                     database,
 		worktreeDir:            worktreeDir,
+		locks:                  NewFileLockManager(),
 		retryQueued:            make(map[string]bool),
 		issueBranchSlugEnabled: true,
 	}
@@ -130,6 +132,22 @@ func (m *Manager) defaultIssueBranch(issueNumber int, title string) string {
 // operations. Called after the clone manager is initialized.
 func (m *Manager) SetClones(clones *gitclone.Manager) {
 	m.clones = clones
+}
+
+// withRepoLock acquires a lock for the clone directory, executes the function,
+// and releases the lock. The lock is released even if the function panics.
+func (m *Manager) withRepoLock(ctx context.Context, cloneDir string, fn func() error) error {
+	lock, err := m.locks.Acquire(ctx, cloneDir)
+	if err != nil {
+		return fmt.Errorf("acquire worktree lock for %q: %w", cloneDir, err)
+	}
+	defer func() {
+		if err := lock.Unlock(); err != nil {
+			slog.Warn("failed to release worktree lock",
+				"path", cloneDir, "err", err)
+		}
+	}()
+	return fn()
 }
 
 // SetTmuxCommand sets the command + argv prefix for every tmux
@@ -457,7 +475,24 @@ func (m *Manager) Setup(
 	return nil
 }
 
+// addWorktree creates the workspace's worktree and branch under the
+// per-repo lock. The lock prevents concurrent worktree mutations on
+// the same bare clone from clobbering each other; see FileLockManager.
 func (m *Manager) addWorktree(
+	ctx context.Context, cloneDir string, ws *Workspace,
+) (string, error) {
+	var branch string
+	err := m.withRepoLock(ctx, cloneDir, func() error {
+		var addErr error
+		branch, addErr = m.addWorktreeLocked(ctx, cloneDir, ws)
+		return addErr
+	})
+	return branch, err
+}
+
+// addWorktreeLocked runs the worktree-add decision tree. Callers must
+// hold the per-repo lock for cloneDir before invoking this function.
+func (m *Manager) addWorktreeLocked(
 	ctx context.Context, cloneDir string, ws *Workspace,
 ) (string, error) {
 	if ws.ItemType == db.WorkspaceItemTypeIssue {
@@ -890,21 +925,23 @@ func (m *Manager) cleanupWorkspaceArtifactsForRetry(
 		return nil
 	}
 
-	if err := runGit(
-		ctx, cloneDir,
-		"worktree", "remove", "--force", ws.WorktreePath,
-	); err != nil && !isGitWorktreeAbsent(err) {
-		return fmt.Errorf("remove git worktree: %w", err)
-	}
-	if err := m.deleteWorkspaceBranchesStrict(
-		ctx, cloneDir, ws, ws.WorkspaceBranch,
-	); err != nil {
-		return err
-	}
-	if err := runGit(ctx, cloneDir, "worktree", "prune"); err != nil {
-		return fmt.Errorf("prune git worktrees: %w", err)
-	}
-	return nil
+	return m.withRepoLock(ctx, cloneDir, func() error {
+		if err := runGit(
+			ctx, cloneDir,
+			"worktree", "remove", "--force", ws.WorktreePath,
+		); err != nil && !isGitWorktreeAbsent(err) {
+			return fmt.Errorf("remove git worktree: %w", err)
+		}
+		if err := m.deleteWorkspaceBranchesStrict(
+			ctx, cloneDir, ws, ws.WorkspaceBranch,
+		); err != nil {
+			return err
+		}
+		if err := runGit(ctx, cloneDir, "worktree", "prune"); err != nil {
+			return fmt.Errorf("prune git worktrees: %w", err)
+		}
+		return nil
+	})
 }
 
 func (m *Manager) cleanupWorkspaceArtifactsForDelete(
@@ -924,14 +961,28 @@ func (m *Manager) cleanupWorkspaceArtifactsForDelete(
 	if err != nil {
 		return err
 	}
+	// If the clone is missing — manually removed, or never created
+	// because Setup failed before EnsureClone returned — there is
+	// nothing to clean up under the lock, and trying to acquire it
+	// would fail at file open. Match the retry-path's behavior and
+	// fall through to a successful no-op delete.
+	ready, err := gitCloneDirReady(cloneDir)
+	if err != nil {
+		return err
+	}
+	if !ready {
+		return nil
+	}
 
-	_ = runGit(
-		ctx, cloneDir,
-		"worktree", "remove", "--force", ws.WorktreePath,
-	)
-	m.deleteWorkspaceBranches(ctx, cloneDir, ws, ws.WorkspaceBranch)
-	_ = runGit(ctx, cloneDir, "worktree", "prune")
-	return nil
+	return m.withRepoLock(ctx, cloneDir, func() error {
+		_ = runGit(
+			ctx, cloneDir,
+			"worktree", "remove", "--force", ws.WorktreePath,
+		)
+		m.deleteWorkspaceBranches(ctx, cloneDir, ws, ws.WorkspaceBranch)
+		_ = runGit(ctx, cloneDir, "worktree", "prune")
+		return nil
+	})
 }
 
 func (m *Manager) cleanupTmuxSession(
@@ -1888,21 +1939,28 @@ func wrapWorkspaceSetupError(stage string, err error) error {
 }
 
 // rollbackWorktree removes a partially created worktree and its
-// branch.
+// branch under the per-repo lock.
 func (m *Manager) rollbackWorktree(
 	ctx context.Context, cloneDir string, ws *Workspace,
 	branch string,
 ) {
 	cleanupCtx, cancel := cleanupContext(ctx)
 	defer cancel()
-	if err := runGit(
-		cleanupCtx, cloneDir,
-		"worktree", "remove", "--force", ws.WorktreePath,
-	); err != nil {
-		slog.Warn("rollback: worktree remove failed",
-			"path", ws.WorktreePath, "err", err)
+	err := m.withRepoLock(cleanupCtx, cloneDir, func() error {
+		if err := runGit(
+			cleanupCtx, cloneDir,
+			"worktree", "remove", "--force", ws.WorktreePath,
+		); err != nil {
+			slog.Warn("rollback: worktree remove failed",
+				"path", ws.WorktreePath, "err", err)
+		}
+		m.deleteWorkspaceBranches(cleanupCtx, cloneDir, ws, branch)
+		return nil
+	})
+	if err != nil {
+		slog.Warn("rollback: acquire worktree lock failed",
+			"path", cloneDir, "err", err)
 	}
-	m.deleteWorkspaceBranches(cleanupCtx, cloneDir, ws, branch)
 }
 
 func (m *Manager) deleteWorkspaceBranches(

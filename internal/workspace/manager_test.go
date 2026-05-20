@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2440,4 +2442,211 @@ func TestWorkspaceBranchCandidatesUsesBareFallbackOnlyForLegacyWorkspace(t *test
 	}
 	got := workspaceBranchCandidates(ws, workspaceBranchUnknown)
 	assert.Equal([]string{"middleman/issue-10"}, got)
+}
+
+func TestFileLockManagerAcquireRelease(t *testing.T) {
+	require := require.New(t)
+	mgr := NewFileLockManager()
+	ctx := t.Context()
+	repo := t.TempDir()
+
+	first, err := mgr.Acquire(ctx, repo)
+	require.NoError(err)
+	require.NoError(first.Unlock())
+
+	second, err := mgr.Acquire(ctx, repo)
+	require.NoError(err)
+	require.NoError(second.Unlock())
+}
+
+func TestFileLockManagerSerializesGoroutines(t *testing.T) {
+	require := require.New(t)
+	mgr := NewFileLockManager()
+	ctx := t.Context()
+	repo := t.TempDir()
+
+	const goroutines = 6
+	var inCritical atomic.Int32
+	var maxObserved atomic.Int32
+	var overlap atomic.Int32
+
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Go(func() {
+			lock, err := mgr.Acquire(ctx, repo)
+			if err != nil {
+				return
+			}
+			defer func() { _ = lock.Unlock() }()
+			current := inCritical.Add(1)
+			defer inCritical.Add(-1)
+			if current > 1 {
+				overlap.Add(1)
+			}
+			for {
+				prev := maxObserved.Load()
+				if current <= prev || maxObserved.CompareAndSwap(prev, current) {
+					break
+				}
+			}
+			time.Sleep(15 * time.Millisecond)
+		})
+	}
+	wg.Wait()
+
+	require.Equal(int32(1), maxObserved.Load(),
+		"only one goroutine should hold the lock at a time")
+	require.Equal(int32(0), overlap.Load(),
+		"no goroutine should observe another holder in its critical section")
+	require.Equal(int32(0), inCritical.Load())
+}
+
+func TestFileLockManagerCtxCancelWhileWaiting(t *testing.T) {
+	require := require.New(t)
+	mgr := NewFileLockManager()
+	repo := t.TempDir()
+
+	held, err := mgr.Acquire(t.Context(), repo)
+	require.NoError(err)
+	defer func() { _ = held.Unlock() }()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	gotErr := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		_, err := mgr.Acquire(ctx, repo)
+		gotErr <- err
+	}()
+	<-started
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-gotErr:
+		require.ErrorIs(err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		require.FailNow("Acquire did not return after ctx cancel")
+	}
+}
+
+func TestFileLockManagerDoubleUnlock(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	mgr := NewFileLockManager()
+	lock, err := mgr.Acquire(t.Context(), t.TempDir())
+	require.NoError(err)
+	require.NoError(lock.Unlock())
+	assert.Error(lock.Unlock())
+}
+
+func TestManagerWithRepoLockReleaseOnSuccess(t *testing.T) {
+	require := require.New(t)
+	mgr := NewManager(openTestDB(t), t.TempDir())
+	repo := t.TempDir()
+
+	calls := 0
+	require.NoError(mgr.withRepoLock(t.Context(), repo, func() error {
+		calls++
+		return nil
+	}))
+	require.Equal(1, calls)
+
+	again, err := mgr.locks.Acquire(t.Context(), repo)
+	require.NoError(err)
+	require.NoError(again.Unlock())
+}
+
+func TestManagerWithRepoLockReleaseOnError(t *testing.T) {
+	require := require.New(t)
+	mgr := NewManager(openTestDB(t), t.TempDir())
+	repo := t.TempDir()
+
+	sentinel := errors.New("inner failed")
+	err := mgr.withRepoLock(t.Context(), repo, func() error {
+		return sentinel
+	})
+	require.ErrorIs(err, sentinel)
+
+	again, err := mgr.locks.Acquire(t.Context(), repo)
+	require.NoError(err)
+	require.NoError(again.Unlock())
+}
+
+func TestManagerAddWorktreeAcquiresRepoLock(t *testing.T) {
+	require := require.New(t)
+	cloneDir := setupBareCloneForWorkspaceGitTest(t)
+	configureSameRepoPRRefs(t, cloneDir, "feature/lock-probe", 7)
+	mgr := NewManager(openTestDB(t), t.TempDir())
+
+	// Hold the per-repo lock from outside addWorktree; it must wait.
+	held, err := mgr.locks.Acquire(t.Context(), cloneDir)
+	require.NoError(err)
+
+	ws := &Workspace{
+		ItemType:     db.WorkspaceItemTypePullRequest,
+		ItemNumber:   7,
+		GitHeadRef:   "feature/lock-probe",
+		WorktreePath: filepath.Join(t.TempDir(), "wt"),
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.addWorktree(t.Context(), cloneDir, ws)
+		done <- err
+	}()
+
+	select {
+	case <-done:
+		require.FailNow("addWorktree completed while the per-repo lock was held")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	require.NoError(held.Unlock())
+	select {
+	case err := <-done:
+		require.NoError(err)
+	case <-time.After(5 * time.Second):
+		require.FailNow("addWorktree did not finish after lock release")
+	}
+}
+
+func TestManagerCleanupForDeleteAcquiresRepoLock(t *testing.T) {
+	require := require.New(t)
+
+	host, owner, name := "github.com", "acme", "widget"
+	baseDir := t.TempDir()
+	cloneDir := filepath.Join(baseDir, host, owner, name+".git")
+	require.NoError(os.MkdirAll(filepath.Dir(cloneDir), 0o755))
+	runWorkspaceTestGit(
+		t, baseDir, "init", "--bare", "--initial-branch=main", cloneDir,
+	)
+
+	mgr := NewManager(openTestDB(t), t.TempDir())
+	mgr.SetClones(gitclone.New(baseDir, nil))
+
+	ws := &Workspace{
+		ID:           "ws-cleanup-lock",
+		PlatformHost: host,
+		RepoOwner:    owner,
+		RepoName:     name,
+		WorktreePath: filepath.Join(t.TempDir(), "missing-wt"),
+	}
+
+	held, err := mgr.locks.Acquire(t.Context(), cloneDir)
+	require.NoError(err)
+	done := make(chan error, 1)
+	go func() { done <- mgr.cleanupWorkspaceArtifactsForDelete(t.Context(), ws) }()
+
+	select {
+	case <-done:
+		require.FailNow("cleanupWorkspaceArtifactsForDelete proceeded under held lock")
+	case <-time.After(80 * time.Millisecond):
+	}
+	require.NoError(held.Unlock())
+	select {
+	case err := <-done:
+		require.NoError(err)
+	case <-time.After(5 * time.Second):
+		require.FailNow("cleanupWorkspaceArtifactsForDelete did not finish after release")
+	}
 }
