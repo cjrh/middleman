@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -196,6 +197,12 @@ func (s *Server) trackHTTPConn(_ net.Conn, state http.ConnState) {
 // Hub returns the server's SSE event hub. Callers should never
 // retain the returned pointer beyond the server's lifetime.
 func (s *Server) Hub() *EventHub { return s.hub }
+
+// SubscriberCount returns the number of live SSE subscribers. Intended
+// for tests that need to wait for a connection to register before
+// broadcasting (broadcasts issued before subscription would otherwise
+// race against the handler's Subscribe call).
+func (s *Server) SubscriberCount() int { return s.hub.SubscriberCount() }
 
 // SetVersion sets the version string returned by GET /api/v1/version.
 func (s *Server) SetVersion(v string) { s.version = v }
@@ -409,7 +416,7 @@ func newServer(
 		cfgPath:                cfgPath,
 		options:                options,
 		now:                    time.Now,
-		hub:                    NewEventHub(),
+		hub:                    NewEventHubWithCapacity(cfg.SSEBufferSizeOrDefault()),
 		tmuxActivity:           newTmuxActivityTracker(nil),
 		labelCatalogRefreshIDs: make(map[int64]struct{}),
 		bgCtx: shutdownAwareContext{
@@ -815,7 +822,8 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
 		return
 	}
-	s.serveSSE(r.Context(), w, rc)
+	cursor, hasCursor := parseLastEventID(r)
+	s.serveSSE(r.Context(), w, rc, cursor, hasCursor)
 }
 
 func (s *Server) streamEvents(
@@ -827,10 +835,11 @@ func (s *Server) streamEvents(
 			ctx.SetHeader("Cache-Control", "no-cache")
 			ctx.SetHeader("Connection", "keep-alive")
 
-			_, w := humago.Unwrap(ctx)
+			r, w := humago.Unwrap(ctx)
 			rc := http.NewResponseController(w)
 			_ = rc.SetWriteDeadline(time.Time{})
-			s.serveSSE(ctx.Context(), w, rc)
+			cursor, hasCursor := parseLastEventID(r)
+			s.serveSSE(ctx.Context(), w, rc, cursor, hasCursor)
 		},
 	}, nil
 }
@@ -840,18 +849,70 @@ type sseController interface {
 	Flush() error
 }
 
+// parseLastEventID inspects an incoming SSE request for a reconnect
+// cursor. The Last-Event-ID header takes priority (HTML5 EventSource
+// emits it automatically on reconnect); the since= query parameter is
+// the fallback for non-browser callers and explicit first-connect
+// resumption. Returns (0, false) when no usable cursor is present, so
+// the handler can fall back to the no-cursor path (live + cached
+// sync_status) without further branching.
+func parseLastEventID(r *http.Request) (uint64, bool) {
+	candidates := []string{r.Header.Get("Last-Event-ID")}
+	if q := r.URL.Query().Get("since"); q != "" {
+		candidates = append(candidates, q)
+	}
+	for _, raw := range candidates {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			slog.Debug("sse: ignoring unparseable cursor", "value", raw, "err", err)
+			continue
+		}
+		return n, true
+	}
+	return 0, false
+}
+
 func (s *Server) serveSSE(
 	ctx context.Context,
 	w io.Writer,
 	rc sseController,
+	cursor uint64,
+	hasCursor bool,
 ) {
 	// Subscribe BEFORE the first flush so any broadcast issued between
 	// the headers landing on the wire and the subscriber being registered
-	// is delivered to this client instead of dropped.
-	ch, done := s.hub.Subscribe(ctx)
+	// is delivered to this client instead of dropped. When a cursor is
+	// supplied the handler replays the ring directly, so cached
+	// sync_status injection by Subscribe would duplicate; pass false.
+	ch, done := s.hub.Subscribe(ctx, !hasCursor)
 
 	if err := rc.Flush(); err != nil {
 		return
+	}
+
+	// Resolve the replay path before entering the live loop so the
+	// client sees missed events (or a stale signal) before any new
+	// live broadcasts and never out of order with them.
+	deliveredThrough := cursor
+	if hasCursor {
+		replay, synID, stale := s.hub.ReplaySnapshotSince(cursor)
+		if stale {
+			if !writeSSEFrame(w, rc, synID, "reconnect.stale", []byte("{}")) {
+				return
+			}
+			deliveredThrough = synID
+		} else {
+			for _, rec := range replay {
+				if !writeSSERecorded(w, rc, rec) {
+					return
+				}
+				deliveredThrough = rec.ID
+			}
+		}
 	}
 
 	ticker := time.NewTicker(30 * time.Second)
@@ -872,21 +933,13 @@ func (s *Server) serveSSE(
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(ev.Data)
-			if err != nil {
-				slog.Error("sse: marshal event", "type", ev.Type, "err", err)
+			if hasCursor && ev.ID <= deliveredThrough {
+				// Already replayed; skip the duplicate that arrived
+				// via the cached-status pre-load or a race between
+				// the snapshot read and a fresh broadcast.
 				continue
 			}
-			if err := rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-				return
-			}
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data); err != nil {
-				return
-			}
-			if err := rc.Flush(); err != nil {
-				return
-			}
-			if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			if !writeSSERecorded(w, rc, ev) {
 				return
 			}
 		case <-ticker.C:
@@ -906,6 +959,39 @@ func (s *Server) serveSSE(
 			return
 		}
 	}
+}
+
+// writeSSERecorded serializes a recorded event and writes it as a
+// framed SSE frame. Returns true on success, false if any write or
+// flush failed and the handler should exit.
+func writeSSERecorded(w io.Writer, rc sseController, rec RecordedEvent) bool {
+	data, err := json.Marshal(rec.Event.Data)
+	if err != nil {
+		slog.Error("sse: marshal event", "type", rec.Event.Type, "err", err)
+		// Skip the unmarshalable event but keep streaming.
+		return true
+	}
+	return writeSSEFrame(w, rc, rec.ID, rec.Event.Type, data)
+}
+
+func writeSSEFrame(
+	w io.Writer, rc sseController, id uint64, eventType string, data []byte,
+) bool {
+	if err := rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return false
+	}
+	if _, err := fmt.Fprintf(
+		w, "id: %d\nevent: %s\ndata: %s\n\n", id, eventType, data,
+	); err != nil {
+		return false
+	}
+	if err := rc.Flush(); err != nil {
+		return false
+	}
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		return false
+	}
+	return true
 }
 
 func (s *Server) getVersion(
