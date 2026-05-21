@@ -2457,6 +2457,13 @@ export interface components {
             state: string;
             title: string;
         };
+        OperationAvailability: {
+            available: boolean;
+            code?: string;
+            required_capability?: string;
+            retry_at?: string;
+            unavailable_reason?: string;
+        };
         PlatformIdentityPayload: {
             name: string;
             owner: string;
@@ -2610,6 +2617,19 @@ export interface components {
             synced_at?: string;
             syncing: boolean;
         };
+        RepoOperations: {
+            add_comment: components["schemas"]["OperationAvailability"];
+            add_label: components["schemas"]["OperationAvailability"];
+            approve_workflow: components["schemas"]["OperationAvailability"];
+            close_issue: components["schemas"]["OperationAvailability"];
+            close_pr: components["schemas"]["OperationAvailability"];
+            mark_ready_for_review: components["schemas"]["OperationAvailability"];
+            merge_pr: components["schemas"]["OperationAvailability"];
+            remove_label: components["schemas"]["OperationAvailability"];
+            reopen_issue: components["schemas"]["OperationAvailability"];
+            reopen_pr: components["schemas"]["OperationAvailability"];
+            submit_review: components["schemas"]["OperationAvailability"];
+        };
         RepoPreviewRequest: {
             /**
              * Format: uri
@@ -2691,6 +2711,7 @@ export interface components {
             PlatformHost: string;
             ViewerCanMerge: boolean;
             capabilities: components["schemas"]["ProviderCapabilitiesResponse"];
+            operations: components["schemas"]["RepoOperations"];
         };
         RepoSummaryAuthorResponse: {
             /** Format: int64 */
@@ -2741,6 +2762,7 @@ export interface components {
             open_issue_count: number;
             /** Format: int64 */
             open_pr_count: number;
+            operations: components["schemas"]["RepoOperations"];
             owner: string;
             platform_host: string;
             recent_issues: components["schemas"]["RepoSummaryIssueResponse"][] | null;

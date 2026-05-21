@@ -786,6 +786,15 @@ type MrImportMetadataResponse struct {
 	Title            string  `json:"title"`
 }
 
+// OperationAvailability defines model for OperationAvailability.
+type OperationAvailability struct {
+	Available          bool    `json:"available"`
+	Code               *string `json:"code,omitempty"`
+	RequiredCapability *string `json:"required_capability,omitempty"`
+	RetryAt            *string `json:"retry_at,omitempty"`
+	UnavailableReason  *string `json:"unavailable_reason,omitempty"`
+}
+
 // PlatformIdentityPayload defines model for PlatformIdentityPayload.
 type PlatformIdentityPayload struct {
 	Name         string `json:"name"`
@@ -913,6 +922,21 @@ type RepoLabelsResponse struct {
 	Syncing   bool     `json:"syncing"`
 }
 
+// RepoOperations defines model for RepoOperations.
+type RepoOperations struct {
+	AddComment         OperationAvailability `json:"add_comment"`
+	AddLabel           OperationAvailability `json:"add_label"`
+	ApproveWorkflow    OperationAvailability `json:"approve_workflow"`
+	CloseIssue         OperationAvailability `json:"close_issue"`
+	ClosePr            OperationAvailability `json:"close_pr"`
+	MarkReadyForReview OperationAvailability `json:"mark_ready_for_review"`
+	MergePr            OperationAvailability `json:"merge_pr"`
+	RemoveLabel        OperationAvailability `json:"remove_label"`
+	ReopenIssue        OperationAvailability `json:"reopen_issue"`
+	ReopenPr           OperationAvailability `json:"reopen_pr"`
+	SubmitReview       OperationAvailability `json:"submit_review"`
+}
+
 // RepoPreviewRequest defines model for RepoPreviewRequest.
 type RepoPreviewRequest struct {
 	// Schema A URL to the JSON Schema for this object.
@@ -983,6 +1007,7 @@ type RepoResponse struct {
 	PlatformHost             string                       `json:"PlatformHost"`
 	ViewerCanMerge           bool                         `json:"ViewerCanMerge"`
 	Capabilities             ProviderCapabilitiesResponse `json:"capabilities"`
+	Operations               RepoOperations               `json:"operations"`
 }
 
 // RepoSummaryAuthorResponse defines model for RepoSummaryAuthorResponse.
@@ -1035,6 +1060,7 @@ type RepoSummaryResponse struct {
 	Name                 string                            `json:"name"`
 	OpenIssueCount       int64                             `json:"open_issue_count"`
 	OpenPrCount          int64                             `json:"open_pr_count"`
+	Operations           RepoOperations                    `json:"operations"`
 	Owner                string                            `json:"owner"`
 	PlatformHost         string                            `json:"platform_host"`
 	RecentIssues         *[]RepoSummaryIssueResponse       `json:"recent_issues"`
