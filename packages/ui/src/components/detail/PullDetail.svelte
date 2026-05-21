@@ -1329,6 +1329,10 @@
           checksJSON={pr.CIChecksJSON}
           detailLoaded={detailStore.getDetailLoaded()}
           detailSyncing={detailStore.isDetailSyncing()}
+          owner={owner}
+          name={name}
+          number={pr.Number}
+          prKey={pr.PlatformExternalID}
           bind:expanded={ciExpanded}
           showPanel={false}
         />
@@ -1380,6 +1384,10 @@
           checksJSON={pr.CIChecksJSON}
           detailLoaded={detailStore.getDetailLoaded()}
           detailSyncing={detailStore.isDetailSyncing()}
+          owner={owner}
+          name={name}
+          number={pr.Number}
+          prKey={pr.PlatformExternalID}
           bind:expanded={ciExpanded}
           showButton={false}
         />
