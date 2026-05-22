@@ -134,6 +134,58 @@ that call `t.Run`, `t.Parallel`, or `t.Deadline` inside the bubble.
 `synctest.Wait` is race-detector synchronization, so it is useful under
 `go test -race` when the test is structurally eligible.
 
+## HTTP testing discipline
+
+A test of user-visible HTTP behavior is **wire-level** when the request flows
+through `srv.ServeHTTP` (every middleware runs) and assertions read what a
+client observes: status, response headers, and body bytes. The handler
+function's return value is not consulted.
+
+Two transports qualify:
+
+- **`httptest.NewRecorder`** is the default for request/response tests, used
+  by `internal/server/apitest/`. No `net.Conn`, so writes buffer until the
+  handler returns and `Flush` does not push toward a reader — the recorder
+  cannot honor streaming or hijack semantics.
+- **`httptest.NewServer`** is required for streaming, hijack, or
+  `Flush`-sensitive endpoints. Used by `internal/server/e2etest/` and the
+  in-package `TestSSE_*` tests.
+
+Defaults for new code:
+
+- API request/response → `internal/server/apitest/` with the generated client;
+  decoding through `generated.ErrorModel` catches OpenAPI drift.
+- Streaming, hijack, `Flush`-sensitive → `internal/server/e2etest/`.
+- Inputs the generated client cannot produce (wrong `Content-Type`, malformed
+  body, preflight failure) → raw `http.Request` over the recorder; comment
+  the reason.
+- Direct handler-function calls (`s.handleSSE(w, r)`) skip routing and
+  middleware. Allowed only to inject a fault into the `http.ResponseWriter`;
+  comment the fault. The two `TestSSE_Terminates...` deadline tests are the
+  legitimate exception.
+
+Handler-internal helper unit tests (URL parsing, label diffs, capability
+resolution) stay as plain unit tests in `package server` and are out of
+scope.
+
+Bug classes wire-level catches:
+
+| Bug class | Why the wire matters |
+|-----------|----------------------|
+| Time serialization (`Z` vs `+00:00`) | Response bytes, not `time.Time` before marshaling. |
+| Error missing from OpenAPI doc | Generated client surfaces unknown status variants. |
+| Header rewritten or stripped by middleware | `resp.Header`, not `w.Header()` inside the handler. |
+| Status overridden by middleware | `resp.StatusCode`, not the handler return. |
+| Mutation guard short-circuits before dispatch | Only `srv.ServeHTTP` runs the full middleware chain. |
+| SSE `Content-Type` / `Cache-Control` drift | Real-socket read; the recorder is buffered. |
+
+Worked examples: `internal/server/e2etest/sse_contract_test.go` pins SSE
+headers and the first cached `sync_status` frame;
+`internal/server/apitest/mutation_guard_test.go` asserts the 415 response
+for `POST Content-Type: text/plain`;
+`internal/server/workspacetest/issue_workspace_conflict_test.go` reproduces
+a 409 through `generated.ErrorModel` alongside the in-package original.
+
 ## Related context
 
 - [`context/provider-architecture.md`](./provider-architecture.md) documents the
