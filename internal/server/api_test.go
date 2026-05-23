@@ -4741,6 +4741,69 @@ func TestAPICommentAutocomplete(t *testing.T) {
 		{Kind: "pull", Number: 12, Title: "Polish mentions", State: "open"},
 	}, refBody.References)
 	assert.Empty(refBody.Users)
+
+	bangReq := httptest.NewRequest(http.MethodGet, "/api/v1/repo/gh/acme/widget/comment-autocomplete?trigger=!&q=1&limit=10", nil)
+	bangRR := httptest.NewRecorder()
+	srv.ServeHTTP(bangRR, bangReq)
+	assert.Equal(http.StatusBadRequest, bangRR.Code, bangRR.Body.String())
+
+	gitlabRepoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitlab",
+		PlatformHost: "gitlab.example.com",
+		Owner:        "group",
+		Name:         "project",
+	})
+	require.NoError(err)
+	_, err = database.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:         gitlabRepoID,
+		PlatformID:     12001,
+		Number:         12,
+		URL:            "https://gitlab.example.com/group/project/-/merge_requests/12",
+		Title:          "Polish merge request mentions",
+		Author:         "alice",
+		State:          "open",
+		HeadBranch:     "feature-12",
+		BaseBranch:     "main",
+		CreatedAt:      time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second),
+		UpdatedAt:      time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second),
+		LastActivityAt: time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second),
+	})
+	require.NoError(err)
+	_, err = database.UpsertIssue(ctx, &db.Issue{
+		RepoID:         gitlabRepoID,
+		PlatformID:     17001,
+		Number:         17,
+		URL:            "https://gitlab.example.com/group/project/-/issues/17",
+		Title:          "Mention issue",
+		Author:         "alex",
+		State:          "open",
+		CreatedAt:      time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second),
+		UpdatedAt:      time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second),
+		LastActivityAt: time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second),
+	})
+	require.NoError(err)
+
+	gitlabIssueReq := httptest.NewRequest(http.MethodGet, "/api/v1/host/gitlab.example.com/repo/gitlab/group/project/comment-autocomplete?trigger=%23&q=1&limit=10", nil)
+	gitlabIssueRR := httptest.NewRecorder()
+	srv.ServeHTTP(gitlabIssueRR, gitlabIssueReq)
+	require.Equal(http.StatusOK, gitlabIssueRR.Code, gitlabIssueRR.Body.String())
+
+	var gitlabIssueBody commentAutocompleteResponse
+	require.NoError(json.NewDecoder(gitlabIssueRR.Body).Decode(&gitlabIssueBody))
+	assert.Equal([]db.CommentAutocompleteReference{
+		{Kind: "issue", Number: 17, Title: "Mention issue", State: "open"},
+	}, gitlabIssueBody.References)
+
+	gitlabMRReq := httptest.NewRequest(http.MethodGet, "/api/v1/host/gitlab.example.com/repo/gitlab/group/project/comment-autocomplete?trigger=!&q=1&limit=10", nil)
+	gitlabMRRR := httptest.NewRecorder()
+	srv.ServeHTTP(gitlabMRRR, gitlabMRReq)
+	require.Equal(http.StatusOK, gitlabMRRR.Code, gitlabMRRR.Body.String())
+
+	var gitlabMRBody commentAutocompleteResponse
+	require.NoError(json.NewDecoder(gitlabMRRR.Body).Decode(&gitlabMRBody))
+	assert.Equal([]db.CommentAutocompleteReference{
+		{Kind: "pull", Number: 12, Title: "Polish merge request mentions", State: "open"},
+	}, gitlabMRBody.References)
 }
 
 func TestAPICommentAutocompleteUsesRepoPlatformHost(t *testing.T) {
@@ -9132,7 +9195,7 @@ func TestResolveItem_PR(t *testing.T) {
 	client := setupTestClient(t, srv)
 
 	resp, err := client.HTTP.ResolveRepoItemWithResponse(
-		t.Context(), "gh", "acme", "widget", 42,
+		t.Context(), "gh", "acme", "widget", 42, nil,
 	)
 	require.NoError(err)
 	require.Equal(http.StatusOK, resp.StatusCode())
@@ -9150,7 +9213,7 @@ func TestResolveItem_Issue(t *testing.T) {
 	client := setupTestClient(t, srv)
 
 	resp, err := client.HTTP.ResolveRepoItemWithResponse(
-		t.Context(), "gh", "acme", "widget", 7,
+		t.Context(), "gh", "acme", "widget", 7, nil,
 	)
 	require.NoError(err)
 	require.Equal(http.StatusOK, resp.StatusCode())
@@ -9160,13 +9223,73 @@ func TestResolveItem_Issue(t *testing.T) {
 	require.True(resp.JSON200.RepoTracked)
 }
 
+func TestResolveItem_UsesItemTypeHintForGitLab(t *testing.T) {
+	require := require.New(t)
+	repos := []ghclient.RepoRef{{
+		Platform:     platform.KindGitLab,
+		PlatformHost: "gitlab.example.com",
+		Owner:        "group",
+		Name:         "project",
+	}}
+	srv, database := setupTestServerWithRepos(t, &mockGH{}, repos)
+	repoID, err := database.UpsertRepo(t.Context(), db.RepoIdentity{
+		Platform:     "gitlab",
+		PlatformHost: "gitlab.example.com",
+		Owner:        "group",
+		Name:         "project",
+	})
+	require.NoError(err)
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err = database.UpsertMergeRequest(t.Context(), &db.MergeRequest{
+		RepoID:         repoID,
+		PlatformID:     10000,
+		Number:         10,
+		URL:            "https://gitlab.example.com/group/project/-/merge_requests/10",
+		Title:          "Test MR",
+		Author:         "testuser",
+		State:          "open",
+		HeadBranch:     "feature",
+		BaseBranch:     "main",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		LastActivityAt: now,
+	})
+	require.NoError(err)
+	_, err = database.UpsertIssue(t.Context(), &db.Issue{
+		RepoID:         repoID,
+		PlatformID:     10001,
+		Number:         10,
+		URL:            "https://gitlab.example.com/group/project/-/issues/10",
+		Title:          "Test Issue",
+		Author:         "testuser",
+		State:          "open",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		LastActivityAt: now,
+	})
+	require.NoError(err)
+	client := setupTestClient(t, srv)
+	itemType := generated.ResolveRepoItemOnHostParamsItemTypeIssue
+
+	resp, err := client.HTTP.ResolveRepoItemOnHostWithResponse(
+		t.Context(), "gitlab.example.com", "gitlab", "group", "project", 10,
+		&generated.ResolveRepoItemOnHostParams{ItemType: &itemType},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.Equal("issue", resp.JSON200.ItemType)
+	require.EqualValues(10, resp.JSON200.Number)
+	require.True(resp.JSON200.RepoTracked)
+}
+
 func TestResolveItem_UntrackedRepo(t *testing.T) {
 	require := require.New(t)
 	srv, _ := setupTestServer(t)
 	client := setupTestClient(t, srv)
 
 	resp, err := client.HTTP.ResolveRepoItemWithResponse(
-		t.Context(), "gh", "unknown", "repo", 1,
+		t.Context(), "gh", "unknown", "repo", 1, nil,
 	)
 	require.NoError(err)
 	require.Equal(http.StatusOK, resp.StatusCode())
@@ -9193,7 +9316,7 @@ func TestResolveItem_NotFoundOnGitHub(t *testing.T) {
 	client := setupTestClient(t, srv)
 
 	resp, err := client.HTTP.ResolveRepoItemWithResponse(
-		t.Context(), "gh", "acme", "widget", 999,
+		t.Context(), "gh", "acme", "widget", 999, nil,
 	)
 	require.NoError(err)
 	require.Equal(http.StatusNotFound, resp.StatusCode())
@@ -9216,7 +9339,7 @@ func TestResolveItem_GitHubServerError(t *testing.T) {
 	client := setupTestClient(t, srv)
 
 	resp, err := client.HTTP.ResolveRepoItemWithResponse(
-		t.Context(), "gh", "acme", "widget", 999,
+		t.Context(), "gh", "acme", "widget", 999, nil,
 	)
 	require.NoError(err)
 	require.Equal(http.StatusBadGateway, resp.StatusCode())

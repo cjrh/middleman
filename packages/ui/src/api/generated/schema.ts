@@ -4418,7 +4418,10 @@ export interface operations {
     };
     "resolve-repo-item-on-host": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional item type hint for providers whose issues and merge requests have separate number spaces. */
+                item_type?: "pr" | "issue";
+            };
             header?: never;
             path: {
                 provider: string;
@@ -6004,7 +6007,10 @@ export interface operations {
     };
     "resolve-repo-item": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional item type hint for providers whose issues and merge requests have separate number spaces. */
+                item_type?: "pr" | "issue";
+            };
             header?: never;
             path: {
                 provider: string;
@@ -6870,6 +6876,8 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const pathsHostPlatform_hostRepoProviderOwnerNameResolveNumberPostParametersQueryItem_typeValues: ReadonlyArray<FlattenedDeepRequired<paths>["/host/{platform_host}/repo/{provider}/{owner}/{name}/resolve/{number}"]["post"]["parameters"]["query"]["item_type"]> = ["pr", "issue"];
+export const pathsRepoProviderOwnerNameResolveNumberPostParametersQueryItem_typeValues: ReadonlyArray<FlattenedDeepRequired<paths>["/repo/{provider}/{owner}/{name}/resolve/{number}"]["post"]["parameters"]["query"]["item_type"]> = ["pr", "issue"];
 export const mergeRequestKanbanStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MergeRequest"]["KanbanStatus"]> = ["new", "reviewing", "waiting", "awaiting_merge"];
 export const mergeRequestStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MergeRequest"]["State"]> = ["open", "closed", "merged"];
 export const mergeRequestResponseKanbanStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MergeRequestResponse"]["KanbanStatus"]> = ["new", "reviewing", "waiting", "awaiting_merge"];
