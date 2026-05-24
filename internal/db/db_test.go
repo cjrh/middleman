@@ -818,6 +818,92 @@ func TestOpenRepairsCurrentSchemaMissingWorkspaceTerminalBackend(t *testing.T) {
 	require.NoError(err)
 }
 
+func TestOpenInitializesBranchActivitySchema(t *testing.T) {
+	require := require.New(t)
+	ctx := t.Context()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "branch-activity.db")
+
+	d, err := Open(path)
+	require.NoError(err)
+	t.Cleanup(func() { require.NoError(d.Close()) })
+
+	for table, columns := range map[string][]string{
+		"middleman_branch_commits":      {"observed_order", "created_at", "updated_at"},
+		"middleman_branch_tips":         {"created_at", "updated_at"},
+		"middleman_branch_force_pushes": {"before_observed_at", "created_at"},
+	} {
+		for _, column := range columns {
+			hasColumn, err := hasColumn(d.ReadDB(), table, column)
+			require.NoError(err)
+			require.Truef(hasColumn, "%s.%s should exist after migration", table, column)
+		}
+	}
+
+	repoID, err := d.UpsertRepo(ctx, GitHubRepoIdentity("github.com", "acme", "widget"))
+	require.NoError(err)
+	require.NoError(d.UpsertBranchCommits(ctx, []BranchCommit{{
+		RepoID:         repoID,
+		BranchName:     "main",
+		CommitSHA:      "shared-sha",
+		AuthorName:     "Alice",
+		AuthorEmail:    "alice@example.com",
+		AuthoredAt:     time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+		CommitterName:  "Alice",
+		CommitterEmail: "alice@example.com",
+		CommittedAt:    time.Date(2026, 5, 1, 12, 1, 0, 0, time.UTC),
+		Subject:        "main work",
+	}, {
+		RepoID:         repoID,
+		BranchName:     "release",
+		CommitSHA:      "shared-sha",
+		AuthorName:     "Alice",
+		AuthorEmail:    "alice@example.com",
+		AuthoredAt:     time.Date(2026, 5, 1, 12, 3, 0, 0, time.UTC),
+		CommitterName:  "Alice",
+		CommitterEmail: "alice@example.com",
+		CommittedAt:    time.Date(2026, 5, 1, 12, 4, 0, 0, time.UTC),
+		Subject:        "release work",
+	}}))
+	require.NoError(d.InsertBranchForcePush(ctx, BranchForcePush{
+		RepoID:     repoID,
+		BranchName: "main",
+		BeforeSHA:  "before-sha",
+		AfterSHA:   "after-sha",
+		DetectedAt: time.Date(2026, 5, 1, 12, 2, 0, 0, time.UTC),
+	}))
+	require.NoError(d.InsertBranchForcePush(ctx, BranchForcePush{
+		RepoID:     repoID,
+		BranchName: "main",
+		BeforeSHA:  "before-sha",
+		AfterSHA:   "after-sha",
+		DetectedAt: time.Date(2026, 5, 1, 12, 5, 0, 0, time.UTC),
+	}))
+
+	var commitRows int
+	err = d.ReadDB().QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM middleman_branch_commits
+		WHERE repo_id = ? AND commit_sha = ?`,
+		repoID,
+		"shared-sha",
+	).Scan(&commitRows)
+	require.NoError(err)
+	require.Equal(2, commitRows)
+
+	var forcePushRows int
+	err = d.ReadDB().QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM middleman_branch_force_pushes
+		WHERE repo_id = ? AND before_sha = ? AND after_sha = ?`,
+		repoID,
+		"before-sha",
+		"after-sha",
+	).Scan(&forcePushRows)
+	require.NoError(err)
+	require.Equal(2, forcePushRows)
+}
+
 func TestOpenMigratesWorkspaceUniquenessAndPreservesSetupEvents(t *testing.T) {
 	require := require.New(t)
 	ctx := t.Context()

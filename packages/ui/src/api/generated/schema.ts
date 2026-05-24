@@ -551,6 +551,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/host/{platform_host}/repo/{provider}/{owner}/{name}/commits/{sha}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get repository commit diff */
+        get: operations["get-repo-commit-diff-on-host"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/host/{platform_host}/repo/{provider}/{owner}/{name}/labels": {
         parameters: {
             query?: never;
@@ -1236,6 +1253,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/repo/{provider}/{owner}/{name}/commits/{sha}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get repository commit diff */
+        get: operations["get-repo-commit-diff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/repo/{provider}/{owner}/{name}/labels": {
         parameters: {
             query?: never;
@@ -1666,6 +1700,10 @@ export interface components {
         };
         Activity: {
             collapse_threads: boolean;
+            /** Format: int64 */
+            default_branch_max_commits: number;
+            /** Format: int64 */
+            default_branch_retention_days: number;
             hide_bots: boolean;
             hide_closed: boolean;
             time_range: string;
@@ -1673,8 +1711,19 @@ export interface components {
         };
         ActivityItemResponse: {
             activity_type: string;
+            activity_url?: string;
+            after_sha?: string;
             author: string;
+            author_email?: string;
+            author_name?: string;
+            authored_at?: string;
+            before_sha?: string;
             body_preview: string;
+            branch_name?: string;
+            commit_sha?: string;
+            committed_at?: string;
+            committer_email?: string;
+            committer_name?: string;
             created_at: string;
             cursor: string;
             id: string;
@@ -4348,6 +4397,43 @@ export interface operations {
             };
         };
     };
+    "get-repo-commit-diff-on-host": {
+        parameters: {
+            query?: {
+                whitespace?: string;
+            };
+            header?: never;
+            path: {
+                provider: string;
+                platform_host: string;
+                owner: string;
+                name: string;
+                sha: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiffResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
     "list-repo-labels-on-host": {
         parameters: {
             query?: never;
@@ -5926,6 +6012,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CommentAutocompleteResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "get-repo-commit-diff": {
+        parameters: {
+            query?: {
+                whitespace?: string;
+            };
+            header?: never;
+            path: {
+                provider: string;
+                owner: string;
+                name: string;
+                sha: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiffResponse"];
                 };
             };
             /** @description Error */

@@ -148,6 +148,10 @@ const (
 
 const syncProgressLogInterval = 100
 const largeRepoBulkGraphQLThreshold = syncProgressLogInterval
+const (
+	defaultBranchActivityRetention  = 90 * 24 * time.Hour
+	defaultBranchActivityMaxCommits = 5000
+)
 
 type itemSyncProgressLogger struct {
 	repo   RepoRef
@@ -275,24 +279,27 @@ func (p *listFetchProgressLogger) log(message string) {
 
 // Syncer periodically pulls PR data from GitHub into SQLite.
 type Syncer struct {
-	clients       *platform.Registry
-	db            *db.DB
-	clones        *gitclone.Manager
-	rateTrackers  map[string]*RateTracker    // provider/host bucket -> tracker
-	budgets       map[string]*SyncBudget     // provider/host bucket -> budget
-	fetchers      map[string]*GraphQLFetcher // host -> GraphQL fetcher
-	repos         []RepoRef
-	reposMu       sync.Mutex
-	interval      time.Duration
-	watchInterval time.Duration
-	watchedMRs    []WatchedMR
-	watchMu       sync.Mutex
-	parallelism   atomic.Int32
-	running       atomic.Bool
-	status        atomic.Value // stores *SyncStatus
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	wg            sync.WaitGroup
+	clients                  *platform.Registry
+	db                       *db.DB
+	clones                   *gitclone.Manager
+	rateTrackers             map[string]*RateTracker    // provider/host bucket -> tracker
+	budgets                  map[string]*SyncBudget     // provider/host bucket -> budget
+	fetchers                 map[string]*GraphQLFetcher // host -> GraphQL fetcher
+	repos                    []RepoRef
+	reposMu                  sync.Mutex
+	interval                 time.Duration
+	watchInterval            time.Duration
+	watchedMRs               []WatchedMR
+	watchMu                  sync.Mutex
+	branchActivityMu         sync.RWMutex
+	branchActivityRetention  time.Duration
+	branchActivityMaxCommits int
+	parallelism              atomic.Int32
+	running                  atomic.Bool
+	status                   atomic.Value // stores *SyncStatus
+	stopCh                   chan struct{}
+	stopOnce                 sync.Once
+	wg                       sync.WaitGroup
 	// lifecycleMu serializes TriggerRun registration with Stop so
 	// no wg.Add can happen after Stop begins wg.Wait.
 	lifecycleMu        sync.Mutex
@@ -519,16 +526,18 @@ func NewSyncerWithRegistry(
 	}
 
 	s := &Syncer{
-		clients:            registry,
-		db:                 database,
-		clones:             clones,
-		rateTrackers:       rateTrackers,
-		budgets:            budgets,
-		repos:              repos,
-		interval:           interval,
-		nextSyncAfter:      make(map[string]time.Time),
-		nextWatchSyncAfter: make(map[string]time.Time),
-		stopCh:             make(chan struct{}),
+		clients:                  registry,
+		db:                       database,
+		clones:                   clones,
+		rateTrackers:             rateTrackers,
+		budgets:                  budgets,
+		repos:                    repos,
+		interval:                 interval,
+		branchActivityRetention:  defaultBranchActivityRetention,
+		branchActivityMaxCommits: defaultBranchActivityMaxCommits,
+		nextSyncAfter:            make(map[string]time.Time),
+		nextWatchSyncAfter:       make(map[string]time.Time),
+		stopCh:                   make(chan struct{}),
 		displayNames: newDisplayNameCache(
 			displayNameCacheSize,
 			displayNameSuccessTTL,
@@ -1157,6 +1166,44 @@ func (s *Syncer) SetParallelism(n int) {
 		n = 1
 	}
 	s.parallelism.Store(int32(n))
+}
+
+// SetBranchActivityLimits configures how much default-branch commit
+// activity the syncer persists.
+func (s *Syncer) SetBranchActivityLimits(
+	retention time.Duration,
+	maxCommits int,
+) {
+	if retention <= 0 {
+		retention = defaultBranchActivityRetention
+	}
+	if maxCommits <= 0 {
+		maxCommits = defaultBranchActivityMaxCommits
+	}
+	s.branchActivityMu.Lock()
+	s.branchActivityRetention = retention
+	s.branchActivityMaxCommits = maxCommits
+	s.branchActivityMu.Unlock()
+}
+
+func (s *Syncer) branchActivityLimits() (time.Duration, int) {
+	s.branchActivityMu.RLock()
+	retention := s.branchActivityRetention
+	maxCommits := s.branchActivityMaxCommits
+	s.branchActivityMu.RUnlock()
+	if retention <= 0 {
+		retention = defaultBranchActivityRetention
+	}
+	if maxCommits <= 0 {
+		maxCommits = defaultBranchActivityMaxCommits
+	}
+	return retention, maxCommits
+}
+
+// BranchActivityLimits reports the configured default-branch activity
+// retention and per-branch commit cap.
+func (s *Syncer) BranchActivityLimits() (time.Duration, int) {
+	return s.branchActivityLimits()
 }
 
 // SetOnStatusChange registers a callback invoked whenever the
@@ -2232,6 +2279,20 @@ func (s *Syncer) syncRepo(ctx context.Context, repo RepoRef) error {
 	// Fetch bare clone before PR data so refs are available for merge-base.
 	host := repoHost(repo)
 	cloneFetchOK := false
+	defaultBranch := s.defaultBranchForActivity(ctx, repoID, repo)
+	var previousTip *db.BranchTip
+	if defaultBranch != "" {
+		tip, err := s.db.GetBranchTip(ctx, repoID, defaultBranch)
+		if err != nil {
+			slog.Warn("get default branch tip failed",
+				"repo", repo.Owner+"/"+repo.Name,
+				"branch", defaultBranch,
+				"err", err,
+			)
+		} else {
+			previousTip = tip
+		}
+	}
 	if s.clones != nil {
 		if err := s.clones.EnsureClone(ctx, host, repo.Owner, repo.Name, cloneRemoteURL(repo)); err != nil {
 			slog.Warn("bare clone fetch failed",
@@ -2239,6 +2300,7 @@ func (s *Syncer) syncRepo(ctx context.Context, repo RepoRef) error {
 			)
 		} else {
 			cloneFetchOK = true
+			s.syncDefaultBranchActivity(ctx, repo, repoID, defaultBranch, previousTip)
 		}
 	}
 
@@ -2261,6 +2323,187 @@ func (s *Syncer) syncRepo(ctx context.Context, repo RepoRef) error {
 	}
 
 	return syncErr
+}
+
+func (s *Syncer) defaultBranchForActivity(ctx context.Context, repoID int64, repo RepoRef) string {
+	repoRow, err := s.db.GetRepoByID(ctx, repoID)
+	if err != nil {
+		slog.Warn("get repo default branch failed",
+			"repo", repo.Owner+"/"+repo.Name,
+			"err", err,
+		)
+		return strings.TrimSpace(repo.DefaultBranch)
+	}
+	if repoRow != nil && strings.TrimSpace(repoRow.DefaultBranch) != "" {
+		return strings.TrimSpace(repoRow.DefaultBranch)
+	}
+	return strings.TrimSpace(repo.DefaultBranch)
+}
+
+func (s *Syncer) syncDefaultBranchActivity(
+	ctx context.Context,
+	repo RepoRef,
+	repoID int64,
+	preferredBranch string,
+	previousTip *db.BranchTip,
+) {
+	if s.clones == nil {
+		return
+	}
+	host := repoHost(repo)
+	branch, currentTip, err := s.clones.ResolveDefaultBranch(
+		ctx,
+		host,
+		repo.Owner,
+		repo.Name,
+		preferredBranch,
+	)
+	if err != nil {
+		slog.Warn("resolve default branch activity ref failed",
+			"repo", repo.Owner+"/"+repo.Name,
+			"branch", preferredBranch,
+			"err", err,
+		)
+		return
+	}
+	if branch == "" || currentTip == "" {
+		slog.Warn("default branch activity skipped: no branch resolved",
+			"repo", repo.Owner+"/"+repo.Name,
+			"branch", preferredBranch,
+		)
+		return
+	}
+	if previousTip == nil || previousTip.BranchName != branch {
+		previousTip, err = s.db.GetBranchTip(ctx, repoID, branch)
+		if err != nil {
+			slog.Warn("get resolved default branch tip failed",
+				"repo", repo.Owner+"/"+repo.Name,
+				"branch", branch,
+				"err", err,
+			)
+			return
+		}
+	}
+
+	now := time.Now().UTC()
+	retention, maxCommits := s.branchActivityLimits()
+	retentionStart := now.Add(-retention)
+	afterSHA := ""
+	var beforeObservedAt time.Time
+	forcePush := false
+	if previousTip != nil && previousTip.TipSHA != "" {
+		afterSHA = previousTip.TipSHA
+		beforeObservedAt = previousTip.ObservedAt
+		if previousTip.TipSHA != currentTip {
+			ancestor, err := s.clones.IsAncestor(
+				ctx,
+				host,
+				repo.Owner,
+				repo.Name,
+				previousTip.TipSHA,
+				currentTip,
+			)
+			if err != nil {
+				slog.Warn("check default branch ancestry failed",
+					"repo", repo.Owner+"/"+repo.Name,
+					"branch", branch,
+					"err", err,
+				)
+				return
+			}
+			forcePush = !ancestor
+		}
+	}
+
+	gitCommits, err := s.clones.ListBranchCommitsSince(
+		ctx,
+		host,
+		repo.Owner,
+		repo.Name,
+		branch,
+		retentionStart,
+		afterSHA,
+		maxCommits,
+	)
+	if err != nil {
+		slog.Warn("list default branch commits failed",
+			"repo", repo.Owner+"/"+repo.Name,
+			"branch", branch,
+			"err", err,
+		)
+		return
+	}
+	if err := s.db.UpsertBranchCommits(
+		ctx,
+		dbBranchCommits(repoID, branch, gitCommits),
+	); err != nil {
+		slog.Warn("upsert default branch commits failed",
+			"repo", repo.Owner+"/"+repo.Name,
+			"branch", branch,
+			"err", err,
+		)
+		return
+	}
+	if forcePush {
+		if err := s.db.InsertBranchForcePush(ctx, db.BranchForcePush{
+			RepoID:           repoID,
+			BranchName:       branch,
+			BeforeSHA:        afterSHA,
+			AfterSHA:         currentTip,
+			BeforeObservedAt: beforeObservedAt,
+			DetectedAt:       now,
+		}); err != nil {
+			slog.Warn("insert default branch force push failed",
+				"repo", repo.Owner+"/"+repo.Name,
+				"branch", branch,
+				"err", err,
+			)
+			return
+		}
+	}
+	if err := s.db.UpsertBranchTip(ctx, db.BranchTip{
+		RepoID:     repoID,
+		BranchName: branch,
+		TipSHA:     currentTip,
+		ObservedAt: now,
+	}); err != nil {
+		slog.Warn("upsert default branch tip failed",
+			"repo", repo.Owner+"/"+repo.Name,
+			"branch", branch,
+			"err", err,
+		)
+		return
+	}
+	if err := s.db.PruneBranchActivity(ctx, retentionStart, maxCommits); err != nil {
+		slog.Warn("prune default branch activity failed",
+			"repo", repo.Owner+"/"+repo.Name,
+			"branch", branch,
+			"err", err,
+		)
+	}
+}
+
+func dbBranchCommits(
+	repoID int64,
+	branch string,
+	commits []gitclone.Commit,
+) []db.BranchCommit {
+	out := make([]db.BranchCommit, 0, len(commits))
+	for _, commit := range commits {
+		out = append(out, db.BranchCommit{
+			RepoID:         repoID,
+			BranchName:     branch,
+			CommitSHA:      commit.SHA,
+			AuthorName:     commit.AuthorName,
+			AuthorEmail:    commit.AuthorEmail,
+			AuthoredAt:     commit.AuthoredAt,
+			CommitterName:  commit.CommitterName,
+			CommitterEmail: commit.CommitterEmail,
+			CommittedAt:    commit.CommittedAt,
+			Subject:        commit.Message,
+		})
+	}
+	return out
 }
 
 func (s *Syncer) refreshRepoSettings(
@@ -2324,6 +2567,16 @@ func (s *Syncer) updateRepoSettingsFromProviderRepo(
 	repoID int64,
 	repo platform.Repository,
 ) {
+	if err := s.db.UpdateRepoProviderMetadata(ctx, repoID, db.RepoProviderMetadata{
+		PlatformRepoID: repo.PlatformExternalID,
+		WebURL:         repo.WebURL,
+		CloneURL:       repo.CloneURL,
+		DefaultBranch:  repo.DefaultBranch,
+	}); err != nil {
+		slog.Warn("update repo provider metadata failed",
+			"repo", repo.Ref.DisplayName(), "err", err,
+		)
+	}
 	if repo.MergeSettings != nil {
 		settings := repo.MergeSettings
 		if repo.ViewerCanMerge == nil {

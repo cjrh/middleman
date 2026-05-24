@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -185,6 +186,26 @@ type getRepoInput struct {
 }
 
 type getRepoOutput = bodyOutput[repoResponse]
+
+type getRepoCommitDiffInput struct {
+	Provider     string `path:"provider"`
+	PlatformHost string
+	Owner        string `path:"owner"`
+	Name         string `path:"name"`
+	SHA          string `path:"sha"`
+	Whitespace   string `query:"whitespace"`
+}
+
+type getRepoCommitDiffHostInput struct {
+	Provider     string `path:"provider"`
+	PlatformHost string `path:"platform_host"`
+	Owner        string `path:"owner"`
+	Name         string `path:"name"`
+	SHA          string `path:"sha"`
+	Whitespace   string `query:"whitespace"`
+}
+
+type getRepoCommitDiffOutput = bodyOutput[diffResponse]
 
 type commentAutocompleteInput struct {
 	Provider     string `path:"provider"`
@@ -708,6 +729,10 @@ func (s *Server) registerProviderRepoAPI(api huma.API) {
 		documentOperation("get-repo", "Get repository", "Repositories"))
 	huma.Get(api, hostRepoPath, s.getRepoOnHost,
 		documentOperation("get-repo-on-host", "Get repository", "Repositories"))
+	huma.Get(api, repoPath+"/commits/{sha}/diff", s.getRepoCommitDiff,
+		documentOperation("get-repo-commit-diff", "Get repository commit diff", "Repositories"))
+	huma.Get(api, hostRepoPath+"/commits/{sha}/diff", s.getRepoCommitDiffOnHost,
+		documentOperation("get-repo-commit-diff-on-host", "Get repository commit diff", "Repositories"))
 	huma.Register(api, huma.Operation{OperationID: "list-repo-labels", Method: http.MethodGet, Path: repoPath + "/labels", DefaultStatus: http.StatusOK, Summary: "List repository labels", Tags: []string{"Repositories"}}, s.listRepoLabels)
 	huma.Register(api, huma.Operation{OperationID: "list-repo-labels-on-host", Method: http.MethodGet, Path: hostRepoPath + "/labels", DefaultStatus: http.StatusOK, Summary: "List repository labels", Tags: []string{"Repositories"}}, s.listRepoLabelsOnHost)
 	huma.Get(api, repoPath+"/comment-autocomplete", s.getCommentAutocomplete,
@@ -887,6 +912,97 @@ func (s *Server) getPull(ctx context.Context, input *repoNumberInput) (*getPullO
 	}
 
 	return &getPullOutput{Body: body}, nil
+}
+
+func (s *Server) getRepoCommitDiff(
+	ctx context.Context,
+	input *getRepoCommitDiffInput,
+) (*getRepoCommitDiffOutput, error) {
+	if s.clones == nil {
+		return nil, problemServiceUnavailable("diff view not available: clone manager not configured")
+	}
+
+	repo, err := s.lookupRepoByProviderRoute(
+		ctx, input.Provider, input.PlatformHost, input.Owner, input.Name,
+	)
+	if err != nil {
+		return nil, providerRouteLookupError(err)
+	}
+
+	host := repoProviderHost(*repo)
+	if !isFullGitObjectID(input.SHA) {
+		return nil, problemValidation("path.sha", "commit SHA must be a full object ID")
+	}
+
+	sha, err := s.clones.ResolveCommit(ctx, host, repo.Owner, repo.Name, input.SHA)
+	if err != nil {
+		if errors.Is(err, gitclone.ErrNotFound) {
+			return nil, problemNotFound(CodeNotFound, "diff not available: referenced commit not found", nil)
+		}
+		slog.Error("failed to resolve repo commit", "owner", input.Owner, "name", input.Name, "sha", input.SHA, "err", err)
+		return nil, problemUpstream("failed to compute diff", "", "")
+	}
+
+	parent, err := s.clones.ParentOf(ctx, host, repo.Owner, repo.Name, sha)
+	if err != nil {
+		if errors.Is(err, gitclone.ErrNotFound) {
+			return nil, problemNotFound(CodeNotFound, "diff not available: referenced commit not found", nil)
+		}
+		slog.Error("failed to resolve commit parent", "owner", input.Owner, "name", input.Name, "sha", sha, "err", err)
+		return nil, problemUpstream("failed to compute diff", "", "")
+	}
+
+	hideWhitespace := input.Whitespace == "hide"
+	result, err := s.clones.Diff(ctx, host, repo.Owner, repo.Name, parent, sha, hideWhitespace)
+	if err != nil {
+		if errors.Is(err, gitclone.ErrNotFound) {
+			return nil, problemNotFound(CodeNotFound, "diff not available: referenced commit not found", nil)
+		}
+		slog.Error("failed to compute repo commit diff", "owner", input.Owner, "name", input.Name, "sha", sha, "err", err)
+		return nil, problemUpstream("failed to compute diff", "", "")
+	}
+
+	return &getRepoCommitDiffOutput{Body: diffResponse{
+		Stale:               false,
+		WhitespaceOnlyCount: result.WhitespaceOnlyCount,
+		Files:               result.Files,
+	}}, nil
+}
+
+func (s *Server) getRepoCommitDiffOnHost(
+	ctx context.Context,
+	input *getRepoCommitDiffHostInput,
+) (*getRepoCommitDiffOutput, error) {
+	next := getRepoCommitDiffInput{
+		Provider:     input.Provider,
+		PlatformHost: input.PlatformHost,
+		Owner:        input.Owner,
+		Name:         input.Name,
+		SHA:          input.SHA,
+		Whitespace:   input.Whitespace,
+	}
+	return s.getRepoCommitDiff(ctx, &next)
+}
+
+func isFullGitObjectID(value string) bool {
+	switch len(value) {
+	case 40, 64:
+	default:
+		return false
+	}
+	for _, c := range value {
+		if c >= '0' && c <= '9' {
+			continue
+		}
+		if c >= 'a' && c <= 'f' {
+			continue
+		}
+		if c >= 'A' && c <= 'F' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (s *Server) buildPullDetailResponse(
@@ -2777,7 +2893,7 @@ func (s *Server) listActivity(ctx context.Context, input *listActivityInput) (*l
 
 	out := make([]activityItemResponse, len(items))
 	for i, it := range items {
-		out[i] = activityItemResponse{
+		item := activityItemResponse{
 			ID:           it.Source + ":" + strconv.FormatInt(it.SourceID, 10),
 			Cursor:       db.EncodeCursor(it.CreatedAt, it.Source, it.SourceID),
 			ActivityType: it.ActivityType,
@@ -2796,11 +2912,73 @@ func (s *Server) listActivity(ctx context.Context, input *listActivityInput) (*l
 			CreatedAt:    formatUTCRFC3339(it.CreatedAt),
 			BodyPreview:  it.BodyPreview,
 		}
+		item.BranchName = it.BranchName
+		item.CommitSHA = it.CommitSHA
+		item.BeforeSHA = it.BeforeSHA
+		item.AfterSHA = it.AfterSHA
+		item.AuthorName = it.AuthorName
+		item.AuthorEmail = it.AuthorEmail
+		item.CommitterName = it.CommitterName
+		item.CommitterEmail = it.CommitterEmail
+		if it.AuthoredAt != nil {
+			item.AuthoredAt = formatUTCRFC3339(*it.AuthoredAt)
+		}
+		if it.CommittedAt != nil {
+			item.CommittedAt = formatUTCRFC3339(*it.CommittedAt)
+		}
+		item.ActivityURL = it.ActivityURL
+		if item.ActivityURL == "" {
+			item.ActivityURL = branchActivityURL(it)
+		}
+		out[i] = item
 	}
 
 	return &listActivityOutput{
 		Body: activityResponse{Items: out, Capped: capped},
 	}, nil
+}
+
+func branchActivityURL(it db.ActivityItem) string {
+	if it.CommitSHA == "" && (it.BeforeSHA == "" || it.AfterSHA == "") {
+		return ""
+	}
+	kind := platform.Kind(it.Platform)
+	meta, ok := platform.MetadataFor(kind)
+	if !ok {
+		return ""
+	}
+	host, ok := platform.HostOrDefault(meta.Kind, it.PlatformHost)
+	if !ok || host == "" {
+		return ""
+	}
+	repoPath := escapedRepoPath(it.RepoOwner, it.RepoName)
+	switch meta.Kind {
+	case platform.KindGitHub, platform.KindForgejo, platform.KindGitea:
+		if it.CommitSHA == "" {
+			return "https://" + host + "/" + repoPath + "/compare/" +
+				url.PathEscape(it.BeforeSHA) + "..." + url.PathEscape(it.AfterSHA)
+		}
+		return "https://" + host + "/" + repoPath + "/commit/" + url.PathEscape(it.CommitSHA)
+	case platform.KindGitLab:
+		if it.CommitSHA == "" {
+			return "https://" + host + "/" + repoPath + "/-/compare/" +
+				url.PathEscape(it.BeforeSHA) + "..." + url.PathEscape(it.AfterSHA)
+		}
+		return "https://" + host + "/" + repoPath + "/-/commit/" + url.PathEscape(it.CommitSHA)
+	default:
+		return ""
+	}
+}
+
+func escapedRepoPath(owner, name string) string {
+	parts := strings.Split(strings.Trim(owner+"/"+name, "/"), "/")
+	escaped := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			escaped = append(escaped, url.PathEscape(part))
+		}
+	}
+	return strings.Join(escaped, "/")
 }
 
 func (s *Server) resolveItem(

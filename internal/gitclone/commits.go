@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // emptyTreeSHA is git's well-known SHA for an empty tree object.
@@ -14,10 +15,14 @@ const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 // Commit holds metadata for a single commit in a PR's history.
 type Commit struct {
-	SHA        string
-	AuthorName string
-	AuthoredAt time.Time
-	Message    string // first line only
+	SHA            string
+	AuthorName     string
+	AuthorEmail    string
+	AuthoredAt     time.Time
+	CommitterName  string
+	CommitterEmail string
+	CommittedAt    time.Time
+	Message        string // first line only
 }
 
 type CommitTimelinePoint struct {
@@ -38,7 +43,7 @@ func (m *Manager) ListCommits(
 		return nil, err
 	}
 
-	args := []string{"log", "--first-parent", "--format=%H%x00%an%x00%aI%x00%s"}
+	args := []string{"log", "--first-parent", "--format=" + commitLogFormat}
 	if mergeBase == emptyTreeSHA {
 		// Empty tree is not a commit — list all ancestors of head.
 		args = append(args, headSHA)
@@ -51,6 +56,16 @@ func (m *Manager) ListCommits(
 		return nil, fmt.Errorf("list commits: %w", err)
 	}
 
+	return parseCommitLog(out)
+}
+
+const (
+	commitIdentityMaxBytes = 256
+	commitMessageMaxBytes  = 512
+	commitLogFormat        = "%H%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s"
+)
+
+func parseCommitLog(out []byte) ([]Commit, error) {
 	var commits []Commit
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), 1024*1024)
@@ -59,22 +74,45 @@ func (m *Manager) ListCommits(
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\x00", 4)
-		if len(parts) != 4 {
+		parts := strings.SplitN(line, "\x00", 8)
+		if len(parts) != 8 {
 			return nil, fmt.Errorf("unexpected git log line: %q", line)
 		}
-		t, err := time.Parse(time.RFC3339, parts[2])
+		authoredAt, err := time.Parse(time.RFC3339, parts[3])
 		if err != nil {
-			return nil, fmt.Errorf("parse commit date %q: %w", parts[2], err)
+			return nil, fmt.Errorf("parse authored date %q: %w", parts[3], err)
+		}
+		committedAt, err := time.Parse(time.RFC3339, parts[6])
+		if err != nil {
+			return nil, fmt.Errorf("parse committed date %q: %w", parts[6], err)
 		}
 		commits = append(commits, Commit{
-			SHA:        parts[0],
-			AuthorName: parts[1],
-			AuthoredAt: t,
-			Message:    parts[3],
+			SHA:            parts[0],
+			AuthorName:     truncateCommitText(parts[1], commitIdentityMaxBytes),
+			AuthorEmail:    truncateCommitText(parts[2], commitIdentityMaxBytes),
+			AuthoredAt:     authoredAt,
+			CommitterName:  truncateCommitText(parts[4], commitIdentityMaxBytes),
+			CommitterEmail: truncateCommitText(parts[5], commitIdentityMaxBytes),
+			CommittedAt:    committedAt,
+			Message:        truncateCommitText(parts[7], commitMessageMaxBytes),
 		})
 	}
 	return commits, scanner.Err()
+}
+
+func truncateCommitText(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	s = strings.ToValidUTF8(s, "")
+	if len(s) <= maxBytes {
+		return s
+	}
+	truncated := s[:maxBytes]
+	for !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated
 }
 
 // CommitTimelineSinceTag returns first-parent commits on the default branch
@@ -139,7 +177,7 @@ func (m *Manager) CommitTimelineSinceTag(
 		points = append(points, CommitTimelinePoint{
 			SHA:         parts[0],
 			CommittedAt: t,
-			Message:     parts[2],
+			Message:     truncateCommitText(parts[2], commitMessageMaxBytes),
 		})
 	}
 	if err := scanner.Err(); err != nil {
@@ -192,7 +230,7 @@ func (m *Manager) ParentOf(
 		return "", err
 	}
 	out, err := m.git(ctx, host, dir,
-		"rev-list", "--parents", "-n", "1", sha,
+		"rev-list", "--parents", "-n", "1", "--end-of-options", sha,
 	)
 	if err != nil {
 		return "", fmt.Errorf("parent of %s: %w", sha, err)

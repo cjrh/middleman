@@ -34,6 +34,28 @@ function activityItem(
   };
 }
 
+function branchActivityItem(
+  id: string,
+  overrides: Partial<ActivityItem> = {},
+): ActivityItem {
+  return activityItem(id, {
+    activity_type: "default_branch_commit",
+    author: "alice",
+    author_name: "Alice Example",
+    body_preview: "Refresh cache warmer",
+    branch_name: "main",
+    commit_sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    committed_at: "2026-04-27T12:00:00Z",
+    item_number: 0,
+    item_state: "",
+    item_title: "",
+    item_type: "",
+    item_url: "",
+    activity_url: "https://github.com/acme/widgets/commit/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    ...overrides,
+  });
+}
+
 const expanded = vi.hoisted(() => ({ value: true }));
 const toggleThreadItem = vi.hoisted(() => vi.fn());
 
@@ -93,5 +115,152 @@ describe("ActivityThreaded collapse", () => {
       ".repo-chip.repo-tag .repo-chip__label",
     );
     expect(label?.textContent).toBe("acme/widgets");
+  });
+
+  it("renders branch activity as top-level rows interleaved with item threads", async () => {
+    const { container } = render(ActivityThreaded, {
+      props: {
+        items: [
+          branchActivityItem("c4", {
+            created_at: "2026-04-27T12:04:00Z",
+            commit_sha: "d1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          }),
+          branchActivityItem("c3", {
+            created_at: "2026-04-27T12:03:00Z",
+            commit_sha: "c1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          }),
+          branchActivityItem("c2", {
+            created_at: "2026-04-27T12:02:00Z",
+            commit_sha: "b1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          }),
+          activityItem("pr-comment", {
+            created_at: "2026-04-27T12:01:30Z",
+          }),
+          branchActivityItem("c1", {
+            created_at: "2026-04-27T12:01:00Z",
+          }),
+        ],
+        onSelectItem: undefined,
+      },
+    });
+
+    const rows = Array.from(container.querySelectorAll(".item-row"));
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain("3 commits");
+    expect(rows[1]?.textContent).toContain("Add widget caching layer");
+    expect(rows[2]?.textContent).toContain("Refresh cache warmer");
+    expect(container.textContent).not.toContain("main updates on acme/widgets");
+    expect(container.textContent).not.toContain("#0");
+    expect(
+      container.querySelector(".branch-activity-row .thread-caret"),
+    ).toBeNull();
+  });
+
+  it("labels commit rows without the branch type or duplicated commit text", () => {
+    const { container } = render(ActivityThreaded, {
+      props: {
+        items: [branchActivityItem("c1")],
+        onSelectItem: undefined,
+      },
+    });
+
+    const row = container.querySelector(".branch-activity-row");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain("Commit");
+    expect(row?.textContent).toContain("acme/widgets");
+    expect(row?.textContent).toContain("main");
+    expect(row?.textContent).toContain("Refresh cache warmer");
+    expect(row?.textContent).not.toContain("Branch");
+    expect(row?.textContent).not.toContain("Commit Commit");
+    expect(row?.textContent).not.toContain("a1b2c3d");
+  });
+
+  it("selects default branch commit rows for an in-app diff", async () => {
+    const onSelectItem = vi.fn();
+    const onSelectBranchCommit = vi.fn();
+    const open = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
+
+    const { container } = render(ActivityThreaded, {
+      props: {
+        items: [branchActivityItem("c1")],
+        onSelectItem,
+        onSelectBranchCommit,
+      },
+    });
+
+    const row = container.querySelector(".branch-activity-row");
+    expect(row).not.toBeNull();
+    await fireEvent.click(row!);
+
+    expect(onSelectItem).not.toHaveBeenCalled();
+    expect(onSelectBranchCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activity_type: "default_branch_commit",
+        commit_sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      }),
+    );
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
+  it("highlights the selected default branch commit row", () => {
+    const { container } = render(ActivityThreaded, {
+      props: {
+        items: [branchActivityItem("c1")],
+        onSelectItem: undefined,
+        selectedBranchCommit: {
+          provider: "github",
+          platformHost: "github.com",
+          repoPath: "acme/widgets",
+          owner: "acme",
+          name: "widgets",
+          commitSha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        },
+      },
+    });
+
+    expect(
+      container.querySelector(".branch-activity-row.selected"),
+    ).not.toBeNull();
+  });
+
+  it("keeps force-push rows as provider compare links", async () => {
+    const onSelectBranchCommit = vi.fn();
+    const open = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
+
+    const { container } = render(ActivityThreaded, {
+      props: {
+        items: [
+          branchActivityItem("force-1", {
+            activity_type: "default_branch_force_push",
+            activity_url:
+              "https://github.com/acme/widgets/compare/aaaaaaaa...bbbbbbbb",
+            before_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            after_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            body_preview:
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            commit_sha: "",
+          }),
+        ],
+        onSelectItem: undefined,
+        onSelectBranchCommit,
+      },
+    });
+
+    const row = container.querySelector(".branch-activity-row");
+    expect(row).not.toBeNull();
+    await fireEvent.click(row!);
+
+    expect(onSelectBranchCommit).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith(
+      "https://github.com/acme/widgets/compare/aaaaaaaa...bbbbbbbb",
+      "_blank",
+      "noopener",
+    );
+    open.mockRestore();
   });
 });

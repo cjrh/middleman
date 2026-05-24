@@ -12931,6 +12931,57 @@ func TestAPIGetDiff_SingleCommit(t *testing.T) {
 	require.Len(*resp.JSON200.Files, 1)
 }
 
+func TestAPIGetRepoCommitDiff(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+
+	_, _, _, _, commitSHAs, srv := setupTestServerWithClonesAndServer(t)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/repo/gh/acme/widget/commits/"+commitSHAs[2]+"/diff",
+		nil,
+	)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	resp := rr.Result()
+	defer resp.Body.Close()
+
+	require.Equal(http.StatusOK, resp.StatusCode)
+	var body diffResponse
+	require.NoError(json.NewDecoder(resp.Body).Decode(&body))
+	require.Len(body.Files, 1)
+	assert.False(body.Stale)
+	assert.Equal("file3.txt", body.Files[0].Path)
+	assert.Equal("added", body.Files[0].Status)
+	require.NotEmpty(body.Files[0].Hunks)
+	require.NotEmpty(body.Files[0].Hunks[0].Lines)
+	assert.Equal("content 3", body.Files[0].Hunks[0].Lines[0].Content)
+}
+
+func TestAPIGetRepoCommitDiffRejectsOptionLikeSHA(t *testing.T) {
+	require := require.New(t)
+
+	_, _, _, _, _, srv := setupTestServerWithClonesAndServer(t)
+	clonePath, err := srv.clones.ClonePath("github.com", "acme", "widget")
+	require.NoError(err)
+	configPath := filepath.Join(clonePath, "config")
+	before, err := os.ReadFile(configPath)
+	require.NoError(err)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/repo/gh/acme/widget/commits/--output=config/diff",
+		nil,
+	)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	require.Equal(http.StatusBadRequest, rr.Code)
+	after, err := os.ReadFile(configPath)
+	require.NoError(err)
+	require.Equal(before, after)
+}
+
 func TestAPIGetFilePreview_ReturnsHeadContent(t *testing.T) {
 	require := require.New(t)
 	assert := Assert.New(t)
@@ -13134,6 +13185,349 @@ func TestAPIListActivity(t *testing.T) {
 	assert.NotEmpty(*resp.JSON200.Items,
 		"activity feed should contain PR and comment items")
 	assert.Equal("github.com", (*resp.JSON200.Items)[0].PlatformHost)
+}
+
+func TestAPIListActivityReturnsDefaultBranchActivity(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	ctx := t.Context()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	repoID, err := database.UpsertRepo(ctx, db.GitHubRepoIdentity("github.com", "acme", "widget"))
+	require.NoError(err)
+
+	committedAt := base.Add(10 * time.Minute)
+	require.NoError(database.UpsertBranchCommits(ctx, []db.BranchCommit{{
+		RepoID:         repoID,
+		BranchName:     "main",
+		CommitSHA:      "abc123def456abc123def456abc123def456abcd",
+		AuthorName:     "Commit Author",
+		AuthorEmail:    "author@example.com",
+		AuthoredAt:     committedAt.Add(-time.Minute),
+		CommitterName:  "Committer Person",
+		CommitterEmail: "committer@example.com",
+		CommittedAt:    committedAt,
+		Subject:        "ship default branch work",
+	}}))
+	detectedAt := base.Add(20 * time.Minute)
+	require.NoError(database.InsertBranchForcePush(ctx, db.BranchForcePush{
+		RepoID:     repoID,
+		BranchName: "main",
+		BeforeSHA:  "before1234567890",
+		AfterSHA:   "after1234567890",
+		DetectedAt: detectedAt,
+	}))
+
+	since := url.QueryEscape(base.Format(time.RFC3339))
+	rr := doJSON(t, srv, http.MethodGet, "/api/v1/activity?since="+since, nil)
+	require.Equal(http.StatusOK, rr.Code)
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	require.NoError(json.NewDecoder(rr.Body).Decode(&body))
+	require.Len(body.Items, 2)
+
+	forcePush := body.Items[0]
+	assert.Equal("default_branch_force_push", forcePush["activity_type"])
+	assert.Equal("main", forcePush["branch_name"])
+	assert.Equal("before1234567890", forcePush["before_sha"])
+	assert.Equal("after1234567890", forcePush["after_sha"])
+	assert.Empty(forcePush["item_type"])
+	assert.Zero(forcePush["item_number"])
+	assert.Equal(formatUTCRFC3339(detectedAt), forcePush["created_at"])
+
+	commit := body.Items[1]
+	assert.Equal("default_branch_commit", commit["activity_type"])
+	assert.Equal("main", commit["branch_name"])
+	assert.Equal("abc123def456abc123def456abc123def456abcd", commit["commit_sha"])
+	assert.Equal("Commit Author", commit["author_name"])
+	assert.Equal("author@example.com", commit["author_email"])
+	assert.Equal("Committer Person", commit["committer_name"])
+	assert.Equal("committer@example.com", commit["committer_email"])
+	assert.Equal(formatUTCRFC3339(committedAt), commit["committed_at"])
+	assert.Equal("https://github.com/acme/widget/commit/abc123def456abc123def456abc123def456abcd", commit["activity_url"])
+	assert.Empty(commit["item_type"])
+	assert.Zero(commit["item_number"])
+}
+
+func TestAPIListActivityCapsDefaultBranchCommitMetadata(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	ctx := t.Context()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	repoID, err := database.UpsertRepo(ctx, db.GitHubRepoIdentity("github.com", "acme", "widget"))
+	require.NoError(err)
+
+	committedAt := base.Add(10 * time.Minute)
+	_, err = database.WriteDB().ExecContext(ctx, `
+		INSERT INTO middleman_branch_commits (
+		    repo_id, branch_name, commit_sha, author_name, author_email,
+		    authored_at, committer_name, committer_email, committed_at,
+		    subject
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		repoID,
+		"main",
+		"abc123def456abc123def456abc123def456abcd",
+		strings.Repeat("a", 300),
+		strings.Repeat("e", 300),
+		committedAt.Add(-time.Minute),
+		strings.Repeat("c", 300),
+		strings.Repeat("m", 300),
+		committedAt,
+		strings.Repeat("s", 700),
+	)
+	require.NoError(err)
+
+	since := url.QueryEscape(base.Format(time.RFC3339))
+	rr := doJSON(t, srv, http.MethodGet, "/api/v1/activity?since="+since, nil)
+	require.Equal(http.StatusOK, rr.Code)
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	require.NoError(json.NewDecoder(rr.Body).Decode(&body))
+	require.Len(body.Items, 1)
+
+	commit := body.Items[0]
+	assert.Equal("default_branch_commit", commit["activity_type"])
+	assert.Len(commit["body_preview"], 200)
+	assert.Len(commit["author"], 256)
+	assert.Len(commit["author_name"], 256)
+	assert.Len(commit["author_email"], 256)
+	assert.Len(commit["committer_name"], 256)
+	assert.Len(commit["committer_email"], 256)
+}
+
+func TestAPIListActivityReflectsConfiguredDefaultBranchCommitCap(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	ctx := t.Context()
+	dir := t.TempDir()
+	remote := filepath.Join(dir, "remote.git")
+	work := filepath.Join(dir, "work")
+	runGit(t, dir, "init", "--bare", "--initial-branch=main", remote)
+	runGit(t, dir, "clone", remote, work)
+	runGit(t, work, "config", "user.email", "alice@example.com")
+	runGit(t, work, "config", "user.name", "Alice")
+
+	shas := map[string]string{}
+	for _, subject := range []string{"oldest", "third", "second", "newest"} {
+		require.NoError(os.WriteFile(
+			filepath.Join(work, subject+".txt"),
+			[]byte(subject+"\n"),
+			0o644,
+		))
+		runGit(t, work, "add", ".")
+		runGit(t, work, "commit", "-m", subject)
+		shas[subject] = testGitSHA(t, work, "HEAD")
+	}
+	runGit(t, work, "push", "origin", "main")
+
+	database := dbtest.Open(t)
+	clones := gitclone.New(filepath.Join(dir, "clones"), nil)
+	repoRef := platform.RepoRef{
+		Platform:           platform.KindGitLab,
+		Host:               "gitlab.example.com",
+		Owner:              "group",
+		Name:               "project",
+		RepoPath:           "group/project",
+		PlatformExternalID: "gid://gitlab/Project/branch-activity-cap",
+		CloneURL:           remote,
+		DefaultBranch:      "main",
+	}
+	provider := &apiTestGitLabProvider{ref: repoRef}
+	registry, err := platform.NewRegistry(provider)
+	require.NoError(err)
+	tracked := []ghclient.RepoRef{{
+		Platform:           platform.KindGitLab,
+		PlatformHost:       repoRef.Host,
+		Owner:              repoRef.Owner,
+		Name:               repoRef.Name,
+		RepoPath:           repoRef.RepoPath,
+		PlatformExternalID: repoRef.PlatformExternalID,
+		CloneURL:           repoRef.CloneURL,
+		DefaultBranch:      repoRef.DefaultBranch,
+	}}
+	syncer := ghclient.NewSyncerWithRegistry(
+		registry, database, clones, tracked, time.Minute, nil, nil,
+	)
+	t.Cleanup(syncer.Stop)
+	cfg := &config.Config{Activity: config.Activity{
+		DefaultBranchRetentionDays: 90,
+		DefaultBranchMaxCommits:    2,
+	}}
+	syncer.SetBranchActivityLimits(
+		cfg.BranchActivityRetention(),
+		cfg.Activity.DefaultBranchMaxCommits,
+	)
+	srv := New(database, syncer, nil, "/", nil, ServerOptions{Clones: clones})
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+	client := setupTestClient(t, srv)
+
+	syncer.RunOnce(ctx)
+
+	types := []string{"default_branch_commit"}
+	dbItems, err := database.ListActivity(ctx, db.ListActivityOpts{
+		Limit: 10,
+		Types: types,
+	})
+	require.NoError(err)
+	require.Len(dbItems, 2)
+	gotPersisted := []string{dbItems[0].CommitSHA, dbItems[1].CommitSHA}
+	assert.ElementsMatch([]string{shas["newest"], shas["second"]}, gotPersisted)
+
+	since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	resp, err := client.HTTP.ListActivityWithResponse(
+		ctx, &generated.ListActivityParams{Since: &since, Types: &types},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.NotNil(resp.JSON200.Items)
+	require.Len(*resp.JSON200.Items, 2)
+	gotAPI := []string{
+		*(*resp.JSON200.Items)[0].CommitSha,
+		*(*resp.JSON200.Items)[1].CommitSha,
+	}
+	assert.ElementsMatch([]string{shas["newest"], shas["second"]}, gotAPI)
+}
+
+func TestAPIListActivityReturnsProviderCompareURLsForDefaultBranchForcePushes(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	ctx := t.Context()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	beforeSHA := "before1234567890abcdef"
+	afterSHA := "after1234567890abcdef"
+
+	tests := []struct {
+		name     string
+		identity db.RepoIdentity
+		wantURL  string
+	}{
+		{
+			name:     "github",
+			identity: db.GitHubRepoIdentity("github.com", "acme", "github-widget"),
+			wantURL:  "https://github.com/acme/github-widget/compare/" + beforeSHA + "..." + afterSHA,
+		},
+		{
+			name: "forgejo",
+			identity: db.RepoIdentity{
+				Platform:     "forgejo",
+				PlatformHost: "codeberg.org",
+				Owner:        "acme",
+				Name:         "forgejo-widget",
+			},
+			wantURL: "https://codeberg.org/acme/forgejo-widget/compare/" + beforeSHA + "..." + afterSHA,
+		},
+		{
+			name: "gitea",
+			identity: db.RepoIdentity{
+				Platform:     "gitea",
+				PlatformHost: "gitea.com",
+				Owner:        "acme",
+				Name:         "gitea-widget",
+			},
+			wantURL: "https://gitea.com/acme/gitea-widget/compare/" + beforeSHA + "..." + afterSHA,
+		},
+		{
+			name: "gitlab",
+			identity: db.RepoIdentity{
+				Platform:     "gitlab",
+				PlatformHost: "gitlab.com",
+				Owner:        "acme/platform",
+				Name:         "gitlab-widget",
+			},
+			wantURL: "https://gitlab.com/acme/platform/gitlab-widget/-/compare/" + beforeSHA + "..." + afterSHA,
+		},
+	}
+
+	for i, tt := range tests {
+		repoID, err := database.UpsertRepo(ctx, tt.identity)
+		require.NoError(err)
+		require.NoError(database.InsertBranchForcePush(ctx, db.BranchForcePush{
+			RepoID:     repoID,
+			BranchName: "main",
+			BeforeSHA:  beforeSHA,
+			AfterSHA:   afterSHA,
+			DetectedAt: base.Add(time.Duration(i) * time.Minute),
+		}))
+	}
+
+	since := url.QueryEscape(base.Add(-time.Minute).Format(time.RFC3339))
+	rr := doJSON(t, srv, http.MethodGet, "/api/v1/activity?since="+since, nil)
+	require.Equal(http.StatusOK, rr.Code)
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	require.NoError(json.NewDecoder(rr.Body).Decode(&body))
+
+	gotURLs := make(map[string]string)
+	for _, item := range body.Items {
+		if item["activity_type"] != "default_branch_force_push" {
+			continue
+		}
+		repo, ok := item["repo"].(map[string]any)
+		require.True(ok)
+		repoPath, ok := repo["repo_path"].(string)
+		require.True(ok)
+		activityURL, _ := item["activity_url"].(string)
+		gotURLs[repoPath] = activityURL
+	}
+
+	for _, tt := range tests {
+		repo := tt.identity.RepoPath
+		if repo == "" {
+			repo = tt.identity.Owner + "/" + tt.identity.Name
+		}
+		assert.Equal(tt.wantURL, gotURLs[repo], tt.name)
+	}
+}
+
+func TestAPIListActivityCanHideDefaultBranchActivity(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	client := setupTestClient(t, srv)
+	ctx := t.Context()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	repoID, err := database.UpsertRepo(ctx, db.GitHubRepoIdentity("github.com", "acme", "widget"))
+	require.NoError(err)
+	seedPR(t, database, "acme", "widget", 1, withSeedPRTimes(base, base, base))
+	require.NoError(database.UpsertBranchCommits(ctx, []db.BranchCommit{{
+		RepoID:         repoID,
+		BranchName:     "main",
+		CommitSHA:      "abc123def456abc123def456abc123def456abcd",
+		AuthorName:     "Commit Author",
+		AuthorEmail:    "author@example.com",
+		AuthoredAt:     base.Add(9 * time.Minute),
+		CommitterName:  "Committer Person",
+		CommitterEmail: "committer@example.com",
+		CommittedAt:    base.Add(10 * time.Minute),
+		Subject:        "ship default branch work",
+	}}))
+	require.NoError(database.InsertBranchForcePush(ctx, db.BranchForcePush{
+		RepoID:     repoID,
+		BranchName: "main",
+		BeforeSHA:  "before1234567890",
+		AfterSHA:   "after1234567890",
+		DetectedAt: base.Add(20 * time.Minute),
+	}))
+
+	since := base.Add(-time.Minute).Format(time.RFC3339)
+	types := []string{"new_pr"}
+	resp, err := client.HTTP.ListActivityWithResponse(
+		ctx, &generated.ListActivityParams{Since: &since, Types: &types},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.NotNil(resp.JSON200.Items)
+	require.Len(*resp.JSON200.Items, 1)
+	assert.Equal("new_pr", (*resp.JSON200.Items)[0].ActivityType)
+	assert.Equal(int64(1), (*resp.JSON200.Items)[0].ItemNumber)
 }
 
 func TestAPIListActivityAcceptsHostQualifiedRepoFilter(t *testing.T) {
