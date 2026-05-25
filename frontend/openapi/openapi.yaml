@@ -934,6 +934,10 @@ components:
             - "null"
         Summary:
           type: string
+        ThreadID:
+          type:
+            - string
+            - "null"
       required:
         - ID
         - IssueID
@@ -946,6 +950,7 @@ components:
         - MetadataJSON
         - CreatedAt
         - DedupeKey
+        - ThreadID
       type: object
     IssueResponse:
       additionalProperties: false
@@ -1250,8 +1255,18 @@ components:
           type:
             - integer
             - "null"
+        PositionJSON:
+          type: string
+        Resolvable:
+          type: boolean
+        Resolved:
+          type: boolean
         Summary:
           type: string
+        ThreadID:
+          type:
+            - string
+            - "null"
       required:
         - ID
         - MergeRequestID
@@ -1264,6 +1279,10 @@ components:
         - MetadataJSON
         - CreatedAt
         - DedupeKey
+        - ThreadID
+        - PositionJSON
+        - Resolvable
+        - Resolved
       type: object
     MergePRBody:
       additionalProperties: false
@@ -1955,6 +1974,10 @@ components:
           type: boolean
         state_mutation:
           type: boolean
+        thread_reply:
+          type: boolean
+        thread_resolve:
+          type: boolean
         workflow_approval:
           type: boolean
       required:
@@ -1973,6 +1996,8 @@ components:
         - ready_for_review
         - issue_mutation
         - label_mutation
+        - thread_reply
+        - thread_resolve
       type: object
     RateLimitHostStatus:
       additionalProperties: false
@@ -2098,6 +2123,36 @@ components:
       required:
         - branch
         - path
+      type: object
+    ReplyToDiscussionHostInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/schemas/ReplyToDiscussionHostInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        body:
+          type: string
+      required:
+        - body
+      type: object
+    ReplyToDiscussionInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/schemas/ReplyToDiscussionInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        body:
+          type: string
+      required:
+        - body
       type: object
     RepoLabelsResponse:
       additionalProperties: false
@@ -2535,6 +2590,36 @@ components:
         - active_authors
         - recent_issues
         - operations
+      type: object
+    ResolveDiscussionHostInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/schemas/ResolveDiscussionHostInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        resolved:
+          type: boolean
+      required:
+        - resolved
+      type: object
+    ResolveDiscussionInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          examples:
+            - /api/v1/schemas/ResolveDiscussionInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        resolved:
+          type: boolean
+      required:
+        - resolved
       type: object
     ResolveItemResponse:
       additionalProperties: false
@@ -4145,6 +4230,116 @@ paths:
                 $ref: "#/components/schemas/ProblemError"
           description: Error
       summary: Get pull request diff
+      tags:
+        - Pull Requests
+  /host/{platform_host}/pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/reply:
+    post:
+      operationId: reply-to-discussion-on-host
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: platform_host
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: owner
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: number
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: discussion_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyToDiscussionHostInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MREvent"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemError"
+          description: Error
+      summary: Reply to pull request discussion
+      tags:
+        - Pull Requests
+  /host/{platform_host}/pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/resolve:
+    post:
+      operationId: resolve-discussion-on-host
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: platform_host
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: owner
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: number
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: discussion_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveDiscussionHostInputBody"
+        required: true
+      responses:
+        "200":
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemError"
+          description: Error
+      summary: Resolve pull request discussion
       tags:
         - Pull Requests
   /host/{platform_host}/pulls/{provider}/{owner}/{name}/{number}/file-preview:
@@ -6148,6 +6343,106 @@ paths:
                 $ref: "#/components/schemas/ProblemError"
           description: Error
       summary: Get pull request diff
+      tags:
+        - Pull Requests
+  /pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/reply:
+    post:
+      operationId: reply-to-discussion
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: owner
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: number
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: discussion_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyToDiscussionInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MREvent"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemError"
+          description: Error
+      summary: Reply to pull request discussion
+      tags:
+        - Pull Requests
+  /pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/resolve:
+    post:
+      operationId: resolve-discussion
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: owner
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: number
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: discussion_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveDiscussionInputBody"
+        required: true
+      responses:
+        "200":
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemError"
+          description: Error
+      summary: Resolve pull request discussion
       tags:
         - Pull Requests
   /pulls/{provider}/{owner}/{name}/{number}/file-preview:

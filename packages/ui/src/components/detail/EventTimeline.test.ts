@@ -110,6 +110,103 @@ describe("EventTimeline", () => {
     expect(bodyStyle.getPropertyValue("border-radius")).toBe("");
   });
 
+  it("groups discussion comments with the root comment first and reverse-chronological replies", () => {
+    const { container } = render(EventTimeline, {
+      props: {
+        events: [
+          makeEvent({
+            ID: 4,
+            EventType: "issue_comment",
+            Author: "root",
+            Body: "Newest threaded reply",
+            ThreadID: "disc-1",
+            CreatedAt: "2024-06-01T12:03:00Z",
+          }),
+          makeEvent({
+            ID: 3,
+            EventType: "issue_comment",
+            Author: "root",
+            Body: "Middle threaded reply",
+            ThreadID: "disc-1",
+            CreatedAt: "2024-06-01T12:02:00Z",
+          }),
+          makeEvent({
+            ID: 2,
+            EventType: "issue_comment",
+            Author: "root",
+            Body: "Oldest threaded reply",
+            ThreadID: "disc-1",
+            CreatedAt: "2024-06-01T12:01:00Z",
+          }),
+          makeEvent({
+            ID: 1,
+            EventType: "issue_comment",
+            Author: "root",
+            Body: "Main threaded comment",
+            ThreadID: "disc-1",
+            CreatedAt: "2024-06-01T12:00:00Z",
+          }),
+          makeEvent({
+            ID: 5,
+            EventType: "commit",
+            Summary: "abcdef1234567890",
+            Body: "Add fixture",
+            CreatedAt: "2024-06-01T11:59:00Z",
+          }),
+        ],
+      },
+    });
+
+    expect(container.querySelectorAll(".event")).toHaveLength(2);
+    expect(container.querySelectorAll(".thread-reply")).toHaveLength(3);
+    expect(screen.getByRole("list", { name: "Threaded replies" })).toBeTruthy();
+
+    const threadText = container.querySelector(".event-card")?.textContent ?? "";
+    expect(threadText.indexOf("Main threaded comment")).toBeLessThan(
+      threadText.indexOf("Newest threaded reply"),
+    );
+    expect(threadText.indexOf("Newest threaded reply")).toBeLessThan(
+      threadText.indexOf("Middle threaded reply"),
+    );
+    expect(threadText.indexOf("Middle threaded reply")).toBeLessThan(
+      threadText.indexOf("Oldest threaded reply"),
+    );
+  });
+
+  it("can collapse and expand threaded replies", async () => {
+    const { container } = render(EventTimeline, {
+      props: {
+        events: [
+          makeEvent({
+            ID: 2,
+            EventType: "issue_comment",
+            Author: "root",
+            Body: "Threaded reply",
+            ThreadID: "disc-1",
+            CreatedAt: "2024-06-01T12:01:00Z",
+          }),
+          makeEvent({
+            ID: 1,
+            EventType: "issue_comment",
+            Author: "root",
+            Body: "Main threaded comment",
+            ThreadID: "disc-1",
+            CreatedAt: "2024-06-01T12:00:00Z",
+          }),
+        ],
+      },
+    });
+
+    expect(container.querySelectorAll(".thread-reply")).toHaveLength(1);
+
+    await fireEvent.click(screen.getByRole("button", { name: /hide 1 reply/i }));
+    expect(container.querySelectorAll(".thread-reply")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /show 1 reply/i })).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole("button", { name: /show 1 reply/i }));
+    expect(container.querySelectorAll(".thread-reply")).toHaveLength(1);
+  });
+
   it("renders commit events as expanded commit detail rows", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-06-01T16:00:00Z"));

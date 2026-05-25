@@ -17,6 +17,8 @@ const (
 	capabilityIssueMutation    = "issue_mutation"
 	capabilityReadLabels       = "read_labels"
 	capabilityLabelMutation    = "label_mutation"
+	capabilityThreadReply      = "thread_reply"
+	capabilityThreadResolve    = "thread_resolve"
 )
 
 func capabilityEnabled(
@@ -42,6 +44,10 @@ func capabilityEnabled(
 		return caps.ReadLabels
 	case capabilityLabelMutation:
 		return caps.LabelMutation
+	case capabilityThreadReply:
+		return caps.ThreadReply
+	case capabilityThreadResolve:
+		return caps.ThreadResolve
 	default:
 		return false
 	}

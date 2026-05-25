@@ -45,6 +45,8 @@ export const defaultProviderCapabilities: ProviderCapabilities = {
   ready_for_review: true,
   issue_mutation: true,
   label_mutation: false,
+  thread_reply: false,
+  thread_resolve: false,
 };
 
 export function repoKey(summary: {

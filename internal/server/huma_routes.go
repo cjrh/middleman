@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,6 +161,44 @@ type editIssueCommentInput struct {
 }
 
 type editIssueCommentOutput = bodyOutput[db.IssueEvent]
+
+type replyToDiscussionInput struct {
+	Provider     string `path:"provider"`
+	PlatformHost string
+	Owner        string `path:"owner"`
+	Name         string `path:"name"`
+	Number       int    `path:"number"`
+	DiscussionID string `path:"discussion_id"`
+	Body         struct {
+		Body string `json:"body"`
+	}
+}
+
+type replyToDiscussionOutput = createdOutput[db.MREvent]
+
+type resolveDiscussionInput struct {
+	Provider     string `path:"provider"`
+	PlatformHost string
+	Owner        string `path:"owner"`
+	Name         string `path:"name"`
+	Number       int    `path:"number"`
+	DiscussionID string `path:"discussion_id"`
+	Body         struct {
+		Resolved bool `json:"resolved"`
+	}
+}
+
+type resolveDiscussionOutput = okStatusOutput
+
+// discussionIDPattern validates GitLab discussion IDs which are 40-char lowercase hex strings.
+var discussionIDPattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
+
+func validateDiscussionID(discussionID string) error {
+	if !discussionIDPattern.MatchString(discussionID) {
+		return problemValidation("path.discussion_id", "discussion_id must be a 40-character lowercase hex string")
+	}
+	return nil
+}
 
 type createIssueInput struct {
 	Provider     string `path:"provider"`
@@ -703,6 +742,10 @@ func (s *Server) registerProviderRepoAPI(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "post-pr-comment-on-host", Method: http.MethodPost, Path: hostPullPath + "/comments", DefaultStatus: http.StatusCreated, Summary: "Post pull request comment", Tags: []string{"Pull Requests"}}, s.postCommentOnHost)
 	huma.Register(api, huma.Operation{OperationID: "edit-pr-comment", Method: http.MethodPatch, Path: pullPath + "/comments/{comment_id}", DefaultStatus: http.StatusOK, Summary: "Edit pull request comment", Tags: []string{"Pull Requests"}}, s.editComment)
 	huma.Register(api, huma.Operation{OperationID: "edit-pr-comment-on-host", Method: http.MethodPatch, Path: hostPullPath + "/comments/{comment_id}", DefaultStatus: http.StatusOK, Summary: "Edit pull request comment", Tags: []string{"Pull Requests"}}, s.editCommentOnHost)
+	huma.Register(api, huma.Operation{OperationID: "reply-to-discussion", Method: http.MethodPost, Path: pullPath + "/discussions/{discussion_id}/reply", DefaultStatus: http.StatusCreated, Summary: "Reply to pull request discussion", Tags: []string{"Pull Requests"}}, s.replyToDiscussion)
+	huma.Register(api, huma.Operation{OperationID: "reply-to-discussion-on-host", Method: http.MethodPost, Path: hostPullPath + "/discussions/{discussion_id}/reply", DefaultStatus: http.StatusCreated, Summary: "Reply to pull request discussion", Tags: []string{"Pull Requests"}}, s.replyToDiscussionOnHost)
+	huma.Register(api, huma.Operation{OperationID: "resolve-discussion", Method: http.MethodPost, Path: pullPath + "/discussions/{discussion_id}/resolve", DefaultStatus: http.StatusOK, Summary: "Resolve pull request discussion", Tags: []string{"Pull Requests"}}, s.resolveDiscussion)
+	huma.Register(api, huma.Operation{OperationID: "resolve-discussion-on-host", Method: http.MethodPost, Path: hostPullPath + "/discussions/{discussion_id}/resolve", DefaultStatus: http.StatusOK, Summary: "Resolve pull request discussion", Tags: []string{"Pull Requests"}}, s.resolveDiscussionOnHost)
 	huma.Register(api, huma.Operation{OperationID: "set-pr-labels", Method: http.MethodPut, Path: pullPath + "/labels", DefaultStatus: http.StatusOK, Summary: "Set pull request labels", Tags: []string{"Pull Requests"}}, s.setPullLabels)
 	huma.Register(api, huma.Operation{OperationID: "set-pr-labels-on-host", Method: http.MethodPut, Path: hostPullPath + "/labels", DefaultStatus: http.StatusOK, Summary: "Set pull request labels", Tags: []string{"Pull Requests"}}, s.setPullLabelsOnHost)
 
@@ -1475,6 +1518,133 @@ func (s *Server) editComment(ctx context.Context, input *editCommentInput) (*edi
 	}
 
 	return &editCommentOutput{Body: event}, nil
+}
+
+func (s *Server) replyToDiscussion(ctx context.Context, input *replyToDiscussionInput) (*replyToDiscussionOutput, error) {
+	if strings.TrimSpace(input.Body.Body) == "" {
+		return nil, problemValidation("body.body", "reply body must not be empty")
+	}
+	if err := validateDiscussionID(input.DiscussionID); err != nil {
+		return nil, err
+	}
+
+	repo, err := s.requireRepoRouteCapability(
+		ctx,
+		input.Provider, input.PlatformHost, input.Owner, input.Name,
+		capabilityThreadReply,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireSyncerCapability(*repo, capabilityThreadReply); err != nil {
+		return nil, err
+	}
+
+	// Verify the MR exists locally before calling the provider to avoid
+	// creating upstream replies for untracked or non-existent PRs.
+	mr, err := s.db.GetMergeRequestByRepoIDAndNumber(ctx, repo.ID, input.Number)
+	if err != nil {
+		return nil, problemInternal("get pull request failed")
+	}
+	if mr == nil {
+		return nil, problemNotFound(CodePullNotFound, "pull request not found", nil)
+	}
+
+	provider, err := s.syncer.Registry().Provider(repoProviderKind(*repo), repoProviderHost(*repo))
+	if err != nil {
+		return nil, problemInternal("provider lookup failed")
+	}
+
+	replier, ok := provider.(platform.ThreadReplier)
+	if !ok {
+		caps := provider.Capabilities()
+		if !caps.ThreadReply {
+			return nil, unsupportedCapabilityProblem(*repo, capabilityThreadReply)
+		}
+		return nil, problemInternal("provider does not implement ThreadReplier")
+	}
+
+	platformEvent, err := replier.ReplyToThread(
+		ctx, platformRepoRefFromDB(*repo), input.Number, input.DiscussionID, input.Body.Body,
+	)
+	if err != nil {
+		return nil, providerCallProblemWithDetail(
+			err,
+			string(repoProviderKind(*repo)), repoProviderHost(*repo),
+			"reply to discussion on provider failed",
+		)
+	}
+
+	event := platform.DBMREvent(mr.ID, platformEvent)
+	if err := s.db.UpsertMREvents(ctx, []db.MREvent{event}); err != nil {
+		slog.ErrorContext(ctx, "failed to persist discussion reply event",
+			"mr_id", mr.ID, "discussion_id", input.DiscussionID, "error", err)
+		return nil, problemInternal("failed to persist reply event")
+	}
+
+	return &replyToDiscussionOutput{Status: http.StatusCreated, Body: event}, nil
+}
+
+func (s *Server) resolveDiscussion(ctx context.Context, input *resolveDiscussionInput) (*resolveDiscussionOutput, error) {
+	if err := validateDiscussionID(input.DiscussionID); err != nil {
+		return nil, err
+	}
+
+	repo, err := s.requireRepoRouteCapability(
+		ctx,
+		input.Provider, input.PlatformHost, input.Owner, input.Name,
+		capabilityThreadResolve,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireSyncerCapability(*repo, capabilityThreadResolve); err != nil {
+		return nil, err
+	}
+
+	// Verify the MR exists locally before calling the provider to avoid
+	// resolving discussions on untracked or non-existent PRs.
+	mr, err := s.db.GetMergeRequestByRepoIDAndNumber(ctx, repo.ID, input.Number)
+	if err != nil {
+		return nil, problemInternal("get pull request failed")
+	}
+	if mr == nil {
+		return nil, problemNotFound(CodePullNotFound, "pull request not found", nil)
+	}
+
+	provider, err := s.syncer.Registry().Provider(repoProviderKind(*repo), repoProviderHost(*repo))
+	if err != nil {
+		return nil, problemInternal("provider lookup failed")
+	}
+
+	resolver, ok := provider.(platform.ThreadResolver)
+	if !ok {
+		caps := provider.Capabilities()
+		if !caps.ThreadResolve {
+			return nil, unsupportedCapabilityProblem(*repo, capabilityThreadResolve)
+		}
+		return nil, problemInternal("provider does not implement ThreadResolver")
+	}
+
+	if err := resolver.ResolveThread(
+		ctx, platformRepoRefFromDB(*repo), input.Number, input.DiscussionID, input.Body.Resolved,
+	); err != nil {
+		return nil, providerCallProblemWithDetail(
+			err,
+			string(repoProviderKind(*repo)), repoProviderHost(*repo),
+			"resolve discussion on provider failed",
+		)
+	}
+
+	// Update local discussion events' resolved state to keep dashboard in sync.
+	if err := s.db.UpdateThreadResolved(ctx, mr.ID, input.DiscussionID, input.Body.Resolved); err != nil {
+		slog.ErrorContext(ctx, "failed to update local discussion resolved state",
+			"mr_id", mr.ID, "discussion_id", input.DiscussionID, "error", err)
+		// Don't fail the request since the upstream mutation succeeded;
+		// the state will be corrected on the next sync.
+	}
+
+	return &resolveDiscussionOutput{Status: http.StatusOK}, nil
 }
 
 func (s *Server) listIssues(ctx context.Context, input *listIssuesInput) (*listIssuesOutput, error) {

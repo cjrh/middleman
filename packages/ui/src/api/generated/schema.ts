@@ -329,6 +329,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/host/{platform_host}/pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reply to pull request discussion */
+        post: operations["reply-to-discussion-on-host"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/host/{platform_host}/pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve pull request discussion */
+        post: operations["resolve-discussion-on-host"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/host/{platform_host}/pulls/{provider}/{owner}/{name}/{number}/file-preview": {
         parameters: {
             query?: never;
@@ -1008,6 +1042,40 @@ export interface paths {
         get: operations["get-pull-diff"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reply to pull request discussion */
+        post: operations["reply-to-discussion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pulls/{provider}/{owner}/{name}/{number}/discussions/{discussion_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve pull request discussion */
+        post: operations["resolve-discussion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2138,6 +2206,7 @@ export interface components {
             /** Format: date-time */
             CreatedAt: string;
             DedupeKey: string;
+            ThreadID: string | null;
             EventType: string;
             /** Format: int64 */
             ID: number;
@@ -2279,6 +2348,7 @@ export interface components {
             /** Format: date-time */
             CreatedAt: string;
             DedupeKey: string;
+            ThreadID: string | null;
             EventType: string;
             /** Format: int64 */
             ID: number;
@@ -2288,6 +2358,9 @@ export interface components {
             PlatformExternalID: string;
             /** Format: int64 */
             PlatformID: number | null;
+            PositionJSON: string;
+            Resolvable: boolean;
+            Resolved: boolean;
             Summary: string;
         };
         MergePRBody: {
@@ -2585,6 +2658,8 @@ export interface components {
         };
         ProviderCapabilitiesResponse: {
             comment_mutation: boolean;
+            thread_reply: boolean;
+            thread_resolve: boolean;
             issue_mutation: boolean;
             label_mutation: boolean;
             merge_mutation: boolean;
@@ -2662,6 +2737,24 @@ export interface components {
             readonly $schema?: string;
             branch: string;
             path: string;
+        };
+        ReplyToDiscussionHostInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/schemas/ReplyToDiscussionHostInputBody.json
+             */
+            readonly $schema?: string;
+            body: string;
+        };
+        ReplyToDiscussionInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/schemas/ReplyToDiscussionInputBody.json
+             */
+            readonly $schema?: string;
+            body: string;
         };
         RepoLabelsResponse: {
             /**
@@ -2829,6 +2922,24 @@ export interface components {
             releases: components["schemas"]["RepoSummaryReleaseResponse"][] | null;
             repo: components["schemas"]["RepoRefResponse"];
             timeline_updated_at?: string;
+        };
+        ResolveDiscussionHostInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/schemas/ResolveDiscussionHostInputBody.json
+             */
+            readonly $schema?: string;
+            resolved: boolean;
+        };
+        ResolveDiscussionInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/schemas/ResolveDiscussionInputBody.json
+             */
+            readonly $schema?: string;
+            resolved: boolean;
         };
         ResolveItemResponse: {
             /**
@@ -3875,6 +3986,84 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DiffResponse"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "reply-to-discussion-on-host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                platform_host: string;
+                owner: string;
+                name: string;
+                number: number;
+                discussion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyToDiscussionHostInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MREvent"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "resolve-discussion-on-host": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                platform_host: string;
+                owner: string;
+                name: string;
+                number: number;
+                discussion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveDiscussionHostInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {
@@ -5488,6 +5677,82 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DiffResponse"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "reply-to-discussion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                owner: string;
+                name: string;
+                number: number;
+                discussion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyToDiscussionInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MREvent"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "resolve-discussion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                owner: string;
+                name: string;
+                number: number;
+                discussion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveDiscussionInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

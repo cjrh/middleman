@@ -1,5 +1,7 @@
 <script lang="ts">
   import CheckIcon from "@lucide/svelte/icons/check";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CopyIcon from "@lucide/svelte/icons/copy";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import XIcon from "@lucide/svelte/icons/x";
@@ -59,6 +61,83 @@
   function shouldRenderMarkdown(eventType: string): boolean {
     return eventType === "issue_comment" || eventType === "review" || eventType === "review_comment";
   }
+
+  type TimelineEntry = {
+    key: string;
+    event: PREvent | IssueEvent;
+    threadID?: string;
+    replies: Array<PREvent | IssueEvent>;
+  };
+
+  function threadID(event: PREvent | IssueEvent): string | null {
+    return typeof event.ThreadID === "string" && event.ThreadID.length > 0
+      ? event.ThreadID
+      : null;
+  }
+
+  function isThreadedComment(event: PREvent | IssueEvent): boolean {
+    return shouldRenderMarkdown(event.EventType) && threadID(event) !== null;
+  }
+
+  function eventSortValue(event: PREvent | IssueEvent): number {
+    const timestamp = Date.parse(event.CreatedAt);
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function compareEventsAscending(a: PREvent | IssueEvent, b: PREvent | IssueEvent): number {
+    return eventSortValue(a) - eventSortValue(b) || a.ID - b.ID;
+  }
+
+  function compareEventsDescending(a: PREvent | IssueEvent, b: PREvent | IssueEvent): number {
+    return eventSortValue(b) - eventSortValue(a) || b.ID - a.ID;
+  }
+
+  function buildTimelineEntries(sourceEvents: Array<PREvent | IssueEvent>): TimelineEntry[] {
+    const threads: Array<{ id: string; events: Array<PREvent | IssueEvent> }> = [];
+
+    for (const event of sourceEvents) {
+      const id = threadID(event);
+      if (!id || !isThreadedComment(event)) continue;
+      const thread = threads.find((item) => item.id === id);
+      if (thread) {
+        thread.events = [...thread.events, event];
+      } else {
+        threads.push({ id, events: [event] });
+      }
+    }
+
+    const emittedThreads: string[] = [];
+    const entries: TimelineEntry[] = [];
+
+    for (const event of sourceEvents) {
+      const id = threadID(event);
+      if (!id || !isThreadedComment(event)) {
+        entries.push({ key: `event-${event.ID}`, event, replies: [] });
+        continue;
+      }
+
+      if (emittedThreads.includes(id)) continue;
+      emittedThreads.push(id);
+
+      const threadEvents = [...(threads.find((item) => item.id === id)?.events ?? [event])];
+      if (threadEvents.length === 1) {
+        entries.push({ key: `event-${event.ID}`, event, replies: [] });
+        continue;
+      }
+
+      const [root, ...replies] = threadEvents.sort(compareEventsAscending);
+      entries.push({
+        key: `thread-${id}`,
+        event: root ?? event,
+        threadID: id,
+        replies: replies.sort(compareEventsDescending),
+      });
+    }
+
+    return entries;
+  }
+
+  const timelineEntries = $derived(buildTimelineEntries(events));
 
   function isCompactEvent(eventType: string): boolean {
     return (
@@ -170,6 +249,7 @@
   let editDraft = $state("");
   let savingEditId = $state<number | null>(null);
   let editError = $state<string | null>(null);
+  let collapsedThreads = $state<string[]>([]);
 
   function canEditComment(event: PREvent | IssueEvent): boolean {
     return (
@@ -191,6 +271,21 @@
     editingId = null;
     editDraft = "";
     editError = null;
+  }
+
+  function entryThreadID(entry: TimelineEntry): string {
+    return entry.threadID ?? String(entry.event.ID);
+  }
+
+  function isThreadCollapsed(entry: TimelineEntry): boolean {
+    return collapsedThreads.includes(entryThreadID(entry));
+  }
+
+  function toggleThread(entry: TimelineEntry): void {
+    const id = entryThreadID(entry);
+    collapsedThreads = collapsedThreads.includes(id)
+      ? collapsedThreads.filter((item) => item !== id)
+      : [...collapsedThreads, id];
   }
 
   async function saveEdit(event: PREvent | IssueEvent): Promise<void> {
@@ -232,11 +327,146 @@
   }
 </script>
 
+{#snippet eventBody(event: PREvent | IssueEvent, nested = false)}
+  {#if event.Body}
+    <div class={nested ? "event-body-wrap event-body-wrap--nested" : "event-body-wrap"}>
+      <div class="event-actions">
+        {#if canEditComment(event)}
+          <button
+            class="event-action-btn"
+            onclick={() => startEdit(event)}
+            title="Edit comment"
+            aria-label="Edit comment"
+            disabled={savingEditId !== null}
+          >
+            <PencilIcon size={14} />
+          </button>
+        {/if}
+        <button
+          class="event-action-btn"
+          class:copied={copiedId === String(event.ID)}
+          onclick={() => copyText(String(event.ID), event.Body)}
+          title={copiedId === String(event.ID) ? "Copied!" : "Copy to clipboard"}
+          aria-label={copiedId === String(event.ID) ? "Copied" : "Copy comment"}
+        >
+          {#if copiedId === String(event.ID)}
+            <CheckIcon size={14} />
+          {:else}
+            <CopyIcon size={14} />
+          {/if}
+        </button>
+      </div>
+      {#if editingId === event.ID && provider && repoOwner && repoName && repoPath}
+        <div class="edit-panel">
+          <CommentEditor
+            {provider}
+            {platformHost}
+            owner={repoOwner}
+            name={repoName}
+            {repoPath}
+            value={editDraft}
+            disabled={savingEditId === event.ID}
+            oninput={(nextBody) => {
+              editDraft = nextBody;
+            }}
+            onsubmit={() => {
+              void saveEdit(event);
+            }}
+          />
+          {#if editError}
+            <p class="edit-error">{editError}</p>
+          {/if}
+          <div class="edit-actions">
+            <button
+              class="edit-action edit-action--primary"
+              onclick={() => void saveEdit(event)}
+              disabled={savingEditId === event.ID}
+            >
+              <CheckIcon size={14} />
+              {savingEditId === event.ID ? "Saving..." : "Save"}
+            </button>
+            <button
+              class="edit-action"
+              onclick={cancelEdit}
+              disabled={savingEditId === event.ID}
+            >
+              <XIcon size={14} />
+              Cancel
+            </button>
+          </div>
+        </div>
+      {:else}
+        <div class={["event-body", { "markdown-body": shouldRenderMarkdown(event.EventType), "event-body--nested": nested }]}>
+          {#if shouldRenderMarkdown(event.EventType)}
+            {@html renderMarkdown(event.Body, provider && repoOwner && repoName && repoPath ? { provider, platformHost, owner: repoOwner, name: repoName, repoPath } : undefined)}
+          {:else}
+            {event.Body}
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {:else if canEditComment(event)}
+    <div class={nested ? "event-body-wrap event-body-wrap--nested" : "event-body-wrap"}>
+      {#if editingId === event.ID && provider && repoOwner && repoName && repoPath}
+        <div class="edit-panel">
+          <CommentEditor
+            {provider}
+            {platformHost}
+            owner={repoOwner}
+            name={repoName}
+            {repoPath}
+            value={editDraft}
+            disabled={savingEditId === event.ID}
+            oninput={(nextBody) => {
+              editDraft = nextBody;
+            }}
+            onsubmit={() => {
+              void saveEdit(event);
+            }}
+          />
+          {#if editError}
+            <p class="edit-error">{editError}</p>
+          {/if}
+          <div class="edit-actions">
+            <button
+              class="edit-action edit-action--primary"
+              onclick={() => void saveEdit(event)}
+              disabled={savingEditId === event.ID}
+            >
+              <CheckIcon size={14} />
+              {savingEditId === event.ID ? "Saving..." : "Save"}
+            </button>
+            <button
+              class="edit-action"
+              onclick={cancelEdit}
+              disabled={savingEditId === event.ID}
+            >
+              <XIcon size={14} />
+              Cancel
+            </button>
+          </div>
+        </div>
+      {:else}
+        <button
+          class="event-action-btn empty-edit-btn"
+          onclick={() => startEdit(event)}
+          title="Edit comment"
+          aria-label="Edit comment"
+          disabled={savingEditId !== null}
+        >
+          <PencilIcon size={14} />
+        </button>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
 {#if events.length === 0}
   <p class="empty">{filtered ? "No activity matches the current filters" : "No activity yet"}</p>
 {:else}
   <ol class="timeline">
-    {#each events as event (event.ID)}
+    {#each timelineEntries as entry (entry.key)}
+      {@const event = entry.event}
       <li class={isCompactEvent(event.EventType) ? "event event--compact" : "event"}>
         <div class="event-rail">
           <span
@@ -328,136 +558,49 @@
             {#if event.Summary && (event.EventType === "commit" || event.EventType === "force_push")}
               <p class="event-summary">{event.Summary}</p>
             {/if}
-            {#if event.Body}
-              <div class="event-body-wrap">
-                <div class="event-actions">
-                  {#if canEditComment(event)}
-                    <button
-                      class="event-action-btn"
-                      onclick={() => startEdit(event)}
-                      title="Edit comment"
-                      aria-label="Edit comment"
-                      disabled={savingEditId !== null}
-                    >
-                      <PencilIcon size={14} />
-                    </button>
+            {@render eventBody(event)}
+            {#if entry.replies.length > 0}
+              <div class="thread-controls">
+                <button
+                  class="thread-toggle"
+                  type="button"
+                  onclick={() => toggleThread(entry)}
+                  aria-expanded={!isThreadCollapsed(entry)}
+                >
+                  {#if isThreadCollapsed(entry)}
+                    <ChevronRightIcon size={14} />
+                    Show {entry.replies.length} {entry.replies.length === 1 ? "reply" : "replies"}
+                  {:else}
+                    <ChevronDownIcon size={14} />
+                    Hide {entry.replies.length} {entry.replies.length === 1 ? "reply" : "replies"}
                   {/if}
-                  <button
-                    class="event-action-btn"
-                    class:copied={copiedId === String(event.ID)}
-                    onclick={() => copyText(String(event.ID), event.Body)}
-                    title={copiedId === String(event.ID) ? "Copied!" : "Copy to clipboard"}
-                    aria-label={copiedId === String(event.ID) ? "Copied" : "Copy comment"}
-                  >
-                    {#if copiedId === String(event.ID)}
-                      <CheckIcon size={14} />
-                    {:else}
-                      <CopyIcon size={14} />
-                    {/if}
-                  </button>
-                </div>
-                {#if editingId === event.ID && provider && repoOwner && repoName && repoPath}
-                  <div class="edit-panel">
-                    <CommentEditor
-                      {provider}
-                      {platformHost}
-                      owner={repoOwner}
-                      name={repoName}
-                      {repoPath}
-                      value={editDraft}
-                      disabled={savingEditId === event.ID}
-                      oninput={(nextBody) => {
-                        editDraft = nextBody;
-                      }}
-                      onsubmit={() => {
-                        void saveEdit(event);
-                      }}
-                    />
-                    {#if editError}
-                      <p class="edit-error">{editError}</p>
-                    {/if}
-                    <div class="edit-actions">
-                      <button
-                        class="edit-action edit-action--primary"
-                        onclick={() => void saveEdit(event)}
-                        disabled={savingEditId === event.ID}
-                      >
-                        <CheckIcon size={14} />
-                        {savingEditId === event.ID ? "Saving..." : "Save"}
-                      </button>
-                      <button
-                        class="edit-action"
-                        onclick={cancelEdit}
-                        disabled={savingEditId === event.ID}
-                      >
-                        <XIcon size={14} />
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                {:else}
-                  <div class="event-body {shouldRenderMarkdown(event.EventType) ? 'markdown-body' : ''}">
-                    {#if shouldRenderMarkdown(event.EventType)}
-                      {@html renderMarkdown(event.Body, provider && repoOwner && repoName && repoPath ? { provider, platformHost, owner: repoOwner, name: repoName, repoPath } : undefined)}
-                    {:else}
-                      {event.Body}
-                    {/if}
-                  </div>
-                {/if}
+                </button>
               </div>
-            {:else if canEditComment(event)}
-              <div class="event-body-wrap">
-                {#if editingId === event.ID && provider && repoOwner && repoName && repoPath}
-                  <div class="edit-panel">
-                    <CommentEditor
-                      {provider}
-                      {platformHost}
-                      owner={repoOwner}
-                      name={repoName}
-                      {repoPath}
-                      value={editDraft}
-                      disabled={savingEditId === event.ID}
-                      oninput={(nextBody) => {
-                        editDraft = nextBody;
-                      }}
-                      onsubmit={() => {
-                        void saveEdit(event);
-                      }}
-                    />
-                    {#if editError}
-                      <p class="edit-error">{editError}</p>
-                    {/if}
-                    <div class="edit-actions">
-                      <button
-                        class="edit-action edit-action--primary"
-                        onclick={() => void saveEdit(event)}
-                        disabled={savingEditId === event.ID}
-                      >
-                        <CheckIcon size={14} />
-                        {savingEditId === event.ID ? "Saving..." : "Save"}
-                      </button>
-                      <button
-                        class="edit-action"
-                        onclick={cancelEdit}
-                        disabled={savingEditId === event.ID}
-                      >
-                        <XIcon size={14} />
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                {:else}
-                  <button
-                    class="event-action-btn empty-edit-btn"
-                    onclick={() => startEdit(event)}
-                    title="Edit comment"
-                    aria-label="Edit comment"
-                    disabled={savingEditId !== null}
-                  >
-                    <PencilIcon size={14} />
-                  </button>
-                {/if}
-              </div>
+              {#if !isThreadCollapsed(entry)}
+                <ol class="thread-replies" aria-label="Threaded replies">
+                  {#each entry.replies as reply, index (reply.ID)}
+                    <li
+                      class="thread-reply"
+                      class:thread-reply--first={index === 0}
+                      class:thread-reply--last={index === entry.replies.length - 1}
+                    >
+                      <div class="thread-reply-rail" aria-hidden="true">
+                        <span class="thread-reply-dot"></span>
+                      </div>
+                      <div class="thread-reply-content">
+                        <div class="event-header thread-reply-header">
+                          <span class="event-type">Reply</span>
+                          {#if reply.Author}
+                            <span class="event-author">{reply.Author}</span>
+                          {/if}
+                          <span class="event-time">{timeAgo(reply.CreatedAt)}</span>
+                        </div>
+                        {@render eventBody(reply, true)}
+                      </div>
+                    </li>
+                  {/each}
+                </ol>
+              {/if}
             {/if}
           </div>
         {/if}
@@ -629,6 +772,110 @@
     margin-top: var(--focus-detail-space-sm, 0.62rem);
   }
 
+  .event-body-wrap--nested {
+    margin-top: 0.15rem;
+  }
+
+  .thread-controls {
+    margin-top: var(--focus-detail-space-sm, 0.62rem);
+  }
+
+  .thread-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.75rem;
+    padding: 0.18rem 0.45rem 0.18rem 0.25rem;
+    border-radius: var(--radius-sm);
+    color: var(--accent-blue);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+  }
+
+  .thread-toggle:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .thread-replies {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-top: 0.2rem;
+    padding-left: 0;
+  }
+
+  .thread-reply {
+    display: grid;
+    grid-template-columns: 1.35rem minmax(0, 1fr);
+    column-gap: 0;
+    min-width: 0;
+    --thread-reply-header-padding-block: 0.18rem;
+    --thread-reply-header-line-height: 1.15rem;
+  }
+
+  .thread-reply-rail {
+    position: relative;
+    min-height: 1.5rem;
+    --thread-dot-size: 0.5rem;
+    --thread-dot-center-y: calc(var(--thread-reply-header-padding-block) + 0.575rem);
+  }
+
+  .thread-reply-rail::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--thread-dot-size) / 2);
+    width: 2px;
+    background: var(--border-default);
+    transform: translateX(-50%);
+  }
+
+  .thread-reply--first .thread-reply-rail::before {
+    top: var(--thread-dot-center-y);
+  }
+
+  .thread-reply--last .thread-reply-rail::before {
+    bottom: calc(100% - var(--thread-dot-center-y));
+  }
+
+  .thread-reply--first.thread-reply--last .thread-reply-rail::before {
+    display: none;
+  }
+
+  .thread-reply-dot {
+    position: absolute;
+    top: calc(var(--thread-dot-center-y) - var(--thread-dot-size) / 2);
+    left: 0;
+    width: var(--thread-dot-size);
+    height: var(--thread-dot-size);
+    border-radius: 50%;
+    background: var(--accent-blue);
+    box-shadow: 0 0 0 0.18rem var(--bg-surface);
+    z-index: 1;
+  }
+
+  .thread-reply-content {
+    min-width: 0;
+    padding: var(--thread-reply-header-padding-block) 0;
+  }
+
+  .thread-reply-header {
+    min-width: 0;
+    min-height: var(--thread-reply-header-line-height);
+    align-items: center;
+  }
+
+  .thread-reply-header .event-type {
+    color: var(--accent-blue);
+  }
+
+  .thread-reply-header .event-author {
+    color: var(--text-secondary);
+  }
+
   .event-actions {
     position: absolute;
     top: var(--focus-detail-space-xs, 0.46rem);
@@ -692,6 +939,11 @@
 
   .event-body.markdown-body {
     white-space: normal;
+  }
+
+  .event-body--nested {
+    padding: 0.12rem calc(var(--focus-detail-hit-target, 2rem) + var(--focus-detail-space-sm, 0.62rem)) 0.15rem 0;
+    line-height: 1.25;
   }
 
   .edit-panel {
