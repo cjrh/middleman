@@ -10,52 +10,111 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 )
 
 const DefaultMaxProcesses = 32
 
+// DefaultAcquireTimeout is the maximum time a subprocess waits for limiter
+// capacity before surfacing host process exhaustion.
+const DefaultAcquireTimeout = 5 * time.Second
+
 var ErrProcessLimitReached = errors.New("host process limit reached")
 
 type Limiter struct {
-	sem *semaphore.Weighted
+	sem            *semaphore.Weighted
+	acquireTimeout time.Duration
 }
 
 func NewLimiter(max int) *Limiter {
+	return NewLimiterWithAcquireTimeout(max, DefaultAcquireTimeout)
+}
+
+// NewLimiterWithAcquireTimeout creates a subprocess limiter with bounded
+// acquisition waits. Non-positive timeouts wait until the caller's context ends.
+func NewLimiterWithAcquireTimeout(max int, acquireTimeout time.Duration) *Limiter {
 	if max <= 0 {
 		max = 1
 	}
 	return &Limiter{
-		sem: semaphore.NewWeighted(int64(max)),
+		sem:            semaphore.NewWeighted(int64(max)),
+		acquireTimeout: acquireTimeout,
 	}
 }
 
 func (l *Limiter) TryAcquire(
-	_ context.Context, reason string,
+	ctx context.Context, reason string,
 ) (func(), error) {
-	if !l.sem.TryAcquire(1) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if l.sem.TryAcquire(1) {
+		if err := ctx.Err(); err != nil {
+			l.sem.Release(1)
+			return nil, err
+		}
+		return releaseOnce(l.sem), nil
+	}
+
+	acquireCtx := ctx
+	cancel := func() {}
+	if l.acquireTimeout > 0 {
+		acquireCtx, cancel = context.WithTimeout(ctx, l.acquireTimeout)
+	}
+	defer cancel()
+
+	if err := l.sem.Acquire(acquireCtx, 1); err != nil {
 		if reason != "" {
 			return nil, fmt.Errorf(
-				"%w: %s", ErrProcessLimitReached, reason,
+				"%w: wait for subprocess capacity %s: %w",
+				ErrProcessLimitReached, reason, err,
 			)
 		}
-		return nil, ErrProcessLimitReached
+		return nil, fmt.Errorf("%w: %w", ErrProcessLimitReached, err)
 	}
+	return releaseOnce(l.sem), nil
+}
+
+func releaseOnce(sem *semaphore.Weighted) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			l.sem.Release(1)
+			sem.Release(1)
 		})
-	}, nil
+	}
 }
 
-var defaultLimiter = NewLimiter(DefaultMaxProcesses)
+var (
+	defaultLimiterMu sync.RWMutex
+	defaultLimiter   = NewLimiter(DefaultMaxProcesses)
+)
 
 func TryAcquire(
 	ctx context.Context, reason string,
 ) (func(), error) {
-	return defaultLimiter.TryAcquire(ctx, reason)
+	defaultLimiterMu.RLock()
+	limiter := defaultLimiter
+	defaultLimiterMu.RUnlock()
+	return limiter.TryAcquire(ctx, reason)
+}
+
+// SetDefaultLimiterForTest replaces the package default limiter and returns a
+// restore function for tests that need deterministic process-capacity pressure.
+func SetDefaultLimiterForTest(limiter *Limiter) func() {
+	if limiter == nil {
+		panic("nil procutil limiter")
+	}
+	defaultLimiterMu.Lock()
+	previous := defaultLimiter
+	defaultLimiter = limiter
+	defaultLimiterMu.Unlock()
+	return func() {
+		defaultLimiterMu.Lock()
+		defaultLimiter = previous
+		defaultLimiterMu.Unlock()
+	}
 }
 
 func Command(name string, arg ...string) *exec.Cmd {
