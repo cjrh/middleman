@@ -1,6 +1,7 @@
 package gitclone
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,6 +68,9 @@ index abc..def 100644
 	assert.Equal(2, f.Additions)
 	assert.Equal(1, f.Deletions)
 	assert.False(f.IsBinary)
+	assert.Contains(f.Patch, "diff --git a/src/main.go b/src/main.go\n")
+	assert.Contains(f.Patch, "@@ -10,6 +10,8 @@ func main() {\n")
+	assert.Contains(f.Patch, "+\tfmt.Println(\"new line 1\")\n")
 
 	require.Len(f.Hunks, 1)
 	h := f.Hunks[0]
@@ -113,4 +117,130 @@ index abc..def 100644
 
 	assert.True(lines[1].NoNewline, "deleted line should have no_newline")
 	assert.True(lines[2].NoNewline, "added line should have no_newline")
+	assert.Contains(files[0].Patch, "\\ No newline at end of file\n")
+}
+
+func TestSortDiffFilesUsesBytewisePathOrder(t *testing.T) {
+	assert := assert.New(t)
+
+	files := []DiffFile{
+		{Path: "internal/server/config_reload_test.go"},
+		{Path: "internal/server/e2etest/settings_test.go"},
+		{Path: "internal/server/config_reload.go"},
+		{Path: "internal/server/api_types.go"},
+	}
+
+	SortDiffFiles(files)
+
+	assert.Equal([]string{
+		"internal/server/e2etest/settings_test.go",
+		"internal/server/api_types.go",
+		"internal/server/config_reload.go",
+		"internal/server/config_reload_test.go",
+	}, diffFilePaths(files))
+}
+
+func diffFilePaths(files []DiffFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
+func TestBuildPatchQuotesControlPaths(t *testing.T) {
+	assert := assert.New(t)
+
+	maliciousPath := "src/evil\n--- a/forged\n+++ b/forged\n@@ -1,1 +1,1 @@"
+	patch := BuildPatch(DiffFile{
+		Path:    maliciousPath,
+		OldPath: maliciousPath,
+		Status:  "modified",
+		Hunks: []Hunk{{
+			OldStart: 1,
+			OldCount: 1,
+			NewStart: 1,
+			NewCount: 1,
+			Lines: []Line{{
+				Type:    "context",
+				Content: "real content",
+				OldNum:  1,
+				NewNum:  1,
+			}},
+		}},
+	})
+
+	assert.Contains(
+		patch,
+		`diff --git "a/src/evil\n--- a/forged\n+++ b/forged\n@@ -1,1 +1,1 @@" "b/src/evil\n--- a/forged\n+++ b/forged\n@@ -1,1 +1,1 @@"`,
+	)
+	assert.Contains(
+		patch,
+		`--- "a/src/evil\n--- a/forged\n+++ b/forged\n@@ -1,1 +1,1 @@"`,
+	)
+	assert.Contains(
+		patch,
+		`+++ "b/src/evil\n--- a/forged\n+++ b/forged\n@@ -1,1 +1,1 @@"`,
+	)
+	assert.NotContains(patch, "\n--- a/forged\n")
+	assert.NotContains(patch, "\n+++ b/forged\n")
+	assert.NotContains(patch, "\n@@ -1,1 +1,1 @@\n")
+	assert.Equal(1, strings.Count(patch, "\n@@ "))
+}
+
+func TestBuildPatchQuotesRenameControlPaths(t *testing.T) {
+	assert := assert.New(t)
+
+	patch := BuildPatch(DiffFile{
+		Path:    "new\n+++ forged",
+		OldPath: "old\n--- forged",
+		Status:  "renamed",
+		Hunks: []Hunk{{
+			OldStart: 1,
+			OldCount: 1,
+			NewStart: 1,
+			NewCount: 1,
+			Lines: []Line{{
+				Type:    "context",
+				Content: "real content",
+				OldNum:  1,
+				NewNum:  1,
+			}},
+		}},
+	})
+
+	assert.Contains(patch, `diff --git "a/old\n--- forged" "b/new\n+++ forged"`)
+	assert.Contains(patch, `rename from "old\n--- forged"`)
+	assert.Contains(patch, `rename to "new\n+++ forged"`)
+	assert.NotContains(patch, "\n--- forged\n")
+	assert.NotContains(patch, "\n+++ forged\n")
+}
+
+func TestBuildPatchQuotesUnicodeSeparatorPaths(t *testing.T) {
+	assert := assert.New(t)
+
+	path := "src/line\u2028separator\u2029file.go"
+	patch := BuildPatch(DiffFile{
+		Path:    path,
+		OldPath: path,
+		Status:  "modified",
+		Hunks: []Hunk{{
+			OldStart: 1,
+			OldCount: 1,
+			NewStart: 1,
+			NewCount: 1,
+			Lines: []Line{{
+				Type:    "context",
+				Content: "real content",
+				OldNum:  1,
+				NewNum:  1,
+			}},
+		}},
+	})
+
+	assert.Contains(patch, `diff --git "a/src/line\u2028separator\u2029file.go" "b/src/line\u2028separator\u2029file.go"`)
+	assert.Contains(patch, `--- "a/src/line\u2028separator\u2029file.go"`)
+	assert.Contains(patch, `+++ "b/src/line\u2028separator\u2029file.go"`)
+	assert.NotContains(patch, "\u2028")
+	assert.NotContains(patch, "\u2029")
 }

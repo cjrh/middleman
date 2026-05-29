@@ -157,6 +157,7 @@ export interface FilesResult {
 }
 
 export type FilePreview = components["schemas"]["FilePreviewResponse"];
+export type DiffFileSide = "old" | "new";
 
 export interface DiffFile {
   path: string;
@@ -167,6 +168,7 @@ export interface DiffFile {
   is_whitespace_only: boolean;
   additions: number;
   deletions: number;
+  patch: string;
   hunks: DiffHunk[];
 }
 

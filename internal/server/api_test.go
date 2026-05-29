@@ -15307,6 +15307,118 @@ func TestAPIGetFilePreview_ReturnsDeletedFileContent(t *testing.T) {
 	assert.Contains(string(decoded), "wal_mode: true")
 }
 
+func TestAPIGetFilePreview_ReturnsRequestedDiffSideContent(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+
+	dir := t.TempDir()
+	database := dbtest.Open(t)
+
+	seedPR(t, database, "acme", "widgets", 1)
+	diffRepo, err := testutil.SetupDiffRepo(ctx, dir, database)
+	require.NoError(err)
+
+	mock := &mockGH{}
+	repos := []ghclient.RepoRef{{
+		Owner: "acme", Name: "widgets", PlatformHost: "github.com",
+	}}
+	syncer := ghclient.NewSyncer(
+		map[string]ghclient.Client{"github.com": mock},
+		database, nil, repos, time.Minute, nil, nil,
+	)
+	t.Cleanup(syncer.Stop)
+	srv := New(database, syncer, nil, "/", nil, ServerOptions{
+		Clones: diffRepo.Manager,
+	})
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+	client := setupTestClient(t, srv)
+
+	path := "internal/handler.go"
+	oldSide := generated.GetPullFilePreviewParamsSideOld
+	oldResp, err := client.HTTP.GetPullFilePreviewWithResponse(
+		ctx, "gh", "acme", "widgets", 1,
+		&generated.GetPullFilePreviewParams{Path: &path, Side: &oldSide},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, oldResp.StatusCode())
+	require.NotNil(oldResp.JSON200)
+	oldDecoded, err := base64.StdEncoding.DecodeString(oldResp.JSON200.Content)
+	require.NoError(err)
+
+	newSide := generated.GetPullFilePreviewParamsSideNew
+	newResp, err := client.HTTP.GetPullFilePreviewWithResponse(
+		ctx, "gh", "acme", "widgets", 1,
+		&generated.GetPullFilePreviewParams{Path: &path, Side: &newSide},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, newResp.StatusCode())
+	require.NotNil(newResp.JSON200)
+	newDecoded, err := base64.StdEncoding.DecodeString(newResp.JSON200.Content)
+	require.NoError(err)
+
+	assert.Contains(string(oldDecoded), `log.Println("handling request")`)
+	assert.NotContains(string(oldDecoded), "slog.Info")
+	assert.Contains(string(newDecoded), `slog.Info("handling request"`)
+	assert.NotContains(string(newDecoded), "log.Println")
+}
+
+func TestAPIGetFilePreviewOnHost_ReturnsRequestedDiffSideContent(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+
+	dir := t.TempDir()
+	database := dbtest.Open(t)
+
+	seedPR(t, database, "acme", "widgets", 1)
+	diffRepo, err := testutil.SetupDiffRepo(ctx, dir, database)
+	require.NoError(err)
+
+	mock := &mockGH{}
+	repos := []ghclient.RepoRef{{
+		Owner: "acme", Name: "widgets", PlatformHost: "github.com",
+	}}
+	syncer := ghclient.NewSyncer(
+		map[string]ghclient.Client{"github.com": mock},
+		database, nil, repos, time.Minute, nil, nil,
+	)
+	t.Cleanup(syncer.Stop)
+	srv := New(database, syncer, nil, "/", nil, ServerOptions{
+		Clones: diffRepo.Manager,
+	})
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+	client := setupTestClient(t, srv)
+
+	path := "internal/handler.go"
+	oldSide := generated.GetPullFilePreviewOnHostParamsSideOld
+	oldResp, err := client.HTTP.GetPullFilePreviewOnHostWithResponse(
+		ctx, "github.com", "gh", "acme", "widgets", 1,
+		&generated.GetPullFilePreviewOnHostParams{Path: &path, Side: &oldSide},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, oldResp.StatusCode())
+	require.NotNil(oldResp.JSON200)
+	oldDecoded, err := base64.StdEncoding.DecodeString(oldResp.JSON200.Content)
+	require.NoError(err)
+
+	newSide := generated.GetPullFilePreviewOnHostParamsSideNew
+	newResp, err := client.HTTP.GetPullFilePreviewOnHostWithResponse(
+		ctx, "github.com", "gh", "acme", "widgets", 1,
+		&generated.GetPullFilePreviewOnHostParams{Path: &path, Side: &newSide},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, newResp.StatusCode())
+	require.NotNil(newResp.JSON200)
+	newDecoded, err := base64.StdEncoding.DecodeString(newResp.JSON200.Content)
+	require.NoError(err)
+
+	assert.Contains(string(oldDecoded), `log.Println("handling request")`)
+	assert.NotContains(string(oldDecoded), "slog.Info")
+	assert.Contains(string(newDecoded), `slog.Info("handling request"`)
+	assert.NotContains(string(newDecoded), "log.Println")
+}
+
 func TestAPIGetDiff_Range(t *testing.T) {
 	require := require.New(t)
 
@@ -18647,6 +18759,75 @@ func TestWorkspaceDiffEndpointsReportHeadAndPushedE2E(t *testing.T) {
 	assert.Equal(int64(1), pushedDiff.WhitespaceOnlyCount)
 }
 
+func TestWorkspaceDiffEndpointsReturnPierreTreeOrderE2E(t *testing.T) {
+	t.Parallel()
+
+	require := require.New(t)
+
+	dir := t.TempDir()
+	worktreePath := filepath.Join(dir, "worktree")
+	runGit(t, dir, "init", "--initial-branch=main", worktreePath)
+	runGit(t, worktreePath, "config", "user.email", "test@test.com")
+	runGit(t, worktreePath, "config", "user.name", "Test")
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, "base.txt"),
+		[]byte("base\n"),
+		0o644,
+	))
+	runGit(t, worktreePath, "add", ".")
+	runGit(t, worktreePath, "commit", "-m", "base commit")
+
+	database := dbtest.Open(t)
+	srv := New(database, nil, nil, "/", nil, ServerOptions{
+		WorktreeDir: filepath.Join(dir, "managed-worktrees"),
+	})
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+
+	ctx := context.Background()
+	require.NoError(database.InsertWorkspace(ctx, &workspace.Workspace{
+		ID:              "ws-file-order",
+		PlatformHost:    "github.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypePullRequest,
+		ItemNumber:      1,
+		GitHeadRef:      "feature/file-order",
+		WorkspaceBranch: "middleman/pr-1",
+		WorktreePath:    worktreePath,
+		TmuxSession:     "middleman-file-order",
+		Status:          "ready",
+	}))
+
+	serverDir := filepath.Join(worktreePath, "internal", "server")
+	require.NoError(os.MkdirAll(
+		filepath.Join(serverDir, "e2etest"),
+		0o755,
+	))
+	for _, path := range []string{
+		filepath.Join(serverDir, "config_reload_test.go"),
+		filepath.Join(serverDir, "e2etest", "settings_test.go"),
+		filepath.Join(serverDir, "config_reload.go"),
+		filepath.Join(serverDir, "api_types.go"),
+	} {
+		require.NoError(os.WriteFile(path, []byte("package server\n"), 0o644))
+	}
+
+	want := []string{
+		"internal/server/e2etest/settings_test.go",
+		"internal/server/api_types.go",
+		"internal/server/config_reload.go",
+		"internal/server/config_reload_test.go",
+	}
+
+	files := requestWorkspaceFiles(t, srv, "ws-file-order", "head")
+	require.NotNil(files.Files)
+	assertWorkspaceDiffPaths(t, *files.Files, want)
+
+	diff := requestWorkspaceDiff(t, srv, "ws-file-order", "head")
+	require.NotNil(diff.Files)
+	assertWorkspaceDiffPaths(t, *diff.Files, want)
+}
+
 func TestWorkspaceCommitsEndpointListsBranchCommitsE2E(t *testing.T) {
 	t.Parallel()
 
@@ -18945,9 +19126,103 @@ func TestWorkspaceDiffEndpointScopesPatchByPathE2E(t *testing.T) {
 	file := (*diff.Files)[0]
 	assert.Equal("first.go", file.Path)
 	assert.Equal("added", file.Status)
+	assert.Contains(file.Patch, "diff --git a/first.go b/first.go\n")
+	assert.Contains(file.Patch, "new file mode 100644\n")
 	require.NotNil(file.Hunks)
 	require.Len(*file.Hunks, 1)
 	assert.NotContains(workspaceDiffPaths(*diff.Files), "second.go")
+}
+
+func TestWorkspaceDiffEndpointQuotesDangerousPathsE2E(t *testing.T) {
+	t.Parallel()
+
+	require := require.New(t)
+	assert := Assert.New(t)
+
+	dir := t.TempDir()
+	worktreePath := filepath.Join(dir, "worktree")
+	runGit(t, dir, "init", "--initial-branch=main", worktreePath)
+	runGit(t, worktreePath, "config", "user.email", "test@test.com")
+	runGit(t, worktreePath, "config", "user.name", "Test")
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, "base.txt"),
+		[]byte("base\n"),
+		0o644,
+	))
+	runGit(t, worktreePath, "add", ".")
+	runGit(t, worktreePath, "commit", "-m", "base commit")
+
+	maliciousPath := "src/evil\n--- forged\n+++ forged\n@@ -1,1 +1,1 @@"
+	require.NoError(os.MkdirAll(filepath.Join(worktreePath, "src"), 0o755))
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, maliciousPath),
+		[]byte("real content\n"),
+		0o644,
+	))
+	unicodeSeparatorPath := "src/unicode\u2028separator\u2029file.go"
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, unicodeSeparatorPath),
+		[]byte("unicode separator content\n"),
+		0o644,
+	))
+
+	database := dbtest.Open(t)
+	srv := New(database, nil, nil, "/", nil, ServerOptions{
+		WorktreeDir: filepath.Join(dir, "managed-worktrees"),
+	})
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+
+	ctx := context.Background()
+	require.NoError(database.InsertWorkspace(ctx, &workspace.Workspace{
+		ID:              "ws-control-paths",
+		PlatformHost:    "github.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypePullRequest,
+		ItemNumber:      1,
+		GitHeadRef:      "feature/control-paths",
+		WorkspaceBranch: "middleman/pr-1",
+		WorktreePath:    worktreePath,
+		TmuxSession:     "middleman-control-paths",
+		Status:          "ready",
+	}))
+
+	diff := requestWorkspaceDiff(t, srv, "ws-control-paths", "head")
+	require.NotNil(diff.Files)
+	file := requireWorkspaceDiffFile(
+		t,
+		*diff.Files,
+		filepath.ToSlash(maliciousPath),
+	)
+
+	assert.Contains(
+		file.Patch,
+		`diff --git "a/src/evil\n--- forged\n+++ forged\n@@ -1,1 +1,1 @@" "b/src/evil\n--- forged\n+++ forged\n@@ -1,1 +1,1 @@"`,
+	)
+	assert.Contains(
+		file.Patch,
+		`+++ "b/src/evil\n--- forged\n+++ forged\n@@ -1,1 +1,1 @@"`,
+	)
+	assert.NotContains(file.Patch, "\n--- forged\n")
+	assert.NotContains(file.Patch, "\n+++ forged\n")
+	assert.NotContains(file.Patch, "\n@@ -1,1 +1,1 @@\n")
+	assert.Equal(1, strings.Count(file.Patch, "\n@@ "))
+
+	unicodeFile := requireWorkspaceDiffFile(
+		t,
+		*diff.Files,
+		filepath.ToSlash(unicodeSeparatorPath),
+	)
+	assert.Contains(
+		unicodeFile.Patch,
+		`diff --git "a/src/unicode\u2028separator\u2029file.go" "b/src/unicode\u2028separator\u2029file.go"`,
+	)
+	assert.Contains(
+		unicodeFile.Patch,
+		`+++ "b/src/unicode\u2028separator\u2029file.go"`,
+	)
+	assert.NotContains(unicodeFile.Patch, "\u2028")
+	assert.NotContains(unicodeFile.Patch, "\u2029")
 }
 
 func requestWorkspaceFiles(

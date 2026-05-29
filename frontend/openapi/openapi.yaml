@@ -513,6 +513,8 @@ components:
           type: boolean
         old_path:
           type: string
+        patch:
+          type: string
         path:
           type: string
         status:
@@ -526,6 +528,7 @@ components:
         - is_whitespace_only
         - additions
         - deletions
+        - patch
         - hunks
       type: object
     DiffResponse:
@@ -4680,6 +4683,16 @@ paths:
           schema:
             description: Changed file path to preview
             type: string
+        - description: Optional diff side to read for context expansion
+          explode: false
+          in: query
+          name: side
+          schema:
+            description: Optional diff side to read for context expansion
+            enum:
+              - old
+              - new
+            type: string
         - description: Scope to a single commit SHA
           explode: false
           in: query
@@ -7165,6 +7178,16 @@ paths:
           name: path
           schema:
             description: Changed file path to preview
+            type: string
+        - description: Optional diff side to read for context expansion
+          explode: false
+          in: query
+          name: side
+          schema:
+            description: Optional diff side to read for context expansion
+            enum:
+              - old
+              - new
             type: string
         - description: Scope to a single commit SHA
           explode: false

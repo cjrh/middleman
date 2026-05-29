@@ -62,6 +62,16 @@ function normalizeFilesResult(data: FilesResponse): FilesResult {
   } as FilesResult;
 }
 
+function withVisibleFiles<T extends DiffResult | FilesResult>(
+  result: T,
+  files: T["files"],
+): T {
+  return {
+    ...result,
+    files,
+  };
+}
+
 function apiBaseURL(basePath: string): string {
   const path = `${basePath.replace(/\/$/, "")}/api/v1`;
   if (typeof window !== "undefined") {
@@ -217,22 +227,28 @@ export function createDiffStore(opts?: DiffStoreOptions) {
   }
   function getFileList(): FilesResult | null {
     if (currentWorkspaceID && fileList) {
-      return { stale: fileList.stale, files: fileList.files ?? [] };
+      return { ...fileList, files: fileList.files ?? [] };
     }
     // Prefer diff.files once available — it respects hideWhitespace
     // and is authoritative. The lightweight /files response is a fast
     // preview used only until the full diff arrives.
-    if (diff) return { stale: diff.stale, files: diff.files ?? [] };
-    if (fileList) return { stale: fileList.stale, files: fileList.files ?? [] };
+    if (diff) {
+      return {
+        stale: diff.stale,
+        whitespace_only_count: diff.whitespace_only_count,
+        files: diff.files ?? [],
+      };
+    }
+    if (fileList) return { ...fileList, files: fileList.files ?? [] };
     return null;
   }
   function getVisibleFileList(): FilesResult | null {
     const list = getFileList();
     if (!list) return null;
-    return {
-      stale: list.stale,
-      files: filterDiffFilesByCategory(list.files, fileCategoryFilter),
-    };
+    return withVisibleFiles(
+      list,
+      filterDiffFilesByCategory(list.files, fileCategoryFilter),
+    );
   }
   function getVisibleDiffFiles(): DiffResult["files"] {
     if (!diff) return [];
@@ -277,8 +293,40 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     number: number,
     filePath: string,
   ): boolean {
-    const key = `${owner}/${name}#${number}`;
+    const key = collapseKeyFor(owner, name, number);
     return (collapsedFiles[key] ?? []).includes(filePath);
+  }
+
+  function visibleCollapsibleFilePaths(): string[] {
+    const visibleDiffFiles = getVisibleDiffFiles();
+    const visibleFiles = visibleDiffFiles.length > 0
+      ? visibleDiffFiles
+      : getVisibleFileList()?.files ?? [];
+    return visibleFiles.map((file) => file.path);
+  }
+
+  function currentCollapseKey(): string | null {
+    if (currentWorkspaceID) {
+      return `workspace:${currentWorkspaceID}:${currentWorkspaceBase}`;
+    }
+    if (!currentOwner || !currentName || !currentNumber) return null;
+    return collapseKeyFor(currentOwner, currentName, currentNumber);
+  }
+
+  function collapseKeyFor(owner: string, name: string, number: number): string {
+    if (currentWorkspaceID) {
+      return `workspace:${currentWorkspaceID}:${currentWorkspaceBase}`;
+    }
+    return `${owner}/${name}#${number}`;
+  }
+
+  function areAllVisibleFilesCollapsed(): boolean {
+    const key = currentCollapseKey();
+    if (!key) return false;
+    const paths = visibleCollapsibleFilePaths();
+    if (paths.length === 0) return false;
+    const current = collapsedFiles[key] ?? [];
+    return paths.every((path) => current.includes(path));
   }
 
   // --- writes ---
@@ -415,7 +463,7 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     number: number,
     filePath: string,
   ): void {
-    const key = `${owner}/${name}#${number}`;
+    const key = collapseKeyFor(owner, name, number);
     const current = collapsedFiles[key] ?? [];
     if (current.includes(filePath)) {
       collapsedFiles = {
@@ -428,6 +476,29 @@ export function createDiffStore(opts?: DiffStoreOptions) {
         [key]: [...current, filePath],
       };
     }
+    saveCollapsedFiles(collapsedFiles);
+  }
+
+  function setAllVisibleFilesCollapsed(nextCollapsed: boolean): void {
+    const key = currentCollapseKey();
+    if (!key) return;
+    const paths = visibleCollapsibleFilePaths();
+    if (paths.length === 0) return;
+
+    let next = collapsedFiles[key] ?? [];
+    if (nextCollapsed) {
+      next = [
+        ...next,
+        ...paths.filter((path) => !next.includes(path)),
+      ];
+    } else {
+      next = next.filter((path) => !paths.includes(path));
+    }
+
+    collapsedFiles = {
+      ...collapsedFiles,
+      [key]: next,
+    };
     saveCollapsedFiles(collapsedFiles);
   }
 
@@ -463,9 +534,10 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     name: string,
     number: number,
     path: string,
+    side?: "old" | "new",
   ): Promise<FilePreview> {
     const ref = currentRouteRef();
-    const key = `${ref.provider}:${ref.platformHost ?? ""}:${ref.repoPath}#${number}:${scopeCacheKey()}:${path}`;
+    const key = `${ref.provider}:${ref.platformHost ?? ""}:${ref.repoPath}#${number}:${scopeCacheKey()}:${path}:${side ?? "preview"}`;
     const cached = filePreviewCache.get(key);
     if (cached) return cached;
 
@@ -477,6 +549,7 @@ export function createDiffStore(opts?: DiffStoreOptions) {
             path: { ...providerRouteParams(ref), number },
             query: {
               path,
+              ...(side && { side }),
               ...(scope.kind === "commit" && { commit: scope.sha }),
               ...(scope.kind === "range" && {
                 from: scope.fromSha,
@@ -1029,7 +1102,9 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     setRichPreview,
     setHideWhitespace,
     isFileCollapsed,
+    areAllVisibleFilesCollapsed,
     toggleFileCollapsed,
+    setAllVisibleFilesCollapsed,
     loadDiff,
     loadCommitDiff,
     loadFilePreview,

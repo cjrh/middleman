@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -163,7 +162,7 @@ func worktreeDiffFilesFromRefs(
 		files = append(files, worktreeUntrackedFiles(ctx, dir, false, hideWhitespace)...)
 	}
 	markWorktreeGeneratedFiles(ctx, dir, files)
-	sortWorktreeDiffFiles(files)
+	gitclone.SortDiffFiles(files)
 	return files, nil
 }
 
@@ -350,21 +349,12 @@ func worktreeDiffFromRefsPath(
 		}
 	}
 	markWorktreeGeneratedFiles(ctx, dir, files)
-	sortWorktreeDiffFiles(files)
+	gitclone.SortDiffFiles(files)
 
 	return &gitclone.DiffResult{
 		WhitespaceOnlyCount: wsCount,
 		Files:               files,
 	}, nil
-}
-
-func sortWorktreeDiffFiles(files []gitclone.DiffFile) {
-	slices.SortFunc(files, func(a, b gitclone.DiffFile) int {
-		if cmp := strings.Compare(a.Path, b.Path); cmp != 0 {
-			return cmp
-		}
-		return strings.Compare(a.OldPath, b.OldPath)
-	})
 }
 
 func markWorktreeGeneratedFiles(
@@ -586,6 +576,7 @@ func worktreeUntrackedFilesFromPaths(
 			file.Hunks = []gitclone.Hunk{
 				untrackedFileHunk(content),
 			}
+			file.Patch = gitclone.BuildPatch(file)
 		}
 		files = append(files, file)
 	}

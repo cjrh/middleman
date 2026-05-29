@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDiffStore } from "@middleman/ui/stores/diff";
 import type { DiffStoreOptions } from "@middleman/ui/stores/diff";
-import type { DiffResult, FilesResult } from "@middleman/ui/api/types";
+import type { DiffFile, DiffResult, FilesResult } from "@middleman/ui/api/types";
 
 const ownerRepoRef = { provider: "github", platformHost: "github.com", owner: "owner", name: "repo", repoPath: "owner/repo" };
 
@@ -16,19 +16,11 @@ interface TestGetOptions {
 }
 
 function makeDiffResult(files: string[]): DiffResult {
+  const diffFiles = files.map((path) => makeDiffFile(path, 1, 1));
   return {
     stale: false,
     whitespace_only_count: 0,
-    files: files.map((path) => ({
-      path,
-      old_path: path,
-      status: "modified" as const,
-      is_binary: false,
-      is_whitespace_only: false,
-      additions: 1,
-      deletions: 1,
-      hunks: [],
-    })),
+    files: diffFiles,
   };
 }
 
@@ -36,19 +28,25 @@ function makeFilesResult(
   files: string[],
   overrides: Partial<FilesResult & { whitespace_only_count: number }> = {},
 ): FilesResult {
+  const diffFiles = files.map((path) => makeDiffFile(path, 0, 0));
   return {
     stale: false,
-    files: files.map((path) => ({
-      path,
-      old_path: path,
-      status: "modified" as const,
-      is_binary: false,
-      is_whitespace_only: false,
-      additions: 0,
-      deletions: 0,
-      hunks: [],
-    })),
+    files: diffFiles,
     ...overrides,
+  };
+}
+
+function makeDiffFile(path: string, additions: number, deletions: number): DiffFile {
+  return {
+    path,
+    old_path: path,
+    status: "modified",
+    is_binary: false,
+    is_whitespace_only: false,
+    additions,
+    deletions,
+    hunks: [],
+    patch: "",
   };
 }
 
@@ -256,6 +254,56 @@ describe("createDiffStore loadDiff", () => {
     expect(calls).toContain(
       "/api/v1/workspaces/ws-1/diff?base=merge-target",
     );
+  });
+
+  it("collapses and expands all visible files in workspace diffs", async () => {
+    const files = makeFilesResult([
+      "src/app.go",
+      "src/app_test.go",
+      "docs/plan.md",
+    ]);
+    const diff = makeDiffResult([
+      "src/app.go",
+      "src/app_test.go",
+      "docs/plan.md",
+    ]);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url;
+        if (url.includes("/workspaces/ws-1/files")) {
+          return Response.json(files);
+        }
+        if (url.includes("/workspaces/ws-1/diff")) {
+          return Response.json(diff);
+        }
+        return Response.json({}, { status: 404 });
+      },
+    );
+
+    const store = createDiffStore({ client: testClient() });
+    await store.loadWorkspaceDiff("ws-1", "head");
+
+    expect(store.areAllVisibleFilesCollapsed()).toBe(false);
+
+    store.setAllVisibleFilesCollapsed(true);
+
+    expect(store.areAllVisibleFilesCollapsed()).toBe(true);
+    expect(store.isFileCollapsed("owner", "repo", 1, "src/app.go")).toBe(true);
+    expect(store.isFileCollapsed("owner", "repo", 1, "src/app_test.go")).toBe(true);
+    expect(store.isFileCollapsed("owner", "repo", 1, "docs/plan.md")).toBe(true);
+
+    store.setFileCategoryFilter("tests");
+    store.setAllVisibleFilesCollapsed(false);
+
+    expect(store.isFileCollapsed("owner", "repo", 1, "src/app.go")).toBe(true);
+    expect(store.isFileCollapsed("owner", "repo", 1, "src/app_test.go")).toBe(false);
+    expect(store.isFileCollapsed("owner", "repo", 1, "docs/plan.md")).toBe(true);
   });
 
   it("loads commits for the active workspace diff", async () => {
@@ -1030,52 +1078,12 @@ describe("createDiffStore loadDiff", () => {
   });
 
   it("filters loaded diff and file list by selected file category", async () => {
-    const result: DiffResult = {
-      stale: false,
-      whitespace_only_count: 0,
-      files: [
-        {
-          path: "docs/review-plan.md",
-          old_path: "docs/review-plan.md",
-          status: "modified",
-          is_binary: false,
-          is_whitespace_only: false,
-          additions: 1,
-          deletions: 1,
-          hunks: [],
-        },
-        {
-          path: "src/App.svelte",
-          old_path: "src/App.svelte",
-          status: "modified",
-          is_binary: false,
-          is_whitespace_only: false,
-          additions: 1,
-          deletions: 1,
-          hunks: [],
-        },
-        {
-          path: "src/App.test.ts",
-          old_path: "src/App.test.ts",
-          status: "modified",
-          is_binary: false,
-          is_whitespace_only: false,
-          additions: 1,
-          deletions: 1,
-          hunks: [],
-        },
-        {
-          path: "bun.lock",
-          old_path: "bun.lock",
-          status: "modified",
-          is_binary: false,
-          is_whitespace_only: false,
-          additions: 1,
-          deletions: 1,
-          hunks: [],
-        },
-      ],
-    };
+    const result = makeDiffResult([
+      "docs/review-plan.md",
+      "src/App.svelte",
+      "src/App.test.ts",
+      "bun.lock",
+    ]);
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL) => {

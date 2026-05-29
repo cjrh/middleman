@@ -1,8 +1,76 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import type { DiffResult, FilesResult } from "@middleman/ui/api/types";
+import type { DiffFile, DiffLine, DiffResult, FilesResult } from "@middleman/ui/api/types";
+
+type DiffFixtureFile = Omit<DiffFile, "patch"> & { patch?: string };
+type DiffFixture = Omit<DiffResult, "files"> & {
+  files: DiffFixtureFile[];
+};
+
+function patchLinePrefix(line: DiffLine): string {
+  if (line.type === "add") return "+";
+  if (line.type === "delete") return "-";
+  return " ";
+}
+
+function patchRange(start: number, count: number): string {
+  return count === 1 ? `${start}` : `${start},${count}`;
+}
+
+function patchForFile(file: DiffFixtureFile): string {
+  if (file.is_binary || file.hunks.length === 0) return "";
+  const oldPath = file.status === "added" ? "/dev/null" : `a/${file.old_path || file.path}`;
+  const newPath = file.status === "deleted" ? "/dev/null" : `b/${file.path}`;
+  const lines = [
+    `diff --git a/${file.old_path || file.path} b/${file.path}`,
+    `--- ${oldPath}`,
+    `+++ ${newPath}`,
+  ];
+  for (const hunk of file.hunks) {
+    lines.push(
+      `@@ -${patchRange(hunk.old_start, hunk.old_count)} +${patchRange(hunk.new_start, hunk.new_count)} @@${hunk.section ? ` ${hunk.section}` : ""}`,
+    );
+    for (const line of hunk.lines) {
+      lines.push(`${patchLinePrefix(line)}${line.content}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function normalizeFixtureFile(file: DiffFixtureFile): DiffFixtureFile {
+  return {
+    ...file,
+    hunks: file.hunks.map((hunk) => ({
+      ...hunk,
+      old_count: hunk.lines.filter((line) => line.type !== "add").length,
+      new_count: hunk.lines.filter((line) => line.type !== "delete").length,
+    })),
+  };
+}
+
+function withServerDiffData(fixture: DiffFixture): DiffResult {
+  const files = fixture.files.map((file) => {
+    const normalized = normalizeFixtureFile(file);
+    return {
+      ...normalized,
+      patch: normalized.patch ?? patchForFile(normalized),
+    };
+  });
+  return {
+    ...fixture,
+    files,
+  };
+}
+
+function treeFileItems(root: Locator) {
+  return root.locator(".diff-file-tree [data-item-type=\"file\"]");
+}
+
+function treeFileItem(root: Locator, path: string) {
+  return root.locator(`.diff-file-tree [data-item-path="${path}"]`);
+}
 
 // Minimal diff fixture: one modified file.
-const tinyDiff: DiffResult = {
+const tinyDiff: DiffResult = withServerDiffData({
   stale: false,
   whitespace_only_count: 0,
   files: [
@@ -31,11 +99,11 @@ const tinyDiff: DiffResult = {
       ],
     },
   ],
-};
+});
 
 // Multi-file diff fixture: 20 files with 20 lines each to force the
 // diff area to overflow in the kanban drawer.
-const multiFileDiff: DiffResult = {
+const multiFileDiff: DiffResult = withServerDiffData({
   stale: false,
   whitespace_only_count: 0,
   files: Array.from({ length: 20 }, (_, i) => ({
@@ -71,7 +139,7 @@ const multiFileDiff: DiffResult = {
       },
     ],
   })),
-};
+});
 
 function filesFromDiff(fixture: DiffResult): FilesResult {
   return {
@@ -106,6 +174,32 @@ async function mockDiffForAllPRs(
       body: JSON.stringify(fixture),
     });
   });
+}
+
+async function mockDiffForAllPRsWithDelayedDiff(
+  page: Page,
+  fixture: DiffResult,
+): Promise<() => void> {
+  let releaseDiff!: () => void;
+  const diffGate = new Promise<void>((resolve) => {
+    releaseDiff = resolve;
+  });
+  await page.route("**/api/v1/pulls/github/*/*/*/files", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(filesFromDiff(fixture)),
+    });
+  });
+  await page.route("**/api/v1/pulls/github/*/*/*/diff*", async (route) => {
+    await diffGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(fixture),
+    });
+  });
+  return releaseDiff;
 }
 
 function issueDetailFixture(
@@ -385,9 +479,9 @@ async function expectDiffFileVisibleInScrollArea(
 ): Promise<void> {
   await expect.poll(async () => {
     return await diffArea.evaluate((container, path) => {
-      const file = container.querySelector<HTMLElement>(
-        `[data-file-path="${CSS.escape(path)}"]`,
-      );
+      const file = Array.from(
+        container.querySelectorAll<HTMLElement>("[data-file-path]"),
+      ).find((el) => el.dataset.filePath === path);
       if (!file) {
         return false;
       }
@@ -822,17 +916,24 @@ test.describe("activity split view and detail drawers", () => {
   });
 
   test("PR tab handoff preserves selected Activity PR files tab", async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      pageErrors.push(error.message);
+    });
     await mockDiffForAllPRs(page, tinyDiff);
     await page.goto(
       "/?selected=pr:1&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets&selected_tab=files",
     );
     await expect(page.locator(".activity-detail .diff-view")).toBeVisible();
+    await expect(page.locator(".activity-detail .diff-file")).toHaveCount(1);
 
     await page.locator(".view-tab", { hasText: "PRs" }).click();
 
     await expect(page).toHaveURL(
       /\/pulls\/github\/acme\/widgets\/1\/files$/,
     );
+    await expect(page.locator(".diff-file")).toHaveCount(1);
+    expect(pageErrors).toEqual([]);
   });
 
   test("Issues tab handoff preserves selected Activity issue platform host", async ({ page }) => {
@@ -904,9 +1005,8 @@ test.describe("activity split view and detail drawers", () => {
     const fileSidebar = detail.locator(".files-layout > .files-sidebar");
     await expect(fileSidebar).toBeVisible();
     await expect(detail.locator(".diff-scope-picker")).toBeVisible();
-    await expect(fileSidebar.locator(".diff-file-row")).toHaveCount(1);
-    await expect(fileSidebar.locator(".diff-file-row .diff-file-name"))
-      .toHaveText("handler.go");
+    await expect(treeFileItems(fileSidebar)).toHaveCount(1);
+    await expect(treeFileItem(fileSidebar, "src/handler.go")).toBeVisible();
     await expect(detail.locator(".stack-sidebar")).toHaveCount(0);
     await expect(detail.locator(".list-layout > .sidebar")).toHaveCount(0);
     await expect(detail.locator(".list-layout > .resize-handle")).toHaveCount(0);
@@ -933,9 +1033,8 @@ test.describe("activity split view and detail drawers", () => {
     await expect(drawer.locator(".files-layout > .files-main .diff-view")).toBeVisible();
 
     await expect(drawer.locator(".diff-scope-picker")).toBeVisible();
-    await expect(sidebar.locator(".diff-file-row")).toHaveCount(1);
-    await expect(sidebar.locator(".diff-file-row .diff-file-name"))
-      .toHaveText("handler.go");
+    await expect(treeFileItems(sidebar)).toHaveCount(1);
+    await expect(treeFileItem(sidebar, "src/handler.go")).toBeVisible();
   });
 
   test("activity split view Files tab renders every diff file", async ({ page }) => {
@@ -995,13 +1094,47 @@ test.describe("activity split view and detail drawers", () => {
     const diffArea = drawer.locator(".files-layout > .files-main .diff-area");
 
     await expect(diffArea).toBeVisible();
-    await expect(sidebar.locator(".diff-file-row")).toHaveCount(20);
+    await expect(treeFileItems(sidebar)).toHaveCount(20);
 
     // Click the 12th file (file_11.go) and verify navigation.
-    await sidebar.locator(".diff-file-row", { hasText: "file_11.go" }).click();
+    await treeFileItem(sidebar, "src/file_11.go").click();
     await expect(
-      sidebar.locator(".diff-file-row.diff-file-row--active .diff-file-name"),
-    ).toHaveText("file_11.go");
+      treeFileItem(sidebar, "src/file_11.go"),
+    ).toHaveAttribute("aria-selected", "true");
+    await expectDiffFileVisibleInScrollArea(diffArea, "src/file_11.go");
+  });
+
+  test("kanban drawer sidebar click waits for delayed diff file DOM", async ({ page }) => {
+    const releaseDiff = await mockDiffForAllPRsWithDelayedDiff(page, multiFileDiff);
+
+    await page.goto("/pulls/board");
+    await page.locator(".kanban-card").first()
+      .waitFor({ state: "visible", timeout: 10_000 });
+
+    const card = page.locator(".kanban-card")
+      .filter({ hasText: "Add widget caching layer" })
+      .first();
+    await card.click();
+
+    const drawer = page.locator(".drawer-panel");
+    await expect(drawer).toBeVisible();
+    await drawer.locator(".detail-tab", { hasText: "Files changed" }).click();
+
+    const sidebar = drawer.locator(".files-layout > .files-sidebar");
+    const filesMain = drawer.locator(".files-layout > .files-main");
+
+    await expect(filesMain).toBeVisible();
+    await expect(treeFileItems(sidebar)).toHaveCount(20);
+
+    await treeFileItem(sidebar, "src/file_11.go").click();
+    await expect(
+      treeFileItem(sidebar, "src/file_11.go"),
+    ).toHaveAttribute("aria-selected", "true");
+
+    releaseDiff();
+    const diffArea = filesMain.locator(".diff-area");
+    await expect(diffArea).toBeVisible();
+    await expect(drawer.locator(".diff-file")).toHaveCount(20);
     await expectDiffFileVisibleInScrollArea(diffArea, "src/file_11.go");
   });
 

@@ -3652,6 +3652,7 @@ type getFilePreviewInput struct {
 	Name         string `path:"name"`
 	Number       int    `path:"number"`
 	Path         string `query:"path" doc:"Changed file path to preview"`
+	Side         string `query:"side" enum:"old,new" doc:"Optional diff side to read for context expansion"`
 	Commit       string `query:"commit" doc:"Scope to a single commit SHA"`
 	From         string `query:"from"   doc:"Start SHA for range diff (inclusive)"`
 	To           string `query:"to"     doc:"End SHA for range diff (inclusive)"`
@@ -3665,6 +3666,10 @@ func (s *Server) getFilePreview(ctx context.Context, input *getFilePreviewInput)
 	}
 	if strings.TrimSpace(input.Path) == "" {
 		return nil, problemValidation("query.path", "path is required")
+	}
+	side := strings.TrimSpace(input.Side)
+	if side != "" && side != "old" && side != "new" {
+		return nil, problemValidation("query.side", "side must be old or new")
 	}
 
 	resolved, err := s.resolveDiffRange(ctx, &getDiffInput{
@@ -3704,7 +3709,22 @@ func (s *Server) getFilePreview(ctx context.Context, input *getFilePreviewInput)
 			continue
 		}
 		found = true
-		if file.Status == "deleted" {
+		if side == "old" {
+			if file.Status == "added" {
+				return nil, problemNotFound(CodeNotFound, "file preview not available: old side does not exist", nil)
+			}
+			previewRef = resolved.fromSHA
+			previewPath = file.OldPath
+			if previewPath == "" {
+				previewPath = file.Path
+			}
+		} else if side == "new" {
+			if file.Status == "deleted" {
+				return nil, problemNotFound(CodeNotFound, "file preview not available: new side does not exist", nil)
+			}
+			previewRef = resolved.toSHA
+			previewPath = file.Path
+		} else if file.Status == "deleted" {
 			previewRef = resolved.fromSHA
 			previewPath = file.OldPath
 			if previewPath == "" {

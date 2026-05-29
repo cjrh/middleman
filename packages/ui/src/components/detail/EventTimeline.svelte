@@ -493,12 +493,77 @@
       }, 1500);
     });
   }
+
+  function inlineReplyButtonHtml(entry: TimelineEntry): string {
+    const targetID = replyTargetID(entry);
+    const expanded = targetID !== null && replyingThreadID === targetID;
+    const disabled = savingReplyThreadID !== null;
+    return `
+      <span class="thread-reply-inline-float">
+        <button
+          class="thread-toggle thread-reply-action thread-reply-action--inline"
+          type="button"
+          data-thread-reply-inline="true"
+          aria-expanded="${expanded ? "true" : "false"}"
+          ${disabled ? "disabled" : ""}
+        >
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 17 4 12 9 7"></polyline>
+            <path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>
+          </svg>
+          Reply
+        </button>
+      </span>
+    `;
+  }
+
+  function withInlineReplyButton(html: string, entry: TimelineEntry): string {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const button = inlineReplyButtonHtml(entry);
+    const targets = template.content.querySelectorAll("p, li, blockquote, h1, h2, h3, h4, h5, h6");
+    const target = targets[targets.length - 1];
+    if (target) {
+      target.insertAdjacentHTML("beforeend", button);
+    } else {
+      template.content.append(document.createElement("p"));
+      template.content.lastElementChild?.insertAdjacentHTML("beforeend", button);
+    }
+    return template.innerHTML;
+  }
+
+  function renderedBodyHtml(event: PREvent | IssueEvent, inlineReplyEntry?: TimelineEntry): string {
+    const html = renderMarkdown(
+      event.Body,
+      provider && repoOwner && repoName && repoPath
+        ? { provider, platformHost, owner: repoOwner, name: repoName, repoPath }
+        : undefined,
+    );
+    return inlineReplyEntry ? withInlineReplyButton(html, inlineReplyEntry) : html;
+  }
+
+  function handleInlineReplyBodyClick(event: MouseEvent, entry: TimelineEntry | undefined): void {
+    if (!entry) return;
+    if (!(event.target instanceof Element)) return;
+    if (!event.target.closest("[data-thread-reply-inline]")) return;
+    startReply(entry);
+  }
+
+  function handleInlineReplyBodyKeydown(event: KeyboardEvent, entry: TimelineEntry | undefined): void {
+    if (!entry) return;
+    if (!(event.target instanceof Element)) return;
+    if (!event.target.closest("[data-thread-reply-inline]")) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    startReply(entry);
+  }
 </script>
 
 {#snippet eventBody(
   event: PREvent | IssueEvent,
   nested = false,
   reviewThread: TimelineReviewThread | undefined = undefined,
+  inlineReplyEntry: TimelineEntry | undefined = undefined,
 )}
   {#if event.Body}
     <div
@@ -519,32 +584,34 @@
             : undefined}
         />
       {/if}
-      <div class="event-actions">
-        {#if canEditComment(event)}
+      {#if !inlineReplyEntry}
+        <div class="event-actions">
+          {#if canEditComment(event)}
+            <button
+              class="event-action-btn"
+              onclick={() => startEdit(event)}
+              title="Edit comment"
+              aria-label="Edit comment"
+              disabled={savingEditId !== null}
+            >
+              <PencilIcon size={14} />
+            </button>
+          {/if}
           <button
             class="event-action-btn"
-            onclick={() => startEdit(event)}
-            title="Edit comment"
-            aria-label="Edit comment"
-            disabled={savingEditId !== null}
+            class:copied={copiedId === String(event.ID)}
+            onclick={() => copyText(String(event.ID), event.Body)}
+            title={copiedId === String(event.ID) ? "Copied!" : "Copy to clipboard"}
+            aria-label={copiedId === String(event.ID) ? "Copied" : "Copy comment"}
           >
-            <PencilIcon size={14} />
+            {#if copiedId === String(event.ID)}
+              <CheckIcon size={14} />
+            {:else}
+              <CopyIcon size={14} />
+            {/if}
           </button>
-        {/if}
-        <button
-          class="event-action-btn"
-          class:copied={copiedId === String(event.ID)}
-          onclick={() => copyText(String(event.ID), event.Body)}
-          title={copiedId === String(event.ID) ? "Copied!" : "Copy to clipboard"}
-          aria-label={copiedId === String(event.ID) ? "Copied" : "Copy comment"}
-        >
-          {#if copiedId === String(event.ID)}
-            <CheckIcon size={14} />
-          {:else}
-            <CopyIcon size={14} />
-          {/if}
-        </button>
-      </div>
+        </div>
+      {/if}
       {#if editingId === event.ID && provider && repoOwner && repoName && repoPath}
         <div class="edit-panel">
           <CommentEditor
@@ -585,9 +652,49 @@
           </div>
         </div>
       {:else}
-        <div class={["event-body", { "markdown-body": shouldRenderMarkdown(event.EventType), "event-body--nested": nested }]}>
+        <div
+          class={[
+            "event-body",
+            {
+              "markdown-body": shouldRenderMarkdown(event.EventType),
+              "event-body--nested": nested,
+              "event-body--with-inline-reply": inlineReplyEntry,
+            },
+          ]}
+          onclick={(clickEvent) => handleInlineReplyBodyClick(clickEvent, inlineReplyEntry)}
+          onkeydown={(keyEvent) => handleInlineReplyBodyKeydown(keyEvent, inlineReplyEntry)}
+          role="presentation"
+        >
+          {#if inlineReplyEntry}
+            <div class="event-actions event-actions--inline-reply">
+              {#if canEditComment(event)}
+                <button
+                  class="event-action-btn"
+                  onclick={() => startEdit(event)}
+                  title="Edit comment"
+                  aria-label="Edit comment"
+                  disabled={savingEditId !== null}
+                >
+                  <PencilIcon size={14} />
+                </button>
+              {/if}
+              <button
+                class="event-action-btn"
+                class:copied={copiedId === String(event.ID)}
+                onclick={() => copyText(String(event.ID), event.Body)}
+                title={copiedId === String(event.ID) ? "Copied!" : "Copy to clipboard"}
+                aria-label={copiedId === String(event.ID) ? "Copied" : "Copy comment"}
+              >
+                {#if copiedId === String(event.ID)}
+                  <CheckIcon size={14} />
+                {:else}
+                  <CopyIcon size={14} />
+                {/if}
+              </button>
+            </div>
+          {/if}
           {#if shouldRenderMarkdown(event.EventType)}
-            {@html renderMarkdown(event.Body, provider && repoOwner && repoName && repoPath ? { provider, platformHost, owner: repoOwner, name: repoName, repoPath } : undefined)}
+            {@html renderedBodyHtml(event, inlineReplyEntry)}
           {:else}
             {event.Body}
           {/if}
@@ -657,6 +764,7 @@
     {#each timelineEntries as entry (entry.key)}
       {@const event = entry.event}
       {@const targetID = replyTargetID(entry)}
+      {@const hasReplyOnlyAction = entry.replies.length === 0 && canReplyToThread(entry)}
       <li class={isCompactEvent(event.EventType) ? "event event--compact" : "event"}>
         <div class="event-rail">
           <span
@@ -738,7 +846,7 @@
             {/if}
           </div>
         {:else}
-          <div class="event-card">
+          <div class={["event-card", hasReplyOnlyAction && "event-card--reply-inline"]}>
             <div class="event-header">
               <span
                 class="event-type"
@@ -754,8 +862,8 @@
             {#if event.Summary && (event.EventType === "commit" || event.EventType === "force_push")}
               <p class="event-summary">{event.Summary}</p>
             {/if}
-            {@render eventBody(event, false, entry.reviewThread)}
-            {#if entry.replies.length > 0 || canReplyToThread(entry)}
+            {@render eventBody(event, false, entry.reviewThread, hasReplyOnlyAction ? entry : undefined)}
+            {#if entry.replies.length > 0 || (canReplyToThread(entry) && !hasReplyOnlyAction)}
               <div class="thread-controls">
                 {#if entry.replies.length > 0}
                   <button
@@ -786,47 +894,6 @@
                   </button>
                 {/if}
               </div>
-              {#if targetID !== null && replyingThreadID === targetID && provider && repoOwner && repoName && repoPath}
-                <div class="thread-reply-panel">
-                  <CommentEditor
-                    {provider}
-                    {platformHost}
-                    owner={repoOwner}
-                    name={repoName}
-                    {repoPath}
-                    value={replyDraft}
-                    placeholder="Reply to thread... (Cmd+Enter to submit)"
-                    disabled={savingReplyThreadID === targetID}
-                    oninput={(nextBody) => {
-                      replyDraft = nextBody;
-                    }}
-                    onsubmit={() => {
-                      void submitReply(entry);
-                    }}
-                  />
-                  {#if replyError}
-                    <p class="edit-error">{replyError}</p>
-                  {/if}
-                  <div class="edit-actions">
-                    <button
-                      class="edit-action edit-action--primary"
-                      onclick={() => void submitReply(entry)}
-                      disabled={savingReplyThreadID === targetID}
-                    >
-                      <CheckIcon size={14} />
-                      {savingReplyThreadID === targetID ? "Replying..." : "Reply"}
-                    </button>
-                    <button
-                      class="edit-action"
-                      onclick={cancelReply}
-                      disabled={savingReplyThreadID === targetID}
-                    >
-                      <XIcon size={14} />
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              {/if}
               {#if !isThreadCollapsed(entry)}
                 <ol class="thread-replies" aria-label="Threaded replies">
                   {#each entry.replies as reply, index (reply.ID)}
@@ -852,6 +919,47 @@
                   {/each}
                 </ol>
               {/if}
+            {/if}
+            {#if targetID !== null && replyingThreadID === targetID && provider && repoOwner && repoName && repoPath}
+              <div class="thread-reply-panel">
+                <CommentEditor
+                  {provider}
+                  {platformHost}
+                  owner={repoOwner}
+                  name={repoName}
+                  {repoPath}
+                  value={replyDraft}
+                  placeholder="Reply to thread... (Cmd+Enter to submit)"
+                  disabled={savingReplyThreadID === targetID}
+                  oninput={(nextBody) => {
+                    replyDraft = nextBody;
+                  }}
+                  onsubmit={() => {
+                    void submitReply(entry);
+                  }}
+                />
+                {#if replyError}
+                  <p class="edit-error">{replyError}</p>
+                {/if}
+                <div class="edit-actions">
+                  <button
+                    class="edit-action edit-action--primary"
+                    onclick={() => void submitReply(entry)}
+                    disabled={savingReplyThreadID === targetID}
+                  >
+                    <CheckIcon size={14} />
+                    {savingReplyThreadID === targetID ? "Replying..." : "Reply"}
+                  </button>
+                  <button
+                    class="edit-action"
+                    onclick={cancelReply}
+                    disabled={savingReplyThreadID === targetID}
+                  >
+                    <XIcon size={14} />
+                    Cancel
+                  </button>
+                </div>
+              </div>
             {/if}
           </div>
         {/if}
@@ -1027,12 +1135,24 @@
     margin-top: 0.15rem;
   }
 
+  .event-body-wrap--with-thread {
+    display: flow-root;
+  }
+
+  .event-body-wrap--with-thread :global(.thread-snippet) {
+    margin-bottom: var(--focus-detail-space-xs, 0.46rem);
+  }
+
   .thread-controls {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: var(--focus-detail-space-xs, 0.46rem);
     margin-top: var(--focus-detail-space-sm, 0.62rem);
+  }
+
+  .event-card--reply-inline {
+    display: flow-root;
   }
 
   .thread-toggle {
@@ -1155,9 +1275,16 @@
 
   .event-body-wrap--with-thread .event-actions {
     position: static;
-    justify-content: flex-end;
-    margin-top: calc(var(--focus-detail-space-xs, 0.46rem) * -1);
-    margin-bottom: var(--focus-detail-space-xs, 0.46rem);
+    float: right;
+    margin: 0 0 var(--focus-detail-space-xs, 0.46rem) var(--focus-detail-space-xs, 0.46rem);
+  }
+
+  .event-card--reply-inline .event-body-wrap--with-thread .event-actions--inline-reply {
+    position: absolute;
+    top: var(--focus-detail-space-sm, 0.62rem);
+    right: 0;
+    float: none;
+    margin: 0;
   }
 
   .event-action-btn {
@@ -1212,6 +1339,15 @@
     line-height: 1.6;
   }
 
+  .event-body-wrap--with-thread .event-body {
+    padding-top: 0.18rem;
+    padding-right: var(--focus-detail-space-xs, 0.46rem);
+  }
+
+  .event-card--reply-inline .event-body {
+    padding-bottom: 0;
+  }
+
   .event-body.markdown-body {
     white-space: normal;
   }
@@ -1219,6 +1355,68 @@
   .event-body--nested {
     padding: 0.12rem calc(var(--focus-detail-hit-target, 2rem) + var(--focus-detail-space-sm, 0.62rem)) 0.15rem 0;
     line-height: 1.25;
+  }
+
+  .event-body--with-inline-reply {
+    position: relative;
+    display: block;
+  }
+
+  .event-body--with-inline-reply::after {
+    content: "";
+    display: block;
+    clear: both;
+  }
+
+  .event-body--with-inline-reply :global(.thread-reply-inline-float) {
+    float: right;
+    clear: right;
+    display: inline-flex;
+    margin-left: var(--focus-detail-space-sm, 0.77rem);
+  }
+
+  .event-body--with-inline-reply :global(.thread-reply-action--inline) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 1.75rem;
+    padding: 0.18rem 0.45rem 0.18rem 0.25rem;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+    vertical-align: text-bottom;
+  }
+
+  .event-card--reply-inline:hover .event-body--with-inline-reply :global(.thread-reply-action--inline),
+  .event-body--with-inline-reply :global(.thread-reply-action--inline:focus-visible),
+  .event-body--with-inline-reply :global(.thread-reply-action--inline[aria-expanded="true"]) {
+    opacity: 1;
+  }
+
+  .event-body--with-inline-reply :global(.thread-reply-action--inline:hover) {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+
+  .event-body--with-inline-reply :global(.thread-reply-action--inline:disabled) {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  @media (hover: none) {
+    .event-body--with-inline-reply :global(.thread-reply-action--inline) {
+      opacity: 1;
+    }
+  }
+
+  .event-body--with-inline-reply > :global(:is(p, h1, h2, h3, h4, h5, h6):first-of-type)::before {
+    content: "";
+    float: right;
+    width: calc(var(--focus-detail-hit-target, 2rem) + var(--focus-detail-space-sm, 0.62rem));
+    height: calc(var(--focus-detail-hit-target, 2rem) + var(--focus-detail-space-xs, 0.46rem));
   }
 
   .edit-panel {

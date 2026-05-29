@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { compile } from "svelte/compiler";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import componentSource from "./EventTimeline.svelte?raw";
 import EventTimeline from "./EventTimeline.svelte";
 import { STORES_KEY } from "../../context.js";
@@ -11,6 +11,48 @@ const compiledCss = compile(
   componentSource,
   { filename: "EventTimeline.svelte" },
 ).css?.code ?? "";
+
+type GlobalWithResizeObserver = { ResizeObserver?: unknown };
+type GlobalWithCSSStyleSheet = {
+  CSSStyleSheet?: { prototype: CSSStyleSheet & { replaceSync?: (text: string) => void } };
+};
+let originalResizeObserver: unknown;
+let originalResizeObserverExisted = false;
+let originalReplaceSync: unknown;
+
+beforeAll(() => {
+  originalResizeObserverExisted = "ResizeObserver" in globalThis;
+  originalResizeObserver = (globalThis as GlobalWithResizeObserver).ResizeObserver;
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  (globalThis as GlobalWithResizeObserver).ResizeObserver = ResizeObserverStub;
+
+  originalReplaceSync = (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet
+    ?.prototype.replaceSync;
+  if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
+    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync
+      ??= function replaceSync(): void {};
+  }
+});
+
+afterAll(() => {
+  if (originalResizeObserverExisted) {
+    (globalThis as GlobalWithResizeObserver).ResizeObserver = originalResizeObserver;
+  } else {
+    delete (globalThis as GlobalWithResizeObserver).ResizeObserver;
+  }
+  if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
+    if (originalReplaceSync) {
+      (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync =
+        originalReplaceSync as (text: string) => void;
+    } else {
+      delete (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync;
+    }
+  }
+});
 
 function makeEvent(overrides: Partial<PREvent> = {}): PREvent {
   return {
@@ -90,6 +132,7 @@ function makeDiffStore(overrides: Partial<DiffStore> = {}): DiffStore {
     getDiff: () => diff,
     isDiffLoading: () => false,
     getCurrentPR: () => ({ owner: "acme", name: "widget", number: 7 }),
+    getTabWidth: () => 4,
     loadDiff: vi.fn(),
     requestScrollToLine: vi.fn(),
     ...overrides,
@@ -103,18 +146,26 @@ function findCompiledStyleRule(
   const style = document.createElement("style");
   style.textContent = compiledCss;
   document.head.appendChild(style);
+  const selectorParts = selector.split(/\s+/).filter(Boolean);
 
   for (const rule of Array.from(style.sheet?.cssRules ?? [])) {
     if (!("selectorText" in rule) || !("style" in rule)) continue;
     const selectorText = String(rule.selectorText);
     if (
-      selectorText.includes(selector)
+      selectorParts.every((part) => selectorText.includes(part))
       && exclude.every((part) => !selectorText.includes(part))
     ) {
       return rule.style as CSSStyleDeclaration;
     }
   }
   throw new Error(`Could not find compiled style rule for ${selector}`);
+}
+
+async function expectPierreTimelineText(pattern: RegExp): Promise<void> {
+  await waitFor(() => {
+    const host = document.querySelector(".thread-code .pierre-diff");
+    expect(host?.shadowRoot?.textContent).toMatch(pattern);
+  });
 }
 
 describe("EventTimeline", () => {
@@ -240,7 +291,7 @@ describe("EventTimeline", () => {
     );
   });
 
-  it("renders positioned discussion threads with the same root and reply ordering", () => {
+  it("renders positioned discussion threads with the same root and reply ordering", async () => {
     const { container } = render(EventTimeline, {
       props: {
         events: [
@@ -306,7 +357,7 @@ describe("EventTimeline", () => {
     });
 
     expect(screen.getByText("src/review.ts:11")).toBeTruthy();
-    expect(screen.getByText("client.publishThreads();")).toBeTruthy();
+    await expectPierreTimelineText(/client\.publishThreads\(\);/);
     expect(container.querySelectorAll(".thread-reply")).toHaveLength(2);
 
     const threadText = container.querySelector(".event-card")?.textContent ?? "";
@@ -696,11 +747,15 @@ describe("EventTimeline", () => {
     });
 
     expect(screen.getByText("src/review.ts:10-11")).toBeTruthy();
-    expect(screen.getByText("client.publishThreads();")).toBeTruthy();
+    await expectPierreTimelineText(/client\.publishThreads\(\);/);
     expect(container.querySelector(".event-body-wrap--with-thread .event-actions")).toBeTruthy();
 
     const threadedActions = findCompiledStyleRule(".event-body-wrap--with-thread");
-    expect(threadedActions.getPropertyValue("position")).toBe("static");
+    expect(threadedActions.getPropertyValue("display")).toBe("flow-root");
+
+    const threadedActionButtons = findCompiledStyleRule(".event-body-wrap--with-thread .event-actions");
+    expect(threadedActionButtons.getPropertyValue("position")).toBe("static");
+    expect(threadedActionButtons.getPropertyValue("float")).toBe("right");
 
     await fireEvent.click(screen.getByRole("button", { name: "Jump to diff" }));
 
@@ -709,8 +764,77 @@ describe("EventTimeline", () => {
     );
   });
 
-  it("shows a reply composer for review threads when thread replies are available", async () => {
+  it("quotes review thread snippet paths before building synthetic patch text", async () => {
+    const path = "src/review.ts\n--- a/forged.ts\n+++ b/forged.ts";
+    const diff = makeDiffStore({
+      getDiff: () => ({
+        stale: false,
+        whitespace_only_count: 0,
+        files: [{
+          path,
+          old_path: path,
+          status: "modified",
+          is_binary: false,
+          is_whitespace_only: false,
+          additions: 1,
+          deletions: 0,
+          hunks: [{
+            old_start: 9,
+            old_count: 1,
+            new_start: 9,
+            new_count: 2,
+            lines: [
+              { type: "context", old_num: 9, new_num: 9, content: "const client = setup();" },
+              { type: "add", new_num: 10, content: "client.publishThreads();" },
+            ],
+          }],
+        }],
+      }),
+    });
+
     render(EventTimeline, {
+      props: {
+        events: [makeReviewThreadEvent({
+          diff_thread: {
+            id: "thread-1",
+            path,
+            side: "right",
+            start_side: "right",
+            start_line: 10,
+            line: 10,
+            new_line: 10,
+            line_type: "add",
+            body: "Please keep this setup explicit.",
+            author_login: "alice",
+            resolved: false,
+            can_resolve: true,
+            created_at: "2024-06-01T12:00:00Z",
+            updated_at: "2024-06-01T12:00:00Z",
+          },
+        })],
+        provider: "github",
+        platformHost: "github.com",
+        repoOwner: "acme",
+        repoName: "widget",
+        repoPath: "acme/widget",
+        number: 7,
+      },
+      context: new Map([
+        [STORES_KEY, {
+          diff,
+          diffReviewDraft: {
+            setRouteContext: vi.fn(),
+            isSubmitting: () => false,
+          },
+        }],
+      ]),
+    });
+
+    await expectPierreTimelineText(/client\.publishThreads\(\);/);
+  });
+
+  it("shows a reply composer for review threads when thread replies are available", async () => {
+    const { container } = render(EventTimeline, {
       props: {
         events: [makeReviewThreadEvent()],
         provider: "github",
@@ -735,6 +859,25 @@ describe("EventTimeline", () => {
         }],
       ]),
     });
+
+    expect(container.querySelector(".event-card--reply-inline")).toBeTruthy();
+    expect(container.querySelector(".thread-controls--reply-only")).toBeNull();
+    expect(container.querySelector(".thread-reply-action--inline")).toBeTruthy();
+
+    const inlineReplyCard = findCompiledStyleRule(".event-card--reply-inline");
+    expect(inlineReplyCard.getPropertyValue("display")).toBe("flow-root");
+
+    const inlineReplyBody = findCompiledStyleRule(".event-body--with-inline-reply");
+    expect(inlineReplyBody.getPropertyValue("display")).toBe("block");
+
+    const inlineReplyFloat = findCompiledStyleRule(".event-body--with-inline-reply .thread-reply-inline-float");
+    expect(inlineReplyFloat.getPropertyValue("float")).toBe("right");
+    expect(inlineReplyFloat.getPropertyValue("clear")).toBe("right");
+    expect(inlineReplyFloat.getPropertyValue("margin-left")).toBe("var(--focus-detail-space-sm, 0.77rem)");
+
+    const inlineReplyAction = findCompiledStyleRule(".event-body--with-inline-reply .thread-reply-action--inline");
+    expect(inlineReplyAction.getPropertyValue("display")).toBe("inline-flex");
+    expect(inlineReplyAction.getPropertyValue("color")).toBe("var(--text-secondary)");
 
     await fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 

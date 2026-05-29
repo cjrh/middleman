@@ -24,6 +24,7 @@ type DiffFile struct {
 	IsWhitespaceOnly bool   `json:"is_whitespace_only"`
 	Additions        int    `json:"additions"`
 	Deletions        int    `json:"deletions"`
+	Patch            string `json:"patch"`
 	Hunks            []Hunk `json:"hunks"`
 }
 
