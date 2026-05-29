@@ -403,6 +403,16 @@ async function mockInlineReviewAPI(
   });
 }
 
+async function firstDiffGutterRight(page: Page): Promise<number> {
+  return page.locator(".pierre-diff").first().evaluate((host) => {
+    const gutter = host.shadowRoot?.querySelector("[data-gutter]");
+    if (!(gutter instanceof HTMLElement)) {
+      throw new Error("diff gutter not found");
+    }
+    return gutter.getBoundingClientRect().right;
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await mockApi(page);
 });
@@ -446,11 +456,34 @@ test("keeps inline composer inside the visible diff pane on long lines", async (
   const composerBox = await composer.boundingBox();
   expect(scrollBox).not.toBeNull();
   expect(composerBox).not.toBeNull();
-  expect(composerBox!.x).toBeGreaterThanOrEqual(scrollBox!.x);
+  const gutterRight = await firstDiffGutterRight(page);
+  const contentWidth = scrollBox!.x + scrollBox!.width - gutterRight;
+  expect(composerBox!.x).toBeGreaterThanOrEqual(gutterRight - 1);
   expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(
     scrollBox!.x + scrollBox!.width + 1,
   );
-  expect(composerBox!.width).toBeGreaterThan(scrollBox!.width * 0.9);
+  expect(composerBox!.width).toBeGreaterThan(contentWidth * 0.85);
+  const leftEdgeHitsTextarea = await composer.locator("textarea").evaluate((textarea) => {
+    const rect = textarea.getBoundingClientRect();
+    const target = document.elementFromPoint(rect.left + 8, rect.top + 16);
+    return target === textarea || textarea.contains(target);
+  });
+  expect(leftEdgeHitsTextarea).toBe(true);
+  const textarea = composer.locator("textarea");
+  const initialTextareaHeight = await textarea.evaluate((element) => element.clientHeight);
+  await textarea.fill([
+    "This comment has enough lines to grow.",
+    "It should expand the editor instead of adding an internal scrollbar.",
+    "That keeps the review text readable while the diff pane scrolls.",
+    "One more line makes the regression obvious.",
+    "And another line verifies the textarea keeps up.",
+  ].join("\n"));
+  const textareaMetrics = await textarea.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(textareaMetrics.clientHeight).toBeGreaterThan(initialTextareaHeight);
+  expect(textareaMetrics.scrollHeight).toBeLessThanOrEqual(textareaMetrics.clientHeight + 1);
 });
 
 test("shows saved draft comments inline and jumps from the tray", async ({ page }) => {
@@ -477,11 +510,13 @@ test("shows saved draft comments inline and jumps from the tray", async ({ page 
   const inlineBox = await inlineDraft.boundingBox();
   expect(scrollBox).not.toBeNull();
   expect(inlineBox).not.toBeNull();
-  expect(inlineBox!.x).toBeGreaterThanOrEqual(scrollBox!.x);
+  const gutterRight = await firstDiffGutterRight(page);
+  const contentWidth = scrollBox!.x + scrollBox!.width - gutterRight;
+  expect(inlineBox!.x).toBeGreaterThanOrEqual(gutterRight - 1);
   expect(inlineBox!.x + inlineBox!.width).toBeLessThanOrEqual(
     scrollBox!.x + scrollBox!.width + 1,
   );
-  expect(inlineBox!.width).toBeGreaterThan(scrollBox!.width * 0.9);
+  expect(inlineBox!.width).toBeGreaterThan(contentWidth * 0.85);
 
   await page.getByRole("button", { name: "src/main.ts:1-2" }).click();
   await expect(inlineDraft).toBeFocused();
