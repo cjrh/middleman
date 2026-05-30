@@ -5286,6 +5286,7 @@ func TestAPITriggerSyncBypassesNextSyncAfter(t *testing.T) {
 	client := setupTestClient(t, srv)
 	resp, err := client.HTTP.TriggerSyncWithResponse(
 		t.Context(),
+		nil,
 	)
 	require.NoError(err)
 	require.Equal(http.StatusAccepted, resp.StatusCode())
@@ -5295,6 +5296,50 @@ func TestAPITriggerSyncBypassesNextSyncAfter(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		require.Fail("expected explicit sync request to bypass background cooldown")
 	}
+}
+
+func TestMatchPriorityRepoSupportsNestedBareRepoPaths(t *testing.T) {
+	assert := Assert.New(t)
+
+	tracked := []ghclient.RepoRef{
+		{
+			Platform:     platform.KindGitLab,
+			PlatformHost: "gitlab.com",
+			Owner:        "group/subgroup",
+			Name:         "project",
+			RepoPath:     "group/subgroup/project",
+		},
+		{
+			Platform:     platform.KindGitHub,
+			PlatformHost: "github.com",
+			Owner:        "acme",
+			Name:         "widget",
+			RepoPath:     "acme/widget",
+		},
+		{
+			Platform:     platform.KindGitea,
+			PlatformHost: "gitea",
+			Owner:        "acme",
+			Name:         "widget",
+			RepoPath:     "acme/widget",
+		},
+	}
+
+	repo, ok := matchPriorityRepo("group/subgroup/project", tracked)
+	assert.True(ok)
+	assert.Equal(platform.KindGitLab, repo.Platform)
+	assert.Equal("group/subgroup/project", repo.RepoPath)
+
+	repo, ok = matchPriorityRepo("github.com/acme/widget", tracked)
+	assert.True(ok)
+	assert.Equal(platform.KindGitHub, repo.Platform)
+	assert.Equal("acme/widget", repo.RepoPath)
+
+	repo, ok = matchPriorityRepo("gitea/acme/widget", tracked)
+	assert.True(ok)
+	assert.Equal(platform.KindGitea, repo.Platform)
+	assert.Equal("gitea", repo.PlatformHost)
+	assert.Equal("acme/widget", repo.RepoPath)
 }
 
 func TestAPIReadyForReview(t *testing.T) {
@@ -9810,7 +9855,9 @@ func TestOpenAPIDocumentsCustomStatusCodes(t *testing.T) {
 	require.Contains(spec, `"/sync":{"post":{"operationId":"trigger-sync"`)
 	require.Contains(spec, `"/starred":{"delete":{"operationId":"unset-starred"`)
 	require.Contains(spec, `"/pulls/{provider}/{owner}/{name}/{number}/comments":{"post":{"operationId":"post-pr-comment"`)
-	require.Contains(spec, `"trigger-sync","responses":{"202":{"description":"Accepted"}`)
+	require.Contains(spec, `"trigger-sync","parameters"`)
+	require.Contains(spec, `"name":"priority_repo"`)
+	require.Contains(spec, `"responses":{"202":{"description":"Accepted"}`)
 	require.Contains(spec, `"set-starred","requestBody"`)
 	require.Contains(spec, `"responses":{"200":{"description":"OK"}`)
 	require.True(

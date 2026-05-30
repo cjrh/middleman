@@ -7741,7 +7741,10 @@ export interface operations {
     };
     "trigger-sync": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional repository filters to sync first. Accepts repeated values or comma-separated values. Each value may be host-qualified as platform_host/owner/name or bare as owner/name; bare values match the first tracked repo with that repo path. */
+                priority_repo?: string[] | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
