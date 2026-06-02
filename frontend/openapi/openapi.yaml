@@ -1716,6 +1716,8 @@ components:
           type: string
         repo_owner:
           type: string
+        stack:
+          $ref: "#/components/schemas/StackContextResponse"
         warnings:
           items:
             type: string

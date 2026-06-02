@@ -88,8 +88,8 @@ const pr = {
   worktree_links: [],
 };
 
-function prForNumber(number: number) {
-  const member = stackMembers.find((candidate) => candidate.number === number);
+function prForNumber(number: number, members = stackMembers) {
+  const member = members.find((candidate) => candidate.number === number);
   return {
     ...pr,
     ID: number,
@@ -186,6 +186,8 @@ const stackMembers = [
   },
 ];
 
+type StackMember = (typeof stackMembers)[number];
+
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({
     status,
@@ -196,7 +198,10 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
 
 async function mockStackedPR(
   page: Page,
-  options: { stackResponseDelays?: Map<number, Promise<void>> } = {},
+  options: {
+    stackMembers?: () => StackMember[];
+    stackResponseDelays?: Map<number, Promise<void>>;
+  } = {},
 ): Promise<void> {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -213,7 +218,9 @@ async function mockStackedPR(
     );
     if (method === "GET" && detailMatch) {
       const number = Number(detailMatch[1]!);
-      const detailPR = prForNumber(number);
+      const currentStackMembers = options.stackMembers?.() ?? stackMembers;
+      const detailPR = prForNumber(number, currentStackMembers);
+      const member = currentStackMembers.find((candidate) => candidate.number === number);
       await fulfillJson(route, {
         merge_request: detailPR,
         repo: repoRef(),
@@ -235,6 +242,16 @@ async function mockStackedPR(
           count: 0,
           runs: [],
         },
+        stack: member
+          ? {
+              stack_id: 1,
+              stack_name: "session-recovery",
+              position: member.position,
+              size: currentStackMembers.length,
+              health: "blocked",
+              members: currentStackMembers,
+            }
+          : undefined,
       });
       return;
     }
@@ -244,15 +261,20 @@ async function mockStackedPR(
     );
     if (method === "GET" && stackMatch) {
       const number = Number(stackMatch[1]!);
-      const member = stackMembers.find((candidate) => candidate.number === number);
+      const currentStackMembers = options.stackMembers?.() ?? stackMembers;
+      const member = currentStackMembers.find((candidate) => candidate.number === number);
       await options.stackResponseDelays?.get(number);
+      if (!member) {
+        await fulfillJson(route, { error: "PR is not part of a stack" }, 404);
+        return;
+      }
       await fulfillJson(route, {
         stack_id: 1,
         stack_name: "session-recovery",
-        position: member?.position ?? 2,
-        size: 7,
+        position: member.position,
+        size: currentStackMembers.length,
         health: "blocked",
-        members: stackMembers,
+        members: currentStackMembers,
       });
       return;
     }
@@ -336,6 +358,73 @@ async function mockStackedPR(
   });
 }
 
+async function emitPRDetailRefreshed(page: Page, number: number): Promise<void> {
+  await page.evaluate((ref) => {
+    const eventSources = (window as unknown as {
+      __middlemanEventSources?: EventTarget[];
+    }).__middlemanEventSources;
+    eventSources?.[0]?.dispatchEvent(new MessageEvent("pr_detail_refreshed", {
+      data: JSON.stringify(ref),
+    }));
+  }, {
+    provider: "github",
+    platform_host: "github.com",
+    repo_path: "acme/widgets",
+    owner: "acme",
+    name: "widgets",
+    number,
+  });
+}
+
+async function installMockEventSource(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const eventSources: EventTarget[] = [];
+
+    class MockEventSource extends EventTarget {
+      url: string;
+      readyState = 0;
+
+      constructor(url: string) {
+        super();
+        this.url = url;
+        eventSources.push(this);
+        setTimeout(() => {
+          this.readyState = 1;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      close(): void {
+        this.readyState = 2;
+      }
+    }
+
+    (window as unknown as {
+      EventSource: typeof EventSource;
+      __middlemanEventSources: EventTarget[];
+    }).EventSource = MockEventSource as unknown as typeof EventSource;
+    (window as unknown as {
+      __middlemanEventSources: EventTarget[];
+    }).__middlemanEventSources = eventSources;
+  });
+}
+
+test("unstacked pull detail does not request stack context", async ({ page }) => {
+  let stackRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/stack")) {
+      stackRequests += 1;
+    }
+  });
+  await mockStackedPR(page);
+
+  await page.goto("/pulls/github/acme/widgets/108");
+
+  await expect(page.getByTestId("ci-chip")).toBeVisible();
+  await expect(page.getByTestId("stack-chip")).toHaveCount(0);
+  expect(stackRequests).toBe(0);
+});
+
 test("stack status shares the PR detail expandable slot with CI", async ({ page }) => {
   await page.setViewportSize({ width: 892, height: 998 });
   await mockStackedPR(page);
@@ -379,6 +468,33 @@ test("stack status shares the PR detail expandable slot with CI", async ({ page 
   await expect(page).toHaveURL(/\/pulls\/github\/acme\/widgets\/101$/);
   await expect(page.getByText("7 PRs · current 1/7")).toBeVisible();
   await expect(page.locator(".stack-base-name")).toHaveText("main");
+});
+
+test("stack status follows refreshed detail stack data", async ({ page }) => {
+  await installMockEventSource(page);
+  let currentStackMembers: StackMember[] = stackMembers;
+  await mockStackedPR(page, {
+    stackMembers: () => currentStackMembers,
+  });
+
+  await page.goto("/pulls/github/acme/widgets/102");
+  await expect(page.getByRole("button", {
+    name: /Stacked: 2\/7, 1 downstack CI failure/i,
+  })).toBeVisible();
+
+  currentStackMembers = [
+    { ...stackMembers[0]!, ci_status: "success" },
+    { ...stackMembers[1]!, ci_status: "success" },
+  ];
+  await emitPRDetailRefreshed(page, 102);
+
+  await expect(page.getByRole("button", { name: /Stacked: 2\/2/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Stacked: 2\/7/i })).toHaveCount(0);
+
+  currentStackMembers = [];
+  await emitPRDetailRefreshed(page, 102);
+
+  await expect(page.getByTestId("stack-chip")).toHaveCount(0);
 });
 
 test("stack status stays rendered while navigating to a stack member", async ({ page }) => {

@@ -1446,6 +1446,7 @@
           {provider}
           {platformHost}
           {repoPath}
+          initialStack={detail.stack ?? null}
           expanded={expandedPanel === "stack"}
           ontoggle={(next) => { expandedPanel = next ? "stack" : null; }}
           onmembernavigate={(ref) => {

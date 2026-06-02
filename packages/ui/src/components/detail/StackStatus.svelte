@@ -18,6 +18,7 @@
   const syncStore = stores.sync;
 
   type Props = PullRequestRouteRef & {
+    initialStack?: StackContext | null;
     expanded?: boolean;
     showButton?: boolean;
     showPanel?: boolean;
@@ -32,6 +33,7 @@
     provider,
     platformHost,
     repoPath,
+    initialStack,
     expanded = $bindable(false),
     showButton = true,
     showPanel = true,
@@ -133,25 +135,35 @@
   }
 
   $effect(() => {
-    const o = owner;
-    const n = name;
     const num = number;
     const refKey = currentRefKey;
-    const cachedStack = untrack(() =>
-      dataRefKey === refKey && data ? stackWithPosition(data, num) : null
-    );
-    if (cachedStack) {
-      data = cachedStack;
+    const seededStack = initialStack ? stackWithPosition(initialStack, num) : null;
+    if (seededStack) {
+      data = seededStack;
+      dataRefKey = refKey;
       visible = true;
-    } else {
+    } else if (initialStack !== undefined) {
       visible = false;
       data = null;
+      dataRefKey = refKey;
+    } else {
+      const cachedStack = untrack(() =>
+        dataRefKey === refKey && data ? stackWithPosition(data, num) : null
+      );
+      if (cachedStack) {
+        data = cachedStack;
+        visible = true;
+      } else {
+        visible = false;
+        data = null;
+        dataRefKey = refKey;
+      }
     }
-    fetchStack(o, n, num, refKey);
+    requestSeq += 1;
   });
 
   const unsubSync = syncStore?.subscribeSyncComplete?.(() =>
-    fetchStack(owner, name, number)
+    initialStack || data ? fetchStack(owner, name, number) : undefined
   );
   onDestroy(() => unsubSync?.());
 
