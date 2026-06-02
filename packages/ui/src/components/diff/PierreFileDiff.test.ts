@@ -1,5 +1,6 @@
 import {
   cleanup,
+  fireEvent,
   render,
   waitFor,
 } from "@testing-library/svelte";
@@ -31,6 +32,7 @@ const pierre = (() => {
   class FileDiff {
     cleanUp = cleanUp;
     expandHunk = () => {};
+    getLineIndex = (lineNumber: number): [number, number] => [lineNumber, lineNumber];
     render = renderDiff;
     setOptions = () => {};
     setSelectedLines = () => {};
@@ -156,6 +158,46 @@ describe("PierreFileDiff", () => {
     });
   });
 
+  it("renders an inactive expanded file after a fallback viewport probe", async () => {
+    const { default: PierreFileDiff } = await import("./PierreFileDiff.svelte");
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    const diffArea = document.createElement("div");
+    diffArea.className = "diff-area";
+    document.body.appendChild(diffArea);
+    let fileNearViewport = false;
+    Element.prototype.getBoundingClientRect = function () {
+      if (this instanceof HTMLElement && this.classList.contains("diff-area")) {
+        return rect({ top: 0, bottom: 400, height: 400 });
+      }
+      if (this instanceof HTMLElement && this.tagName === "DIFFS-CONTAINER") {
+        return fileNearViewport
+          ? rect({ top: 80, bottom: 180, height: 100 })
+          : rect({ top: 1_200, bottom: 1_300, height: 100 });
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      render(PierreFileDiff, {
+        target: diffArea,
+        props: { active: false, file: makeFile() },
+      });
+
+      await Promise.resolve();
+      expect(pierre.renderCount()).toBe(0);
+
+      fileNearViewport = true;
+      await fireEvent.scroll(diffArea);
+
+      await waitFor(() => {
+        expect(pierre.renderCount()).toBe(1);
+      });
+    } finally {
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      diffArea.remove();
+    }
+  });
+
   it("rerenders when annotation metadata changes without moving lines", async () => {
     const { default: PierreFileDiff } = await import("./PierreFileDiff.svelte");
     const file = makeFile();
@@ -184,4 +226,53 @@ describe("PierreFileDiff", () => {
       expect(pierre.renderCount()).toBe(2);
     });
   });
+
+  it("does not rerender when transient annotation metadata changes", async () => {
+    const { default: PierreFileDiff } = await import("./PierreFileDiff.svelte");
+    const file = makeFile();
+
+    const { rerender } = render(PierreFileDiff, {
+      props: { active: true, file },
+    });
+
+    await waitFor(() => {
+      expect(pierre.renderCount()).toBe(1);
+    });
+
+    await rerender({
+      active: true,
+      file,
+      selectedRange: { start: 2, end: 2, side: "additions" },
+      transientLineAnnotation: {
+        side: "additions",
+        lineNumber: 2,
+        metadata: { id: "composer:additions:2", body: "draft text" },
+      },
+    });
+    await Promise.resolve();
+
+    expect(pierre.renderCount()).toBe(1);
+  });
 });
+
+function rect({
+  top,
+  bottom,
+  height,
+}: {
+  top: number;
+  bottom: number;
+  height: number;
+}): DOMRect {
+  return {
+    top,
+    bottom,
+    height,
+    left: 0,
+    right: 500,
+    width: 500,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}

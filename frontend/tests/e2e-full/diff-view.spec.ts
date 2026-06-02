@@ -8,6 +8,8 @@ type DiffFixture = Omit<DiffResult, "files"> & {
   files: DiffFixtureFile[];
 };
 
+const gitBackedDiffTestTimeoutMs = 120_000;
+
 // --- Fixtures ---
 
 // Small fixture: 4 files covering modified (multi-hunk), added, deleted, binary.
@@ -1893,11 +1895,13 @@ test.describe("diff view performance", () => {
 //   - README.md: whitespace-only change
 
 test.describe("diff view (git-backed)", () => {
-  test.describe.configure({ mode: "serial" });
+  test.describe.configure({ mode: "serial", timeout: gitBackedDiffTestTimeoutMs });
 
   let releaseLock: (() => Promise<void>) | null = null;
 
-  test.beforeAll(async () => {
+  // eslint-disable-next-line no-empty-pattern -- Playwright requires fixture destructuring to access testInfo.
+  test.beforeAll(async ({}, testInfo) => {
+    testInfo.setTimeout(gitBackedDiffTestTimeoutMs);
     releaseLock = await acquireExclusiveLock("git-backed-diff");
   });
 
@@ -2078,7 +2082,7 @@ test.describe("diff view (git-backed)", () => {
     }
   });
 
-  test("inline review comments persist selected left and right diff targets", async ({ page }) => {
+  test("inline review composer opens and persists selected left and right diff targets", async ({ page }) => {
     const server = await startIsolatedE2EServer();
     try {
       const baseURL = server.info.base_url;
@@ -2098,6 +2102,7 @@ test.describe("diff view (git-backed)", () => {
       await selectPierreReviewLine(cacheFile, 1, "right");
       await expect(page.getByPlaceholder("Leave a comment")).toBeVisible();
       await expect(page.getByPlaceholder("Leave a comment")).toBeFocused();
+      await expectPierreDiffFirstVisible(cacheFile, diffAdditionsSelector);
       const cacheContentBox = await cacheFile.locator(".file-content").boundingBox();
       const composerBox = await cacheFile.locator(".inline-composer").boundingBox();
       expect(cacheContentBox).not.toBeNull();
