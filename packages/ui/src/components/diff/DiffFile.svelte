@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
+  import type { DiffLineAnnotation, SelectedLineRange, Virtualizer } from "@pierre/diffs";
   import { mount, onMount, unmount } from "svelte";
   import type { DiffFile as DiffFileType } from "../../api/types.js";
   import type { DiffReviewDraftComment } from "../../stores/diff-review-draft.svelte.js";
@@ -36,6 +36,7 @@
     diffHeadSHA?: string | undefined;
     nativeMultilineRanges?: boolean;
     reviewThreads?: ReviewThread[];
+    virtualizer?: Virtualizer | undefined;
   }
 
   const {
@@ -53,6 +54,7 @@
     diffHeadSHA = undefined,
     nativeMultilineRanges = false,
     reviewThreads = [],
+    virtualizer,
   }: Props = $props();
 
   const collapsed = $derived(diffStore.isFileCollapsed(owner, name, number, file.path));
@@ -65,6 +67,7 @@
     richPreviewEnabled && richPreview && supportsRichPreview(file.path),
   );
   const richPreviewKey = $derived(`${file.path}:${filePreviewGeneration}`);
+  const textDiffKey = $derived(`${file.path}:${file.old_path ?? ""}:${filePreviewGeneration}`);
   const fileDraftComments = $derived(
     diffReviewDraft.getComments().filter((comment) => comment.path === file.path),
   );
@@ -528,21 +531,24 @@
       {:else if file.is_binary}
         <div class="binary-notice">Binary file changed</div>
       {:else}
-        <PierreFileDiff
-          {file}
-          active={inViewport}
-          {viewMode}
-          {wordWrap}
-          {tabWidth}
-          loadFileText={contextExpansionEnabled ? loadDiffText : undefined}
-          lineAnnotations={pierreLineAnnotations}
-          transientLineAnnotation={pierreComposerAnnotation}
-          selectedRange={selectedRange}
-          selectedRanges={draftSelectedRanges}
-          enableLineSelection={reviewEnabled && !!diffHeadSHA}
-          onLineSelected={handlePierreSelection}
-          renderAnnotation={renderUnknownAnnotation}
-        />
+        {#key textDiffKey}
+          <PierreFileDiff
+            {file}
+            active={inViewport}
+            {viewMode}
+            {wordWrap}
+            {tabWidth}
+            loadFileText={contextExpansionEnabled ? loadDiffText : undefined}
+            lineAnnotations={pierreLineAnnotations}
+            transientLineAnnotation={pierreComposerAnnotation}
+            selectedRange={selectedRange}
+            selectedRanges={draftSelectedRanges}
+            enableLineSelection={reviewEnabled && !!diffHeadSHA}
+            onLineSelected={handlePierreSelection}
+            renderAnnotation={renderUnknownAnnotation}
+            {virtualizer}
+          />
+        {/key}
       {/if}
     </div>
   {/if}

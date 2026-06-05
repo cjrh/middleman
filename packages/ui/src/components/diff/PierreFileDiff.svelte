@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FileDiff } from "@pierre/diffs";
+  import { FileDiff, VirtualizedFileDiff } from "@pierre/diffs";
   import type {
     DiffLineAnnotation,
     ExpansionDirections,
@@ -9,10 +9,17 @@
     GetLineIndexUtility,
     SelectedLineRange,
     ThemeTypes,
+    Virtualizer,
   } from "@pierre/diffs";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import type { DiffFile } from "../../api/types.js";
-  import { appThemeType, diffFileWithPatch, parsePierreFileDiff } from "./pierre-diff.js";
+  import {
+    appThemeType,
+    diffFileWithPatch,
+    parsePierreFileDiff,
+    parsePierreFileDiffWithContents,
+    pierreFileContents,
+  } from "./pierre-diff.js";
   import { getPierreDiffWorkerPool } from "./pierre-worker-pool.js";
 
   interface Props {
@@ -29,6 +36,7 @@
     enableLineSelection?: boolean;
     onLineSelected?: (selection: SelectedLineRange | null) => void;
     renderAnnotation?: (annotation: DiffLineAnnotation<unknown>) => HTMLElement | undefined;
+    virtualizer?: Virtualizer | undefined;
   }
 
   type PierreSide = NonNullable<Parameters<GetLineIndexUtility>[1]>;
@@ -41,6 +49,12 @@
     gutter?: HTMLElement;
     key: string;
     wrapper: HTMLElement;
+  };
+  type PendingContextExpansion = {
+    direction: ExpansionDirections;
+    expansionLineCount: number | undefined;
+    fileKey: string;
+    hunkIndex: number;
   };
   const emptyFile: DiffFile = {
     path: "",
@@ -55,45 +69,46 @@
   };
 
   const {
-    file,
+    file = null,
     active = true,
     viewMode = "unified",
     wordWrap = false,
     tabWidth = 4,
-    loadFileText,
+    loadFileText = undefined,
     lineAnnotations = [],
     transientLineAnnotation = null,
     selectedRange = null,
     selectedRanges = [],
     enableLineSelection = false,
-    onLineSelected,
-    renderAnnotation,
+    onLineSelected = undefined,
+    renderAnnotation = undefined,
+    virtualizer = undefined,
   }: Props = $props();
 
-  let host: HTMLDivElement | undefined = $state();
-  let pierreDiff: FileDiff<unknown> | undefined;
+  let host: HTMLElement | undefined = $state();
+  let pierreDiff: FileDiff<unknown> | VirtualizedFileDiff<unknown> | undefined;
+  let pierreDiffVirtualizer: Virtualizer | undefined;
   let demandContextHandlerRoot: ShadowRoot | undefined;
   let fullContext: { oldFile: FileContents; newFile: FileContents } | undefined = $state();
+  let fullContextFileDiff: FileDiffMetadata | undefined;
+  let fullContextRendered = false;
   let contextLoadPromise: Promise<{ oldFile: FileContents; newFile: FileContents }> | undefined;
   let contextError: string | null = $state(null);
   let themeType = $state<ThemeTypes>(appThemeType());
   let rendered = $state(false);
-  let placeholderHeight = $state(0);
   let renderedFileKey = "";
   let renderAttemptKey = "";
-  let inactiveCleanupTimer: ReturnType<typeof setTimeout> | undefined;
   let reviewRangeFrame: number | undefined;
   let renderRetryFrame: number | undefined;
   let renderRetryTick = $state(0);
-  let viewportProbeFrame: number | undefined;
-  let viewportProbeTick = $state(0);
   let renderRetryCount = 0;
   let renderedLineRows = new Map<number, RenderedLinePair[]>();
   let selectedRangeElements = new Set<HTMLElement>();
+  let lineAnnotationWrappers = new Map<string, HTMLElement>();
   let transientAnnotationRow: TransientAnnotationRow | undefined;
+  let pendingContextExpansion: PendingContextExpansion | undefined;
   let lineCommentButtonHasPointerSnapshot = false;
   let lineCommentButtonWasSelectedOnPointerDown = false;
-  const inactiveCleanupDelayMs = 10_000;
   const maxImmediateRenderRetries = 5;
 
   const renderFile = $derived(file ? diffFileWithPatch(file) : emptyFile);
@@ -113,13 +128,10 @@
     diffStyle: viewMode,
     diffIndicators: "bars",
     disableFileHeader: true,
-    enableLineSelection,
+    enableLineSelection: false,
     hunkSeparators: "line-info",
     lineDiffType: "word",
-    lineHoverHighlight: enableLineSelection ? "both" : "disabled",
-    ...(onLineSelected && {
-      onLineSelected,
-    }),
+    lineHoverHighlight: "disabled",
     ...(renderAnnotation && { renderAnnotation }),
     overflow: wordWrap ? "wrap" : "scroll",
     theme: { dark: "pierre-dark", light: "pierre-light" },
@@ -127,13 +139,13 @@
     expansionLineCount: 40,
     tokenizeMaxLineLength: 2_000,
     onPostRender: () => {
+      removeStalePlaceholderPres();
       applyLineTargetAttributes();
       applyHunkHeaderLabels();
       applyLineCommentButtons();
+      syncLineAnnotationWrappers();
       rendered = true;
-      if (!fullContext) {
-        installDemandContextHandler();
-      }
+      installDemandContextHandler();
       scheduleSelectedRangesApplication();
     },
     unsafeCSS: `
@@ -234,25 +246,25 @@
 
     return () => {
       themeObserver?.disconnect();
-      cancelInactiveCleanup();
       cancelSelectedRangesApplication();
       cancelRenderRetry();
-      cancelViewportProbe();
       cleanUpPierreDiff();
       contextLoadPromise = undefined;
     };
   });
 
   $effect(() => {
-    if (renderedFileKey === fileKey) return;
+    if (renderedFileKey === fileKey && pierreDiffVirtualizer === virtualizer) return;
     renderedFileKey = fileKey;
-    cancelInactiveCleanup();
+    pierreDiffVirtualizer = virtualizer;
     cleanUpPierreDiff();
     contextLoadPromise = undefined;
     contextError = null;
     fullContext = undefined;
-    rendered = false;
-    placeholderHeight = 0;
+    fullContextFileDiff = undefined;
+    fullContextRendered = false;
+    pendingContextExpansion = undefined;
+    rendered = emptyTextualDiff;
     renderAttemptKey = "";
     renderRetryCount = 0;
     cancelRenderRetry();
@@ -270,25 +282,22 @@
   });
 
   $effect(() => {
-    const currentViewportProbeTick = viewportProbeTick;
     const currentRenderRetryTick = renderRetryTick;
-    if (currentRenderRetryTick < 0 || currentViewportProbeTick < 0) return;
-    if (!active && !isHostNearViewport()) {
-      scheduleInactiveCleanup();
-      return;
-    }
-    cancelInactiveCleanup();
+    if (currentRenderRetryTick < 0) return;
     if (emptyTextualDiff) {
       cleanUpPierreDiff();
       renderAttemptKey = "";
       rendered = true;
-      placeholderHeight = 0;
       return;
     }
     if (!host) return;
     if (!pierreFile) return;
-    pierreDiff ??= new FileDiff<unknown>(pierreOptions, getPierreDiffWorkerPool());
+    if (!active && !virtualizer) return;
+    pierreDiff ??= createPierreDiff();
     pierreDiff.setOptions(pierreOptions);
+    if (pierreDiff instanceof VirtualizedFileDiff && isHostInScrollViewport()) {
+      pierreDiff.setVisibility(true);
+    }
     const nextRenderAttemptKey = [
       fileKey,
       viewMode,
@@ -322,11 +331,12 @@
       if (didRender) {
         renderAttemptKey = nextRenderAttemptKey;
         renderRetryCount = 0;
+        removeStalePlaceholderPres();
         applyLineTargetAttributes();
         applyHunkHeaderLabels();
         applyLineCommentButtons();
+        syncLineAnnotationWrappers();
         rendered = true;
-        placeholderHeight = 0;
         installDemandContextHandler();
         scheduleSelectedRangesApplication();
       } else {
@@ -338,21 +348,7 @@
   });
 
   $effect(() => {
-    if (!host || rendered) return;
-    const root = host.closest(".diff-area");
-    if (!(root instanceof HTMLElement)) return;
-    root.addEventListener("scroll", scheduleViewportProbe, { passive: true });
-    window.addEventListener("resize", scheduleViewportProbe);
-    scheduleViewportProbe();
-    return () => {
-      root.removeEventListener("scroll", scheduleViewportProbe);
-      window.removeEventListener("resize", scheduleViewportProbe);
-      cancelViewportProbe();
-    };
-  });
-
-  $effect(() => {
-    if (active && pierreDiff && pierreFile) {
+    if (pierreDiff && pierreFile) {
       pierreDiff.setThemeType(themeType);
     }
   });
@@ -401,29 +397,29 @@
     cancelRenderRetry();
     clearSelectedRangeElements();
     clearTransientLineAnnotation();
+    clearLineAnnotationWrappers();
     renderedLineRows = new Map();
+    fullContextFileDiff = undefined;
     pierreDiff?.cleanUp();
     pierreDiff = undefined;
+  }
+
+  function createPierreDiff(): FileDiff<unknown> | VirtualizedFileDiff<unknown> {
+    const workerPool = getPierreDiffWorkerPool();
+    if (!virtualizer) return new FileDiff<unknown>(pierreOptions, workerPool, true);
+    return new VirtualizedFileDiff<unknown>(
+      pierreOptions,
+      virtualizer,
+      undefined,
+      workerPool,
+      true,
+    );
   }
 
   function cancelRenderRetry(): void {
     if (renderRetryFrame == null) return;
     cancelAnimationFrame(renderRetryFrame);
     renderRetryFrame = undefined;
-  }
-
-  function scheduleViewportProbe(): void {
-    if (viewportProbeFrame != null) return;
-    viewportProbeFrame = requestAnimationFrame(() => {
-      viewportProbeFrame = undefined;
-      viewportProbeTick += 1;
-    });
-  }
-
-  function cancelViewportProbe(): void {
-    if (viewportProbeFrame == null) return;
-    cancelAnimationFrame(viewportProbeFrame);
-    viewportProbeFrame = undefined;
   }
 
   function scheduleRenderRetry(): void {
@@ -453,7 +449,7 @@
 
   function applySelectedRanges(): void {
     const root = host?.shadowRoot;
-    const pre = root?.querySelector("pre");
+    const pre = renderedDiffPre(root);
     if (!root || !pre) return;
     clearSelectedRangeElements();
     if ((!selectedRange && !selectedRanges.length) || !pierreDiff) return;
@@ -550,6 +546,7 @@
   function clearRenderedDomState(): void {
     clearSelectedRangeElements();
     clearTransientLineAnnotation();
+    clearLineAnnotationWrappers();
     renderedLineRows = new Map();
   }
 
@@ -563,41 +560,7 @@
     return undefined;
   }
 
-  function scheduleInactiveCleanup(): void {
-    if (!pierreDiff || inactiveCleanupTimer) return;
-    inactiveCleanupTimer = setTimeout(() => {
-      inactiveCleanupTimer = undefined;
-      if (active || !pierreDiff) return;
-      placeholderHeight = measuredRenderedHeight();
-      cleanUpPierreDiff();
-      renderAttemptKey = "";
-      rendered = false;
-    }, inactiveCleanupDelayMs);
-  }
-
-  function cancelInactiveCleanup(): void {
-    if (!inactiveCleanupTimer) return;
-    clearTimeout(inactiveCleanupTimer);
-    inactiveCleanupTimer = undefined;
-  }
-
-  function isHostNearViewport(): boolean {
-    if (!host) return false;
-    const root = host.closest(".diff-area");
-    if (!(root instanceof HTMLElement)) return false;
-    const rootRect = root.getBoundingClientRect();
-    const hostRect = host.getBoundingClientRect();
-    return hostRect.bottom > rootRect.top - 600 &&
-      hostRect.top < rootRect.bottom + 600;
-  }
-
-  function measuredRenderedHeight(): number {
-    const height = host?.getBoundingClientRect().height ?? 0;
-    return Number.isFinite(height) && height > 0 ? Math.ceil(height) : placeholderHeight;
-  }
-
   function handleDemandContextClick(event: Event): void {
-    if (fullContext) return;
     const target = closestFromEvent(event, "[data-expand-button], [data-unmodified-lines]");
     if (!target) return;
     const separator = target.closest("[data-separator][data-expand-index]");
@@ -642,39 +605,118 @@
     expansionLineCount: number | undefined,
   ): Promise<void> {
     const requestFileKey = fileKey;
+    const alreadyRendered = fullContextRendered;
     const context = await loadFullContext(requestFileKey);
     if (!context || fileKey !== requestFileKey) return;
-    renderFullContext(context);
+    await tick();
     if (fileKey !== requestFileKey) return;
+    if (!alreadyRendered && !fullContextRendered) {
+      const didRender = renderFullContext(context);
+      if (fileKey !== requestFileKey) return;
+      if (!didRender) {
+        if (!fullContextFileDiff) return;
+        pendingContextExpansion = {
+          direction,
+          expansionLineCount,
+          fileKey: requestFileKey,
+          hunkIndex,
+        };
+        scheduleRenderRetry();
+        return;
+      }
+    }
+    expandRenderedHunk(hunkIndex, direction, expansionLineCount);
+  }
+
+  function expandRenderedHunk(
+    hunkIndex: number,
+    direction: ExpansionDirections,
+    expansionLineCount: number | undefined,
+  ): void {
     clearRenderedDomState();
     pierreDiff?.expandHunk(hunkIndex, direction, expansionLineCount);
+    if (pierreDiff instanceof VirtualizedFileDiff && fullContext && fullContextFileDiff) {
+      pierreDiff.rerender();
+    } else if (fullContext && fullContextFileDiff) {
+      const didRender = renderFullContextRange(fullContext, fullContextFileDiff);
+      if (!didRender) scheduleRenderRetry();
+    }
+    removeStalePlaceholderPres();
     applyLineTargetAttributes();
     applyHunkHeaderLabels();
     applyLineCommentButtons();
+    syncLineAnnotationWrappers();
+    installDemandContextHandler();
     scheduleSelectedRangesApplication();
   }
 
   function renderFullContext(context: { oldFile: FileContents; newFile: FileContents }): boolean {
     if (!pierreDiff || !host) return false;
+    fullContextRendered = false;
     rendered = false;
     clearRenderedDomState();
-    const didRender = pierreDiff.render({
+    fullContextFileDiff = parsePierreFileDiffWithContents(renderFile, context) ?? pierreFile;
+    if (!fullContextFileDiff) return false;
+    const didRender = renderFullContextRange(context, fullContextFileDiff);
+    pierreDiff.setSelectedLines(selectedRange);
+    if (didRender) {
+      fullContextRendered = true;
+      removeStalePlaceholderPres();
+      applyLineTargetAttributes();
+      applyHunkHeaderLabels();
+      applyLineCommentButtons();
+      syncLineAnnotationWrappers();
+      rendered = true;
+      installDemandContextHandler();
+      scheduleSelectedRangesApplication();
+      replayPendingContextExpansion();
+    }
+    return didRender;
+  }
+
+  function replayPendingContextExpansion(): void {
+    const pending = pendingContextExpansion;
+    if (!pending || pending.fileKey !== fileKey) return;
+    pendingContextExpansion = undefined;
+    expandRenderedHunk(
+      pending.hunkIndex,
+      pending.direction,
+      pending.expansionLineCount,
+    );
+  }
+
+  function renderFullContextRange(
+    context: { oldFile: FileContents; newFile: FileContents },
+    fileDiff: FileDiffMetadata,
+  ): boolean {
+    if (!pierreDiff || !host) return false;
+    const props = {
       fileContainer: host,
+      fileDiff,
       oldFile: context.oldFile,
       newFile: context.newFile,
       forceRender: true,
       lineAnnotations,
-    });
-    pierreDiff.setSelectedLines(selectedRange);
-    if (didRender) {
-      applyLineTargetAttributes();
-      applyHunkHeaderLabels();
-      applyLineCommentButtons();
-      rendered = true;
-      placeholderHeight = 0;
-      scheduleSelectedRangesApplication();
+    } satisfies Parameters<FileDiff<unknown>["render"]>[0];
+    if (!(pierreDiff instanceof VirtualizedFileDiff)) {
+      return pierreDiff.render({
+        ...props,
+        renderRange: {
+          startingLine: 0,
+          totalLines: Number.POSITIVE_INFINITY,
+          bufferBefore: 0,
+          bufferAfter: 0,
+        },
+      });
     }
-    return didRender;
+    if (isHostInScrollViewport()) {
+      pierreDiff.setVisibility(true);
+    }
+    if (pierreDiff.fileDiff !== fileDiff) {
+      pierreDiff.fileDiff = fileDiff;
+      pierreDiff.setMetrics(undefined, true);
+    }
+    return pierreDiff.render(props);
   }
 
   async function loadFullContext(
@@ -706,14 +748,8 @@
       renderFile.status === "deleted" ? Promise.resolve("") : loadFileText("new"),
     ]);
     return {
-      oldFile: {
-        name: renderFile.old_path || renderFile.path,
-        contents: oldContents,
-      },
-      newFile: {
-        name: renderFile.path,
-        contents: newContents,
-      },
+      oldFile: pierreFileContents(renderFile.old_path || renderFile.path, oldContents, "full-old"),
+      newFile: pierreFileContents(renderFile.path, newContents, "full-new"),
     };
   }
 
@@ -757,7 +793,7 @@
 
   function applyLineTargetAttributes(): void {
     const root = host?.shadowRoot;
-    const pre = root?.querySelector("pre");
+    const pre = renderedDiffPre(root);
     if (!root || !pre || !pierreDiff) return;
     for (const line of root.querySelectorAll<HTMLElement>("[data-diff-path]")) {
       line.removeAttribute("data-diff-path");
@@ -786,7 +822,7 @@
 
   function applyLineCommentButtons(): void {
     const root = host?.shadowRoot;
-    const pre = root?.querySelector("pre");
+    const pre = renderedDiffPre(root);
     if (!root || !pre) return;
     for (const button of root.querySelectorAll("[data-middleman-line-comment-button]")) {
       button.remove();
@@ -839,10 +875,12 @@
     button.setAttribute("aria-label", label);
     button.setAttribute("data-middleman-line-comment-button", "");
     button.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
       lineCommentButtonHasPointerSnapshot = true;
       lineCommentButtonWasSelectedOnPointerDown = lineCommentTargetIsSelected(target, event);
     });
     button.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
       lineCommentButtonHasPointerSnapshot = true;
       lineCommentButtonWasSelectedOnPointerDown = lineCommentTargetIsSelected(target, event);
     });
@@ -922,13 +960,23 @@
       slotName,
       stableAnnotationKey(annotation.metadata),
     ].join(":");
-    if (transientAnnotationRow?.key === key) return;
+    if (transientAnnotationRow?.key === key) {
+      if (!hasAnnotationSlot(slotName)) {
+        const row = insertTransientAnnotationRow(annotation);
+        if (row) {
+          transientAnnotationRow = {
+            ...transientAnnotationRow,
+            ...row,
+          };
+        }
+      }
+      return;
+    }
 
     clearTransientLineAnnotation();
 
-    const existingSlot = hasAnnotationSlot(slotName);
-    const row = existingSlot ? undefined : insertTransientAnnotationRow(annotation);
-    if (!existingSlot && !row) return;
+    const row = hasAnnotationSlot(slotName) ? undefined : insertTransientAnnotationRow(annotation);
+    if (!hasAnnotationSlot(slotName) && !row) return;
 
     const content = renderAnnotation(annotation);
     if (!content) return;
@@ -955,6 +1003,45 @@
     transientAnnotationRow = undefined;
   }
 
+  function syncLineAnnotationWrappers(): void {
+    if (!host || !renderAnnotation) {
+      clearLineAnnotationWrappers();
+      return;
+    }
+    const activeKeys = new Set<string>();
+    for (const annotation of lineAnnotations) {
+      const slotName = annotationSlotName(annotation);
+      const key = `${slotName}:${stableAnnotationKey(annotation)}`;
+      activeKeys.add(key);
+      if (lineAnnotationWrappers.has(key)) continue;
+
+      const content = renderAnnotation(annotation);
+      if (!content) continue;
+
+      const wrapper = document.createElement("div");
+      wrapper.dataset.middlemanLineAnnotationWrapper = "";
+      wrapper.slot = slotName;
+      wrapper.style.whiteSpace = "normal";
+      wrapper.appendChild(content);
+      // eslint-disable-next-line svelte/no-dom-manipulating -- Pierre owns this custom element; annotations are passed through its light-DOM slot API.
+      host.appendChild(wrapper);
+      lineAnnotationWrappers.set(key, wrapper);
+    }
+
+    for (const [key, wrapper] of lineAnnotationWrappers) {
+      if (activeKeys.has(key)) continue;
+      lineAnnotationWrappers.delete(key);
+      wrapper.remove();
+    }
+  }
+
+  function clearLineAnnotationWrappers(): void {
+    for (const wrapper of lineAnnotationWrappers.values()) {
+      wrapper.remove();
+    }
+    lineAnnotationWrappers.clear();
+  }
+
   function hasAnnotationSlot(slotName: string): boolean {
     const root = host?.shadowRoot;
     if (!root) return false;
@@ -968,7 +1055,7 @@
     annotation: DiffLineAnnotation<unknown>,
   ): { content: HTMLElement; gutter: HTMLElement } | undefined {
     const root = host?.shadowRoot;
-    const pre = root?.querySelector("pre");
+    const pre = renderedDiffPre(root);
     if (!pre || !pierreDiff) return undefined;
 
     const split = pre.getAttribute("data-diff-type") === "split";
@@ -1016,10 +1103,38 @@
     if (!Number.isFinite(lineIndex)) return;
     const pair = renderedLinePair(pre, lineIndex, split);
     if (!pair) return;
-    pair.content.setAttribute("data-diff-path", renderFile.path);
     pair.content.tabIndex = -1;
+    pair.gutter.tabIndex = -1;
+    pair.content.setAttribute("data-diff-path", renderFile.path);
+    pair.gutter.setAttribute("data-diff-path", renderFile.path);
     for (const [name, value] of Object.entries(attributes)) {
       pair.content.setAttribute(name, value);
+      pair.gutter.setAttribute(name, value);
+    }
+  }
+
+  function isHostInScrollViewport(): boolean {
+    if (!host) return false;
+    const root = host.closest(".diff-area");
+    const hostRect = host.getBoundingClientRect();
+    const rootRect = root?.getBoundingClientRect() ?? {
+      top: 0,
+      bottom: window.innerHeight,
+    };
+    return hostRect.bottom > rootRect.top && hostRect.top < rootRect.bottom;
+  }
+
+  function renderedDiffPre(root = host?.shadowRoot): HTMLPreElement | null {
+    return root?.querySelector<HTMLPreElement>("pre[data-diff]") ?? null;
+  }
+
+  function removeStalePlaceholderPres(): void {
+    const root = host?.shadowRoot;
+    if (!root) return;
+    for (const pre of root.querySelectorAll<HTMLPreElement>("pre:not([data-diff])")) {
+      if (pre.childElementCount === 0 && !pre.textContent?.trim()) {
+        pre.remove();
+      }
     }
   }
 
@@ -1128,16 +1243,14 @@
 <div
   class="pierre-diff-shell"
   class:pierre-diff-shell--loading={!rendered}
-  style:min-height={placeholderHeight ? `${placeholderHeight}px` : undefined}
   aria-busy={!rendered}
 >
-  {#if !emptyTextualDiff}
-    <diffs-container
-      class="pierre-diff"
-      class:pierre-diff--pending={!rendered}
-      bind:this={host}
-    ></diffs-container>
-  {/if}
+  <diffs-container
+    class="pierre-diff"
+    class:pierre-diff--pending={!rendered}
+    hidden={emptyTextualDiff}
+    bind:this={host}
+  ></diffs-container>
   {#if rendered && emptyTextualDiff}
     <div class="empty-textual-diff">No textual changes</div>
   {/if}

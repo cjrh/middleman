@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Virtualizer } from "@pierre/diffs";
   import { onMount, tick, untrack } from "svelte";
   import { getStores } from "../../context.js";
   import type { DiffScrollTarget } from "../../stores/diff.svelte.js";
@@ -17,6 +18,7 @@
     number: number;
     loadOnMount?: boolean;
     keyboardActive?: boolean;
+    pageKeyboardActive?: boolean;
     richPreviewEnabled?: boolean;
     contextExpansionEnabled?: boolean;
     provider: string;
@@ -39,6 +41,7 @@
     number,
     loadOnMount = true,
     keyboardActive = true,
+    pageKeyboardActive = keyboardActive,
     richPreviewEnabled = true,
     contextExpansionEnabled = true,
     provider,
@@ -56,9 +59,12 @@
   }: Props = $props();
 
   let diffArea: HTMLDivElement | undefined = $state();
+  let diffContent: HTMLDivElement | undefined = $state();
+  let diffVirtualizer: Virtualizer | undefined = $state();
   let scrollClearRaf = 0;
   let scrollRestoreRaf = 0;
   let scrollTargetRaf = 0;
+  let virtualizerWakeRaf = 0;
   let scrollTargetRun = 0;
   let scrollingToTarget: DiffScrollTarget | null = null;
   let restoredScrollScope = "";
@@ -82,6 +88,7 @@
       cancelAnimationFrame(scrollClearRaf);
       cancelAnimationFrame(scrollRestoreRaf);
       cancelAnimationFrame(scrollTargetRaf);
+      cancelAnimationFrame(virtualizerWakeRaf);
       diffStore.clearDiff();
       diffReviewDraft?.clear();
     };
@@ -138,7 +145,33 @@
       scrollRestoreRaf = 0;
       if (diffArea !== area) return;
       area.scrollTop = Math.max(0, restoreTop);
+      wakeDiffVirtualizer();
     });
+  });
+
+  $effect(() => {
+    const area = diffArea;
+    const content = diffContent;
+    if (
+      !area ||
+      !content ||
+      typeof ResizeObserver === "undefined" ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      diffVirtualizer = undefined;
+      return;
+    }
+
+    const virtualizer = new Virtualizer();
+    virtualizer.setup(area, content);
+    diffVirtualizer = virtualizer;
+
+    return () => {
+      virtualizer.cleanUp();
+      if (diffVirtualizer === virtualizer) {
+        diffVirtualizer = undefined;
+      }
+    };
   });
 
   function scrollWithinDiffArea(el: Element, offset = 0): void {
@@ -146,6 +179,7 @@
     const areaRect = diffArea.getBoundingClientRect();
     const elRect = el.getBoundingClientRect();
     diffArea.scrollTop += elRect.top - areaRect.top - offset;
+    wakeDiffVirtualizer();
   }
 
   function diffFileElement(path: string): HTMLElement | null {
@@ -175,6 +209,7 @@
         return false;
       }
       diffArea.scrollTop += elRect.top - areaRect.top;
+      wakeDiffVirtualizer();
     } else {
       return false;
     }
@@ -185,6 +220,25 @@
     // Clear the scrolling flag after the instant scroll so the next user-initiated
     // scroll event resumes active file tracking.
     scrollClearRaf = requestAnimationFrame(() => diffStore.clearScrolling());
+  }
+
+  function cancelPendingProgrammaticScroll(): void {
+    scrollTargetRun += 1;
+    scrollingToTarget = null;
+    diffStore.consumeScrollTarget();
+    diffStore.clearScrolling();
+    cancelAnimationFrame(scrollClearRaf);
+    scrollClearRaf = 0;
+  }
+
+  function cancelProgrammaticScrollIfUserOverrides(): void {
+    if (
+      scrollingToTarget ||
+      normalizeScrollTarget(diffStore.getScrollTarget()) ||
+      diffStore.isScrolling()
+    ) {
+      cancelPendingProgrammaticScroll();
+    }
   }
 
   function queryDiffElement(selector: string): HTMLElement | null {
@@ -234,6 +288,17 @@
       elRect.top < areaRect.bottom;
   }
 
+  function isScrollTargetReady(target: DiffScrollTarget): boolean {
+    if (target.line != null) return true;
+    const el = diffFileElement(target.path);
+    if (!el) return false;
+    if (el.querySelector(".binary-notice, .empty-textual-diff")) return true;
+    const shell = el.querySelector(".pierre-diff-shell");
+    if (shell?.getAttribute("aria-busy") === "true") return false;
+    const host = el.querySelector<HTMLElement>(".pierre-diff");
+    return !host || host.shadowRoot?.querySelector("pre[data-diff]") != null;
+  }
+
   function jumpToDraftComment(comment: DiffReviewDraftComment): void {
     if (!diffArea) return;
     const el = queryDiffElement(
@@ -246,8 +311,22 @@
     const areaRect = diffArea.getBoundingClientRect();
     const elRect = el.getBoundingClientRect();
     diffArea.scrollTop += elRect.top - areaRect.top - 72;
+    wakeDiffVirtualizer();
     el.focus({ preventScroll: true });
     finishProgrammaticScroll();
+  }
+
+  function wakeDiffVirtualizer(): void {
+    const area = diffArea;
+    if (!area) return;
+    area.dispatchEvent(new Event("scroll"));
+    cancelAnimationFrame(virtualizerWakeRaf);
+    virtualizerWakeRaf = requestAnimationFrame(() => {
+      virtualizerWakeRaf = 0;
+      if (diffArea === area) {
+        area.dispatchEvent(new Event("scroll"));
+      }
+    });
   }
 
   // Watch for scroll requests from the sidebar file list (via the store).
@@ -296,7 +375,7 @@
         visibleFrames = 0;
         continue;
       }
-      if (isScrollTargetVisible(target)) {
+      if (isScrollTargetVisible(target) && isScrollTargetReady(target)) {
         if (target.line == null) {
           targetReached = scrollToTarget(target);
           if (!targetReached) {
@@ -378,13 +457,47 @@
     }
   }
 
-  // j/k keyboard navigation between files.
-  function handleKeydown(e: KeyboardEvent): void {
-    if (e.target instanceof HTMLElement) {
-      const tag = e.target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.target.isContentEditable) return;
+  function isTextEntryTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      target.isContentEditable;
+  }
+
+  function pageDiffArea(direction: 1 | -1): void {
+    const area = diffArea;
+    if (!area) return;
+    cancelPendingProgrammaticScroll();
+    const maxTop = Math.max(0, area.scrollHeight - area.clientHeight);
+    const pageSize = Math.max(1, area.clientHeight - 64);
+    area.scrollTop = Math.min(maxTop, Math.max(0, area.scrollTop + pageSize * direction));
+    area.focus({ preventScroll: true });
+    wakeDiffVirtualizer();
+    onScrollTopChange?.(area.scrollTop);
+  }
+
+  function onDiffUserScrollIntent(): void {
+    cancelProgrammaticScrollIfUserOverrides();
+  }
+
+  function handlePageKeydown(e: KeyboardEvent): boolean {
+    if (isTextEntryTarget(e.target)) return false;
+
+    if (e.key === "PageDown" || e.key === "PageUp") {
+      if (e.metaKey || e.ctrlKey || e.altKey || !diff) return false;
+      e.preventDefault();
+      pageDiffArea(e.key === "PageDown" ? 1 : -1);
+      return true;
     }
+    return false;
+  }
+
+  // j/k keyboard navigation between files; PageUp/PageDown page the diff pane.
+  function handleKeydown(e: KeyboardEvent): void {
+    if (handlePageKeydown(e)) return;
+    if (isTextEntryTarget(e.target)) return;
 
     if (e.key === "j" || e.key === "k") {
       if (!diff || navigationFiles.length === 0) return;
@@ -412,10 +525,33 @@
     }
   }
 
+  function handleDiffAreaKeydown(e: KeyboardEvent): void {
+    if (!pageKeyboardActive || keyboardActive) return;
+    handlePageKeydown(e);
+  }
+
   $effect(() => {
     if (!keyboardActive) return;
     window.addEventListener("keydown", handleKeydown);
     return () => window.removeEventListener("keydown", handleKeydown);
+  });
+
+  $effect(() => {
+    const area = diffArea;
+    if (!area) return;
+
+    area.tabIndex = -1;
+    area.addEventListener("wheel", onDiffUserScrollIntent);
+    area.addEventListener("touchstart", onDiffUserScrollIntent);
+    area.addEventListener("pointerdown", onDiffUserScrollIntent);
+    area.addEventListener("keydown", handleDiffAreaKeydown);
+
+    return () => {
+      area.removeEventListener("wheel", onDiffUserScrollIntent);
+      area.removeEventListener("touchstart", onDiffUserScrollIntent);
+      area.removeEventListener("pointerdown", onDiffUserScrollIntent);
+      area.removeEventListener("keydown", handleDiffAreaKeydown);
+    };
   });
 </script>
 
@@ -446,37 +582,42 @@
           class:diff-area--word-wrap={wordWrap}
           bind:this={diffArea}
           onscroll={onDiffScroll}
+          role="region"
+          aria-label="Changed file diffs"
           style:tab-size={tabWidth}
         >
-          {#if visibleFiles.length === 0}
-            <div class="diff-state diff-state--empty">
-              <p class="diff-state-msg">No changed files match this category.</p>
-            </div>
-          {/if}
-          {#each visibleFiles as file (file.path)}
-            <DiffFileComponent
-              {file}
-              {provider}
-              {platformHost}
-              {owner}
-              {name}
-              {repoPath}
-              {number}
-              {richPreviewEnabled}
-              {contextExpansionEnabled}
-              {reviewEnabled}
-              canReplyToThreads={canReplyToThreads && !diff?.stale}
-              {diffHeadSHA}
-              {nativeMultilineRanges}
-              {reviewThreads}
-            />
-          {/each}
-          {#if reviewEnabled && diffReviewDraft}
-            {#if reviewWarning}
-              <div class="review-warning">{reviewWarning}</div>
+          <div class="diff-content" bind:this={diffContent}>
+            {#if visibleFiles.length === 0}
+              <div class="diff-state diff-state--empty">
+                <p class="diff-state-msg">No changed files match this category.</p>
+              </div>
             {/if}
-            <DiffReviewDraftTray onjump={jumpToDraftComment} />
-          {/if}
+            {#each visibleFiles as file (file.path)}
+              <DiffFileComponent
+                {file}
+                {provider}
+                {platformHost}
+                {owner}
+                {name}
+                {repoPath}
+                {number}
+                {richPreviewEnabled}
+                {contextExpansionEnabled}
+                {reviewEnabled}
+                canReplyToThreads={canReplyToThreads && !diff?.stale}
+                {diffHeadSHA}
+                {nativeMultilineRanges}
+                {reviewThreads}
+                virtualizer={diffVirtualizer}
+              />
+            {/each}
+            {#if reviewEnabled && diffReviewDraft}
+              {#if reviewWarning}
+                <div class="review-warning">{reviewWarning}</div>
+              {/if}
+              <DiffReviewDraftTray onjump={jumpToDraftComment} />
+            {/if}
+          </div>
         </div>
       </div>
     {/if}
@@ -527,6 +668,10 @@
   .diff-area {
     flex: 1;
     overflow: auto;
+  }
+
+  .diff-content {
+    min-width: 0;
   }
 
   .diff-state {

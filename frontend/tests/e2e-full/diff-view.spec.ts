@@ -312,6 +312,36 @@ async function pierreDiffCount(file: ReturnType<Page["locator"]>, selector: stri
   }, selector);
 }
 
+async function pierreDiffTexts(file: ReturnType<Page["locator"]>, selector: string) {
+  return await file.locator(".pierre-diff").evaluate((host, selector) => {
+    return Array.from(host.shadowRoot?.querySelectorAll(selector) ?? [])
+      .map((element) => element.textContent?.trim() ?? "");
+  }, selector);
+}
+
+async function pierreVisibleDiffTextStats(
+  file: ReturnType<Page["locator"]>,
+  selector = "[data-content] [data-line-type]",
+) {
+  return await file.locator(".pierre-diff").evaluate((host, selector) => {
+    const rows = Array.from(host.shadowRoot?.querySelectorAll(selector) ?? [])
+      .filter((element): element is HTMLElement => {
+        if (!(element instanceof HTMLElement)) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0
+          && rect.height > 0
+          && rect.bottom > 0
+          && rect.top < window.innerHeight;
+      })
+      .map((element) => element.textContent?.trim() ?? "");
+    return {
+      blank: rows.filter((text) => text.length === 0).length,
+      nonBlank: rows.filter((text) => text.length > 0).length,
+      texts: rows.filter((text) => text.length > 0),
+    };
+  }, selector);
+}
+
 async function expectPierreDiffCount(
   file: ReturnType<Page["locator"]>,
   selector: string,
@@ -354,6 +384,67 @@ async function expectPierreDiffFirstText(
   }).toContain(text);
 }
 
+async function expectPierreDiffVisibleText(
+  file: ReturnType<Page["locator"]>,
+  selector: string,
+  text: string,
+) {
+  await expect.poll(async () => {
+    return await file.locator(".pierre-diff").evaluate((host, { selector, text }) => {
+      return Array.from(host.shadowRoot?.querySelectorAll(selector) ?? [])
+        .some((element) => {
+          if (!(element instanceof HTMLElement)) return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0
+            && rect.height > 0
+            && element.textContent?.includes(text);
+        });
+    }, { selector, text });
+  }).toBe(true);
+}
+
+async function expectVisibleNonBlankRows(
+  file: ReturnType<Page["locator"]>,
+  textFragment: string,
+) {
+  await expect.poll(async () => {
+    const stats = await pierreVisibleDiffTextStats(file);
+    return {
+      blank: stats.blank,
+      hasText: stats.texts.some((text) => text.includes(textFragment)),
+      nonBlankPositive: stats.nonBlank > 0,
+    };
+  }).toEqual({
+    blank: 0,
+    hasText: true,
+    nonBlankPositive: true,
+  });
+}
+
+async function scrollDiffAreaUntilPierreText(
+  page: Page,
+  diffArea: Locator,
+  file: ReturnType<Page["locator"]>,
+  selector: string,
+  text: string,
+  scrollDelta: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const hasText = await file.locator(".pierre-diff").evaluate((host, { selector, text }) => {
+      return Array.from(host.shadowRoot?.querySelectorAll(selector) ?? [])
+        .some((element) => element.textContent?.includes(text));
+    }, { selector, text });
+    if (hasText) return;
+    await diffArea.evaluate((area, delta) => {
+      area.scrollTop += delta;
+      area.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }, scrollDelta);
+    await page.waitForTimeout(50);
+  }
+  const texts = await pierreDiffTexts(file, selector);
+  expect(texts.join("\n")).toContain(text);
+}
+
 async function expectPierreCodeTabSize(
   file: ReturnType<Page["locator"]>,
   tabSize: string,
@@ -366,12 +457,18 @@ async function expectPierreCodeTabSize(
   }).toBe(tabSize);
 }
 
-async function clickPierreContextExpander(file: ReturnType<Page["locator"]>): Promise<void> {
-  const expander = file
-    .locator(".pierre-diff [data-separator][data-expand-index] [data-expand-button]")
-    .first();
+async function clickPierreContextExpander(
+  file: ReturnType<Page["locator"]>,
+  separatorIndex = 0,
+  buttonSelector = "[data-expand-button]",
+): Promise<void> {
+  const separator = file
+    .locator(".pierre-diff [data-separator][data-expand-index]")
+    .filter({ visible: true })
+    .nth(separatorIndex);
+  const expander = separator.locator(buttonSelector).filter({ visible: true }).first();
   await expect(expander).toBeVisible();
-  await expander.click({ modifiers: ["Shift"] });
+  await expander.click();
 }
 
 async function expectPierreDarkBackgroundMatchesAppSurface(
@@ -725,7 +822,7 @@ async function selectPierreReviewLine(
   ].join(",");
   const target = file.locator(`.pierre-diff ${selector}`).first();
   await expect(target).toBeVisible({ timeout: 10_000 });
-  await target.click();
+  await target.locator("[data-middleman-line-comment-button]").click();
 }
 
 // --- Functional tests ---
@@ -916,6 +1013,71 @@ test.describe("diff view", () => {
     await expect.poll(() =>
       mainArea.evaluate((el) => Math.round(el.scrollTop)),
     ).toBe(0);
+  });
+
+  test("sidebar jump to the last file preserves expanded body space above it", async ({ page }) => {
+    await mockDiffApi(page, largeDiff);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await treeFileItem(page, "src/pkg9/file_49.go").click();
+    await expect(page.locator('[data-file-path="src/pkg9/file_49.go"]'))
+      .toBeVisible();
+
+    const earlierFile = page.locator('[data-file-path="src/pkg5/file_25.go"]');
+    await expect(earlierFile.locator(".file-header"))
+      .toHaveAttribute("title", "Collapse file");
+    await expect(earlierFile.locator(".file-content")).toBeAttached();
+    await expect.poll(async () =>
+      earlierFile.locator(".pierre-diff-shell").evaluate((el) =>
+        Math.round(el.getBoundingClientRect().height),
+      ),
+    ).toBeGreaterThan(300);
+  });
+
+  test("manual paging and wheel scrolling override sidebar file jumps", async ({ page }) => {
+    await mockDiffApi(page, largeDiff);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    const diffArea = page.locator(".diff-area");
+
+    await treeFileItem(page, "src/pkg8/file_40.go").click();
+    await expect(page.locator('[data-file-path="src/pkg8/file_40.go"]'))
+      .toBeVisible();
+    const firstJumpTop = await diffArea.evaluate((area) => Math.round(area.scrollTop));
+
+    await page.keyboard.press("PageDown");
+    await expect.poll(async () =>
+      diffArea.evaluate((area) => Math.round(area.scrollTop)),
+    ).toBeGreaterThan(firstJumpTop + 100);
+    await expect(page.locator(".diff-file-tree [data-item-type='file'][aria-selected='true']"))
+      .toBeInViewport();
+    const afterPageDownTop = await diffArea.evaluate((area) => Math.round(area.scrollTop));
+    await page.waitForTimeout(400);
+    await expect.poll(async () =>
+      diffArea.evaluate((area) => Math.round(area.scrollTop)),
+    ).toBeGreaterThan(afterPageDownTop - 10);
+
+    await treeFileItem(page, "src/pkg8/file_41.go").click();
+    await expect(page.locator('[data-file-path="src/pkg8/file_41.go"]'))
+      .toBeVisible();
+    const secondJumpTop = await diffArea.evaluate((area) => Math.round(area.scrollTop));
+
+    await diffArea.hover();
+    await page.mouse.wheel(0, 900);
+    await expect.poll(async () =>
+      diffArea.evaluate((area) => Math.round(area.scrollTop)),
+    ).toBeGreaterThan(secondJumpTop + 100);
+    await expect(page.locator(".diff-file-tree [data-item-type='file'][aria-selected='true']"))
+      .toBeInViewport();
+    const afterWheelTop = await diffArea.evaluate((area) => Math.round(area.scrollTop));
+    await page.waitForTimeout(400);
+    await expect.poll(async () =>
+      diffArea.evaluate((area) => Math.round(area.scrollTop)),
+    ).toBeGreaterThan(afterWheelTop - 10);
   });
 
   test("deleted file name has strikethrough in sidebar", async ({ page }) => {
@@ -1389,6 +1551,201 @@ test.describe("diff view", () => {
     await expectPierreDiffFirstText(file, diffHunkSeparatorsSelector, "999999 unmodified lines");
     await expectPierreDiffCount(file, "[data-expand-button]", 0);
     await expect.poll(() => previewRequests).toBe(0);
+  });
+
+  test("context expansion keeps earlier virtualized file rows rendered", async ({ page }) => {
+    await page.setViewportSize({ width: 1852, height: 918 });
+
+    const schemaLines: DiffLine[] = Array.from({ length: 140 }, (_, index) => ({
+      type: "context" as const,
+      content: `schema response row ${index + 1}`,
+      old_num: index + 1,
+      new_num: index + 1,
+    }));
+    schemaLines.splice(118, 0, {
+      type: "add",
+      content: "schema inserted response row",
+      new_num: 119,
+    });
+
+    const oldDetailText = Array.from({ length: 1_000 }, (_, index) =>
+      `detail filler row ${index + 1}`
+    );
+    oldDetailText[909] = "function onActionMenuKeydown(e: KeyboardEvent): void {";
+    oldDetailText[910] = "  if (actionMenuOpen && e.key === \"Escape\") {";
+    oldDetailText[911] = "    actionMenuOpen = false;";
+    oldDetailText[948] = "\"/workspaces\",";
+    oldDetailText[949] = "{";
+    oldDetailText[950] = "  body: {";
+    oldDetailText[951] = "    platform_host: detail.platform_host,";
+    oldDetailText[952] = "    owner: detail.repo_owner,";
+    oldDetailText[953] = "    name: detail.repo_name,";
+    const newDetailText = [...oldDetailText];
+    newDetailText.splice(951, 0, "    provider,");
+
+    const expandableDiff = withServerDiffData({
+      stale: false,
+      whitespace_only_count: 0,
+      files: [
+        {
+          path: "src/api/generated/schema.ts",
+          old_path: "src/api/generated/schema.ts",
+          status: "modified",
+          is_binary: false,
+          is_whitespace_only: false,
+          additions: 1,
+          deletions: 0,
+          hunks: [{
+            old_start: 1,
+            old_count: 140,
+            new_start: 1,
+            new_count: 141,
+            lines: schemaLines,
+          }],
+        },
+        {
+          path: "src/api/provider-routes.ts",
+          old_path: "src/api/provider-routes.ts",
+          status: "modified",
+          is_binary: false,
+          is_whitespace_only: false,
+          additions: 1,
+          deletions: 0,
+          hunks: [{
+            old_start: 1,
+            old_count: 4,
+            new_start: 1,
+            new_count: 5,
+            lines: [
+              { type: "context", content: "export const routes = [", old_num: 1, new_num: 1 },
+              { type: "context", content: "  \"/commits/{sha}/diff\",", old_num: 2, new_num: 2 },
+              { type: "add", content: "  \"/worktree-base\",", new_num: 3 },
+              { type: "context", content: "  \"/resolve/{number}\",", old_num: 3, new_num: 4 },
+              { type: "context", content: "];", old_num: 4, new_num: 5 },
+            ],
+          }],
+        },
+        {
+          path: "src/components/detail/PullDetail.svelte",
+          old_path: "src/components/detail/PullDetail.svelte",
+          status: "modified",
+          is_binary: false,
+          is_whitespace_only: false,
+          additions: 1,
+          deletions: 0,
+          hunks: [{
+            old_start: 949,
+            old_count: 6,
+            new_start: 949,
+            new_count: 7,
+            lines: [
+              { type: "context", content: "\"/workspaces\",", old_num: 949, new_num: 949 },
+              { type: "context", content: "{", old_num: 950, new_num: 950 },
+              { type: "context", content: "  body: {", old_num: 951, new_num: 951 },
+              { type: "add", content: "    provider,", new_num: 952 },
+              {
+                type: "context",
+                content: "    platform_host: detail.platform_host,",
+                old_num: 952,
+                new_num: 953,
+              },
+              {
+                type: "context",
+                content: "    owner: detail.repo_owner,",
+                old_num: 953,
+                new_num: 954,
+              },
+              {
+                type: "context",
+                content: "    name: detail.repo_name,",
+                old_num: 954,
+                new_num: 955,
+              },
+            ],
+          }],
+        },
+      ],
+    });
+
+    await mockDiffApi(page, expandableDiff);
+    const previewSides: string[] = [];
+    await page.route("**/api/v1/pulls/github/acme/widgets/1/file-preview**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("path") !== "src/components/detail/PullDetail.svelte") {
+        await route.fulfill({ status: 404, body: JSON.stringify({ detail: "not found" }) });
+        return;
+      }
+      const side = url.searchParams.get("side");
+      previewSides.push(side ?? "");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          path: "src/components/detail/PullDetail.svelte",
+          media_type: "text/plain; charset=utf-8",
+          encoding: "base64",
+          content: Buffer.from(
+            side === "old" ? oldDetailText.join("\n") : newDetailText.join("\n"),
+          ).toString("base64"),
+        }),
+      });
+    });
+
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    const diffArea = page.locator(".diff-area");
+    const schemaFile = page.locator('[data-file-path="src/api/generated/schema.ts"]');
+    const detailFile = page.locator('[data-file-path="src/components/detail/PullDetail.svelte"]');
+
+    await treeFileItem(page, "src/components/detail/PullDetail.svelte").click();
+    await expect(detailFile).toBeInViewport();
+    await diffArea.evaluate((area) => {
+      area.scrollTop = Math.max(0, area.scrollTop - 220);
+      area.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    await expect.poll(async () =>
+      detailFile.evaluate((detail) => {
+        const rect = detail.getBoundingClientRect();
+        return rect.bottom > 0 && rect.top < window.innerHeight;
+      })
+    ).toBe(true);
+    await expectPierreDiffCountAtLeast(detailFile, "[data-line-type]", 1);
+    await expectPierreDiffCountAtLeast(detailFile, "[data-expand-button]", 1);
+    await expectVisibleNonBlankRows(schemaFile, "schema response row");
+
+    const beforeExpansionScrollTop = await diffArea.evaluate((area) => area.scrollTop);
+    await clickPierreContextExpander(detailFile, 0, "[data-expand-down]");
+    await expect.poll(() => [...new Set(previewSides)].sort())
+      .toEqual(["new", "old"]);
+    await expectVisibleNonBlankRows(schemaFile, "schema response row");
+    await scrollDiffAreaUntilPierreText(
+      page,
+      diffArea,
+      detailFile,
+      "[data-content] [data-line-type='context-expanded']",
+      "function onActionMenuKeydown(e: KeyboardEvent): void {",
+      90,
+    );
+
+    await diffArea.evaluate((area, scrollTop) => {
+      area.scrollTop = scrollTop;
+      area.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }, beforeExpansionScrollTop);
+    await expectVisibleNonBlankRows(schemaFile, "schema response row");
+    await clickPierreContextExpander(detailFile);
+    await expectVisibleNonBlankRows(schemaFile, "schema response row");
+    await scrollDiffAreaUntilPierreText(
+      page,
+      diffArea,
+      detailFile,
+      "[data-content] [data-line-type='context-expanded']",
+      "detail filler row 870",
+      90,
+    );
+    await expectVisibleNonBlankRows(schemaFile, "schema response row");
   });
 
   test("deleted file path has strikethrough styling in diff header", async ({ page }) => {
@@ -2096,8 +2453,44 @@ test.describe("diff view (git-backed)", () => {
       await expect.poll(() =>
         pierreDiffCount(handlerFile, "[data-line-type='context-expanded']")
       ).toBeGreaterThan(expandedContextRowsBefore);
+      await expect.poll(async () => {
+        const texts = await pierreDiffTexts(
+          handlerFile,
+          "[data-content] [data-line-type='context-expanded']",
+        );
+        return texts.filter((text) => text.length > 0).length;
+      }).toBeGreaterThan(0);
+      await expectPierreDiffVisibleText(
+        handlerFile,
+        "[data-content] [data-line-type='context-expanded']",
+        "// line 1",
+      );
       await expect.poll(() => [...new Set(previewSides)].sort())
         .toEqual(["new", "old"]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("inline review composer only opens from the gutter comment button", async ({ page }) => {
+    const server = await startIsolatedE2EServer();
+    try {
+      const baseURL = server.info.base_url;
+      await page.goto(`${baseURL}/pulls/github/acme/widgets/1/files`);
+      await waitForDiffLoaded(page);
+      await waitForSidebarFilesLoaded(page);
+
+      const cacheFile = page.locator('[data-file-path="internal/cache.go"]');
+      await cacheFile.scrollIntoViewIfNeeded();
+      const lineContent = cacheFile
+        .locator('.pierre-diff [data-line][data-diff-new-line="1"]')
+        .first();
+      await expect(lineContent).toBeVisible();
+      await lineContent.click();
+      await expect(page.getByPlaceholder("Leave a comment")).toHaveCount(0);
+
+      await selectPierreReviewLine(cacheFile, 1, "right");
+      await expect(page.getByPlaceholder("Leave a comment")).toBeVisible();
     } finally {
       await server.stop();
     }
@@ -2236,6 +2629,7 @@ test.describe("diff view (git-backed)", () => {
     const configFile = page.locator(
       '[data-file-path="config.yaml"]',
     );
+    await configFile.scrollIntoViewIfNeeded();
     await expect(configFile).toBeVisible();
 
     // Only deletion lines -- no additions or context.
