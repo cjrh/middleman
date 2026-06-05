@@ -976,6 +976,18 @@ func withSeedPRTitle(title string) seedPROpt {
 	return func(pr *db.MergeRequest) { pr.Title = title }
 }
 
+func withSeedPRLifecycle(
+	state db.MergeRequestState,
+	mergedAt *time.Time,
+	closedAt *time.Time,
+) seedPROpt {
+	return func(pr *db.MergeRequest) {
+		pr.State = state
+		pr.MergedAt = mergedAt
+		pr.ClosedAt = closedAt
+	}
+}
+
 func withSeedPRCI(status, checksJSON string) seedPROpt {
 	return func(pr *db.MergeRequest) {
 		pr.CIStatus = status
@@ -1787,6 +1799,155 @@ func TestAPIGetPullIsDBOnly(t *testing.T) {
 	// returns early without checking workflows.
 	require.NotNil(resp.JSON200.WorkflowApproval)
 	assert.False(resp.JSON200.WorkflowApproval.Checked)
+}
+
+func TestAPIGetPullIncludesLifecycleTimelineEvents(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	srv, database := setupTestServer(t)
+	client := setupTestClient(t, srv)
+	ctx := t.Context()
+	createdAt := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	mergedAt := createdAt.Add(2 * time.Hour)
+	closedAt := createdAt.Add(3 * time.Hour)
+	reopenedAt := createdAt.Add(4 * time.Hour)
+	previousClosedAt := createdAt.Add(time.Hour)
+
+	seedPR(t, database, "acme", "widget", 1,
+		withSeedPRTimes(createdAt, mergedAt, mergedAt),
+		withSeedPRLifecycle(db.MergeRequestStateMerged, &mergedAt, &mergedAt),
+	)
+	seedPR(t, database, "acme", "widget", 2,
+		withSeedPRTimes(createdAt, closedAt, closedAt),
+		withSeedPRLifecycle(db.MergeRequestStateClosed, nil, &closedAt),
+	)
+	seedPR(t, database, "acme", "widget", 3,
+		withSeedPRTimes(createdAt, reopenedAt, reopenedAt),
+		withSeedPRLifecycle(db.MergeRequestStateOpen, nil, &previousClosedAt),
+	)
+	duplicateMRID := seedPR(t, database, "acme", "widget", 4,
+		withSeedPRTimes(createdAt, mergedAt, mergedAt),
+		withSeedPRLifecycle(db.MergeRequestStateMerged, &mergedAt, &mergedAt),
+	)
+	repeatedClosedMRID := seedPR(t, database, "acme", "widget", 5,
+		withSeedPRTimes(createdAt, closedAt, closedAt),
+		withSeedPRLifecycle(db.MergeRequestStateClosed, nil, &closedAt),
+	)
+	repeatedReopenedMRID := seedPR(t, database, "acme", "widget", 6,
+		withSeedPRTimes(createdAt, reopenedAt, reopenedAt),
+		withSeedPRLifecycle(db.MergeRequestStateOpen, nil, &previousClosedAt),
+	)
+	duplicateReopenedMRID := seedPR(t, database, "acme", "widget", 7,
+		withSeedPRTimes(createdAt, reopenedAt.Add(time.Hour), reopenedAt.Add(time.Hour)),
+		withSeedPRLifecycle(db.MergeRequestStateOpen, nil, &previousClosedAt),
+	)
+	require.NoError(database.UpsertMREvents(ctx, []db.MREvent{{
+		MergeRequestID: duplicateMRID,
+		EventType:      "merged",
+		Author:         "maintainer",
+		Summary:        "merged by provider",
+		CreatedAt:      mergedAt,
+		DedupeKey:      "provider-merged",
+	}, {
+		MergeRequestID: repeatedClosedMRID,
+		EventType:      "closed",
+		Author:         "maintainer",
+		Summary:        "previously closed by provider",
+		CreatedAt:      previousClosedAt,
+		DedupeKey:      "provider-closed",
+	}, {
+		MergeRequestID: repeatedReopenedMRID,
+		EventType:      "reopened",
+		Author:         "maintainer",
+		Summary:        "previously reopened by provider",
+		CreatedAt:      previousClosedAt.Add(-30 * time.Minute),
+		DedupeKey:      "provider-reopened",
+	}, {
+		MergeRequestID: duplicateReopenedMRID,
+		EventType:      "reopened",
+		Author:         "maintainer",
+		Summary:        "reopened by provider",
+		CreatedAt:      previousClosedAt.Add(30 * time.Minute),
+		DedupeKey:      "provider-current-reopened",
+	}}))
+
+	mergedResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 1)
+	require.NoError(err)
+	require.Equal(http.StatusOK, mergedResp.StatusCode())
+	require.NotNil(mergedResp.JSON200)
+	require.NotNil(mergedResp.JSON200.Events)
+	require.Len(*mergedResp.JSON200.Events, 1)
+	assert.Equal("merged", (*mergedResp.JSON200.Events)[0].EventType)
+	assert.Equal("merged this", (*mergedResp.JSON200.Events)[0].Summary)
+	assert.Empty((*mergedResp.JSON200.Events)[0].Author)
+	assert.Equal(int64(-1), (*mergedResp.JSON200.Events)[0].ID)
+	assert.True((*mergedResp.JSON200.Events)[0].CreatedAt.Equal(mergedAt))
+
+	closedResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 2)
+	require.NoError(err)
+	require.Equal(http.StatusOK, closedResp.StatusCode())
+	require.NotNil(closedResp.JSON200)
+	require.NotNil(closedResp.JSON200.Events)
+	require.Len(*closedResp.JSON200.Events, 1)
+	assert.Equal("closed", (*closedResp.JSON200.Events)[0].EventType)
+	assert.Equal("closed this", (*closedResp.JSON200.Events)[0].Summary)
+	assert.Empty((*closedResp.JSON200.Events)[0].Author)
+	assert.Equal(int64(-2), (*closedResp.JSON200.Events)[0].ID)
+	assert.True((*closedResp.JSON200.Events)[0].CreatedAt.Equal(closedAt))
+
+	reopenedResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 3)
+	require.NoError(err)
+	require.Equal(http.StatusOK, reopenedResp.StatusCode())
+	require.NotNil(reopenedResp.JSON200)
+	require.NotNil(reopenedResp.JSON200.Events)
+	require.Len(*reopenedResp.JSON200.Events, 1)
+	assert.Equal("reopened", (*reopenedResp.JSON200.Events)[0].EventType)
+	assert.Equal("reopened this", (*reopenedResp.JSON200.Events)[0].Summary)
+	assert.Empty((*reopenedResp.JSON200.Events)[0].Author)
+	assert.Equal(int64(-3), (*reopenedResp.JSON200.Events)[0].ID)
+	assert.True((*reopenedResp.JSON200.Events)[0].CreatedAt.Equal(reopenedAt))
+
+	duplicateResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 4)
+	require.NoError(err)
+	require.Equal(http.StatusOK, duplicateResp.StatusCode())
+	require.NotNil(duplicateResp.JSON200)
+	require.NotNil(duplicateResp.JSON200.Events)
+	require.Len(*duplicateResp.JSON200.Events, 1)
+	assert.Equal("merged", (*duplicateResp.JSON200.Events)[0].EventType)
+	assert.Equal("merged by provider", (*duplicateResp.JSON200.Events)[0].Summary)
+	assert.NotEqual(int64(-1), (*duplicateResp.JSON200.Events)[0].ID)
+
+	repeatedClosedResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 5)
+	require.NoError(err)
+	require.Equal(http.StatusOK, repeatedClosedResp.StatusCode())
+	require.NotNil(repeatedClosedResp.JSON200)
+	require.NotNil(repeatedClosedResp.JSON200.Events)
+	require.Len(*repeatedClosedResp.JSON200.Events, 2)
+	assert.Equal("closed this", (*repeatedClosedResp.JSON200.Events)[0].Summary)
+	assert.True((*repeatedClosedResp.JSON200.Events)[0].CreatedAt.Equal(closedAt))
+	assert.Equal("previously closed by provider", (*repeatedClosedResp.JSON200.Events)[1].Summary)
+	assert.True((*repeatedClosedResp.JSON200.Events)[1].CreatedAt.Equal(previousClosedAt))
+
+	repeatedReopenedResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 6)
+	require.NoError(err)
+	require.Equal(http.StatusOK, repeatedReopenedResp.StatusCode())
+	require.NotNil(repeatedReopenedResp.JSON200)
+	require.NotNil(repeatedReopenedResp.JSON200.Events)
+	require.Len(*repeatedReopenedResp.JSON200.Events, 2)
+	assert.Equal("reopened this", (*repeatedReopenedResp.JSON200.Events)[0].Summary)
+	assert.True((*repeatedReopenedResp.JSON200.Events)[0].CreatedAt.Equal(reopenedAt))
+	assert.Equal("previously reopened by provider", (*repeatedReopenedResp.JSON200.Events)[1].Summary)
+	assert.True((*repeatedReopenedResp.JSON200.Events)[1].CreatedAt.Equal(previousClosedAt.Add(-30 * time.Minute)))
+
+	duplicateReopenedResp, err := client.HTTP.GetPullWithResponse(ctx, "gh", "acme", "widget", 7)
+	require.NoError(err)
+	require.Equal(http.StatusOK, duplicateReopenedResp.StatusCode())
+	require.NotNil(duplicateReopenedResp.JSON200)
+	require.NotNil(duplicateReopenedResp.JSON200.Events)
+	require.Len(*duplicateReopenedResp.JSON200.Events, 1)
+	assert.Equal("reopened", (*duplicateReopenedResp.JSON200.Events)[0].EventType)
+	assert.Equal("reopened by provider", (*duplicateReopenedResp.JSON200.Events)[0].Summary)
+	assert.NotEqual(int64(-3), (*duplicateReopenedResp.JSON200.Events)[0].ID)
 }
 
 func TestAPIGetPullIncludesDeletedCommentTimelineEvent(t *testing.T) {

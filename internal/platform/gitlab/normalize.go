@@ -309,7 +309,14 @@ func NormalizeMergeRequestDiscussions(
 			continue
 		}
 		for _, note := range discussion.Notes {
-			if note == nil || note.System {
+			if note == nil {
+				continue
+			}
+			if note.System {
+				event, ok := normalizeMergeRequestSystemNote(repo, mrNumber, note)
+				if ok {
+					events = append(events, event)
+				}
 				continue
 			}
 			events = append(events, platform.MergeRequestEvent{
@@ -420,7 +427,10 @@ func normalizeMergeRequestSystemNote(
 ) (platform.MergeRequestEvent, bool) {
 	eventType, ok := gitLabAssignmentEventType(note.Body)
 	if !ok {
-		return platform.MergeRequestEvent{}, false
+		eventType, ok = gitLabLifecycleEventType(note.Body)
+		if !ok {
+			return platform.MergeRequestEvent{}, false
+		}
 	}
 	externalID := strconv.FormatInt(note.ID, 10)
 	return platform.MergeRequestEvent{
@@ -465,6 +475,20 @@ func gitLabAssignmentEventType(body string) (string, bool) {
 		return "assigned", true
 	case strings.HasPrefix(normalized, "unassigned"):
 		return "unassigned", true
+	default:
+		return "", false
+	}
+}
+
+func gitLabLifecycleEventType(body string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(body))
+	switch {
+	case strings.HasPrefix(normalized, "merged"):
+		return "merged", true
+	case strings.HasPrefix(normalized, "closed"):
+		return "closed", true
+	case strings.HasPrefix(normalized, "reopened"):
+		return "reopened", true
 	default:
 		return "", false
 	}

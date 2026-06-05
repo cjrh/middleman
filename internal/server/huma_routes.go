@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1173,6 +1174,7 @@ func (s *Server) buildPullDetailResponse(
 	if events == nil {
 		events = []db.MREvent{}
 	}
+	events = withSyntheticMRLifecycleEvents(*mr, events)
 	eventResponses, err := s.mergeRequestEventResponses(ctx, mr.ID, events)
 	if err != nil {
 		return mergeRequestDetailResponse{}, huma.Error500InternalServerError(
@@ -1238,6 +1240,72 @@ func (s *Server) buildPullDetailResponse(
 	}
 
 	return resp, nil
+}
+
+func withSyntheticMRLifecycleEvents(mr db.MergeRequest, events []db.MREvent) []db.MREvent {
+	hasLifecycleEvent := func(eventType string, createdAt time.Time) bool {
+		createdAt = createdAt.UTC()
+		for _, event := range events {
+			if event.EventType == eventType && event.CreatedAt.UTC().Equal(createdAt) {
+				return true
+			}
+		}
+		return false
+	}
+	hasReopenedEventAfterClose := func(closedAt time.Time) bool {
+		closedAt = closedAt.UTC()
+		for _, event := range events {
+			if event.EventType != "reopened" {
+				continue
+			}
+			eventAt := event.CreatedAt.UTC()
+			if eventAt.Equal(closedAt) || eventAt.After(closedAt) {
+				return true
+			}
+		}
+		return false
+	}
+
+	out := append([]db.MREvent{}, events...)
+	switch mr.State {
+	case db.MergeRequestStateMerged:
+		if mr.MergedAt != nil && !hasLifecycleEvent("merged", *mr.MergedAt) {
+			out = append(out, syntheticMRLifecycleEvent(mr, -1, "merged", "merged this", *mr.MergedAt))
+		}
+	case db.MergeRequestStateClosed:
+		if mr.ClosedAt != nil && !hasLifecycleEvent("closed", *mr.ClosedAt) {
+			out = append(out, syntheticMRLifecycleEvent(mr, -2, "closed", "closed this", *mr.ClosedAt))
+		}
+	case db.MergeRequestStateOpen:
+		if mr.ClosedAt != nil && !hasReopenedEventAfterClose(*mr.ClosedAt) {
+			out = append(out, syntheticMRLifecycleEvent(mr, -3, "reopened", "reopened this", mr.UpdatedAt))
+		}
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	return out
+}
+
+func syntheticMRLifecycleEvent(
+	mr db.MergeRequest,
+	id int64,
+	eventType string,
+	summary string,
+	createdAt time.Time,
+) db.MREvent {
+	return db.MREvent{
+		ID:             id,
+		MergeRequestID: mr.ID,
+		EventType:      eventType,
+		Summary:        summary,
+		CreatedAt:      createdAt.UTC(),
+		DedupeKey:      "synthetic:mr:lifecycle:" + eventType,
+	}
 }
 
 // diffWarnings returns warnings inferred from the persisted PR row. The
