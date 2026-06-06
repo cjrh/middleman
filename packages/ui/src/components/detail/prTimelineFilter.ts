@@ -9,11 +9,7 @@ export interface PRTimelineFilterState {
   hideBots: boolean;
 }
 
-export type PRTimelineEventBucket =
-  | "messages"
-  | "commitDetails"
-  | "events"
-  | "forcePushes";
+export type PRTimelineEventBucket = "messages" | "commitDetails" | "events" | "forcePushes";
 
 export const PR_TIMELINE_FILTER_STORAGE_KEY = "middleman-pr-timeline-filter";
 
@@ -39,16 +35,13 @@ function eventSortValue(event: PREvent): number {
 }
 
 function isEarlierEvent(a: PREvent, b: PREvent): boolean {
-  return eventSortValue(a) < eventSortValue(b) ||
-    (eventSortValue(a) === eventSortValue(b) && a.ID < b.ID);
+  return eventSortValue(a) < eventSortValue(b) || (eventSortValue(a) === eventSortValue(b) && a.ID < b.ID);
 }
 
 function reviewThreadID(event: PREvent): string | null {
   if (!("diff_thread" in event)) return null;
   const thread = event.diff_thread as { id?: unknown } | undefined;
-  return typeof thread?.id === "string" && thread.id.length > 0
-    ? thread.id
-    : null;
+  return typeof thread?.id === "string" && thread.id.length > 0 ? thread.id : null;
 }
 
 function timelineThreadID(event: PREvent): string | null {
@@ -76,35 +69,15 @@ function booleanOrDefault(value: unknown, fallback: boolean): boolean {
 
 function normalizeFilter(value: unknown): PRTimelineFilterState {
   const persisted =
-    value !== null && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
+    value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
   return {
-    showMessages: booleanOrDefault(
-      persisted.showMessages,
-      DEFAULT_PR_TIMELINE_FILTER.showMessages,
-    ),
-    showCommitDetails: booleanOrDefault(
-      persisted.showCommitDetails,
-      DEFAULT_PR_TIMELINE_FILTER.showCommitDetails,
-    ),
-    showReplies: booleanOrDefault(
-      persisted.showReplies,
-      DEFAULT_PR_TIMELINE_FILTER.showReplies,
-    ),
-    showEvents: booleanOrDefault(
-      persisted.showEvents,
-      DEFAULT_PR_TIMELINE_FILTER.showEvents,
-    ),
-    showForcePushes: booleanOrDefault(
-      persisted.showForcePushes,
-      DEFAULT_PR_TIMELINE_FILTER.showForcePushes,
-    ),
-    hideBots: booleanOrDefault(
-      persisted.hideBots,
-      DEFAULT_PR_TIMELINE_FILTER.hideBots,
-    ),
+    showMessages: booleanOrDefault(persisted.showMessages, DEFAULT_PR_TIMELINE_FILTER.showMessages),
+    showCommitDetails: booleanOrDefault(persisted.showCommitDetails, DEFAULT_PR_TIMELINE_FILTER.showCommitDetails),
+    showReplies: booleanOrDefault(persisted.showReplies, DEFAULT_PR_TIMELINE_FILTER.showReplies),
+    showEvents: booleanOrDefault(persisted.showEvents, DEFAULT_PR_TIMELINE_FILTER.showEvents),
+    showForcePushes: booleanOrDefault(persisted.showForcePushes, DEFAULT_PR_TIMELINE_FILTER.showForcePushes),
+    hideBots: booleanOrDefault(persisted.hideBots, DEFAULT_PR_TIMELINE_FILTER.hideBots),
   };
 }
 
@@ -120,26 +93,17 @@ export function loadPRTimelineFilter(): PRTimelineFilterState {
 
 export function savePRTimelineFilter(filter: PRTimelineFilterState): void {
   try {
-    localStorage.setItem(
-      PR_TIMELINE_FILTER_STORAGE_KEY,
-      JSON.stringify(filter),
-    );
+    localStorage.setItem(PR_TIMELINE_FILTER_STORAGE_KEY, JSON.stringify(filter));
   } catch {
     // localStorage can be unavailable in private browsing or embedded contexts.
   }
 }
 
-export function filterPREvents(
-  events: PREvent[],
-  filter: PRTimelineFilterState,
-): PREvent[] {
+export function filterPREvents(events: PREvent[], filter: PRTimelineFilterState): PREvent[] {
   const threadRoots = new Map<string, PREvent>();
   for (const event of events) {
     const threadID = timelineThreadID(event);
-    if (
-      !threadID ||
-      !["issue_comment", "review", "review_comment"].includes(event.EventType)
-    ) {
+    if (!threadID || !["issue_comment", "review", "review_comment"].includes(event.EventType)) {
       continue;
     }
     const currentRoot = threadRoots.get(threadID);
@@ -151,11 +115,7 @@ export function filterPREvents(
   return events.filter((event) => {
     const threadID = timelineThreadID(event);
     if (filter.hideBots && isBotAuthor(event.Author)) return false;
-    if (
-      !filter.showReplies &&
-      threadID &&
-      threadRoots.get(threadID)?.ID !== event.ID
-    ) {
+    if (!filter.showReplies && threadID && threadRoots.get(threadID)?.ID !== event.ID) {
       return false;
     }
     switch (timelineEventBucket(event)) {
@@ -171,9 +131,7 @@ export function filterPREvents(
   });
 }
 
-export function activePRTimelineFilterCount(
-  filter: PRTimelineFilterState,
-): number {
+export function activePRTimelineFilterCount(filter: PRTimelineFilterState): number {
   return [
     !filter.showMessages,
     !filter.showReplies,

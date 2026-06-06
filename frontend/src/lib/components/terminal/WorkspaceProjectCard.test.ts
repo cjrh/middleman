@@ -1,26 +1,16 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import WorkspaceProjectCard from "./WorkspaceProjectCard.svelte";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- test helper needs dynamic window access
 const win = window as any;
 
 const projectGet = vi.fn();
 const worktreesGet = vi.fn();
 
 vi.mock("../../api/runtime.ts", () => ({
-  apiErrorMessage: (
-    error: { detail?: string; title?: string } | undefined,
-    fallback: string,
-  ) => error?.detail ?? error?.title ?? fallback,
+  apiErrorMessage: (error: { detail?: string; title?: string } | undefined, fallback: string) =>
+    error?.detail ?? error?.title ?? fallback,
   client: {
     GET: vi.fn((path: string, options) => {
       if (path === "/projects/{project_id}") {
@@ -60,7 +50,12 @@ function setProjectResponse(project: ProjectFixture | { error: string }): void {
 }
 
 function setWorktreesResponse(
-  worktrees: Array<{ id: string; project_id: string; branch: string; path: string }>,
+  worktrees: Array<{
+    id: string;
+    project_id: string;
+    branch: string;
+    path: string;
+  }>,
 ): void {
   worktreesGet.mockReset();
   worktreesGet.mockResolvedValue({
@@ -94,11 +89,11 @@ describe("WorkspaceProjectCard", () => {
     expect(await screen.findByText("myrepo")).toBeTruthy();
     expect(screen.getByText("/Users/wesm/code/myrepo")).toBeTruthy();
     expect(screen.getByText("main")).toBeTruthy();
+    expect(screen.getByText("This project has no worktrees yet.")).toBeTruthy();
     expect(
-      screen.getByText("This project has no worktrees yet."),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Create your first worktree/i }),
+      screen.getByRole("button", {
+        name: /Create your first worktree/i,
+      }),
     ).toBeTruthy();
   });
 
@@ -131,9 +126,7 @@ describe("WorkspaceProjectCard", () => {
 
     render(WorkspaceProjectCard, { props: { projectId: "prj_1" } });
 
-    expect(
-      await screen.findByText("gitlab.example.com / group/subgroup / project"),
-    ).toBeTruthy();
+    expect(await screen.findByText("gitlab.example.com / group/subgroup / project")).toBeTruthy();
   });
 
   it("renders provider brand icon beside platform identity when platform is present", async () => {
@@ -152,9 +145,7 @@ describe("WorkspaceProjectCard", () => {
 
     render(WorkspaceProjectCard, { props: { projectId: "prj_1" } });
 
-    expect(
-      await screen.findByRole("img", { name: "GitLab" }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "GitLab" })).toBeTruthy();
   });
 
   it("renders existing worktrees and switches the CTA label", async () => {
@@ -174,12 +165,8 @@ describe("WorkspaceProjectCard", () => {
 
     render(WorkspaceProjectCard, { props: { projectId: "prj_1" } });
     await screen.findByText("feature-x");
-    expect(
-      screen.getByText("/tmp/myrepo-worktrees/feature-x"),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Create another worktree/i }),
-    ).toBeTruthy();
+    expect(screen.getByText("/tmp/myrepo-worktrees/feature-x")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Create another worktree/i })).toBeTruthy();
   });
 
   it("renders an error and a retry button when the project fetch fails", async () => {
@@ -215,7 +202,9 @@ describe("WorkspaceProjectCard", () => {
     await screen.findByText("myrepo");
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /Create your first worktree/i }),
+      screen.getByRole("button", {
+        name: /Create your first worktree/i,
+      }),
     );
     expect(newWorktreeHandler).toHaveBeenCalledWith({
       surface: "project-card",
@@ -251,11 +240,11 @@ describe("WorkspaceProjectCard", () => {
     render(WorkspaceProjectCard, { props: { projectId: "prj_1" } });
     await screen.findByText("myrepo");
     await fireEvent.click(
-      screen.getByRole("button", { name: /Create your first worktree/i }),
+      screen.getByRole("button", {
+        name: /Create your first worktree/i,
+      }),
     );
-    expect(
-      await screen.findByText("user cancelled the sheet"),
-    ).toBeTruthy();
+    expect(await screen.findByText("user cancelled the sheet")).toBeTruthy();
   });
 
   it("renders an upgrade-host hint when the new-worktree action is missing", async () => {
@@ -272,10 +261,10 @@ describe("WorkspaceProjectCard", () => {
     render(WorkspaceProjectCard, { props: { projectId: "prj_1" } });
     await screen.findByText("myrepo");
     await fireEvent.click(
-      screen.getByRole("button", { name: /Create your first worktree/i }),
+      screen.getByRole("button", {
+        name: /Create your first worktree/i,
+      }),
     );
-    expect(
-      await screen.findByText(/not available in this build/i),
-    ).toBeTruthy();
+    expect(await screen.findByText(/not available in this build/i)).toBeTruthy();
   });
 });

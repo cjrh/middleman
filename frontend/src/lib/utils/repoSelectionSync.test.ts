@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { globalRepoForSelectedRoute } from "./repoSelectionSync.js";
 import type { Route } from "../stores/router.svelte.ts";
 
@@ -23,20 +23,19 @@ const issueSelected = {
 describe("globalRepoForSelectedRoute", () => {
   it("returns platformHost/repoPath for a pulls route with a selected PR", () => {
     const route: Route = {
-      page: "pulls", view: "list", selected: prSelected,
+      page: "pulls",
+      view: "list",
+      selected: prSelected,
     };
-    expect(globalRepoForSelectedRoute(route)).toBe(
-      "github.com/acme/tools",
-    );
+    expect(globalRepoForSelectedRoute(route)).toBe("github.com/acme/tools");
   });
 
   it("returns platformHost/repoPath for an issues route with a selected issue", () => {
     const route: Route = {
-      page: "issues", selected: issueSelected,
+      page: "issues",
+      selected: issueSelected,
     };
-    expect(globalRepoForSelectedRoute(route)).toBe(
-      "gitlab.example.com/team/infra",
-    );
+    expect(globalRepoForSelectedRoute(route)).toBe("gitlab.example.com/team/infra");
   });
 
   it("returns platformHost/repoPath for a focus PR route", () => {
@@ -50,9 +49,7 @@ describe("globalRepoForSelectedRoute", () => {
       repoPath: "acme/tools",
       number: 42,
     };
-    expect(globalRepoForSelectedRoute(route)).toBe(
-      "github.com/acme/tools",
-    );
+    expect(globalRepoForSelectedRoute(route)).toBe("github.com/acme/tools");
   });
 
   it("returns platformHost/repoPath for a focus issue route", () => {
@@ -66,9 +63,7 @@ describe("globalRepoForSelectedRoute", () => {
       repoPath: "team/infra",
       number: 7,
     };
-    expect(globalRepoForSelectedRoute(route)).toBe(
-      "gitlab.example.com/team/infra",
-    );
+    expect(globalRepoForSelectedRoute(route)).toBe("gitlab.example.com/team/infra");
   });
 
   it("keeps nested repo paths intact", () => {
@@ -83,9 +78,7 @@ describe("globalRepoForSelectedRoute", () => {
         number: 17,
       },
     };
-    expect(globalRepoForSelectedRoute(route)).toBe(
-      "gitlab.example.com/Group/SubGroup/Project.Special",
-    );
+    expect(globalRepoForSelectedRoute(route)).toBe("gitlab.example.com/Group/SubGroup/Project.Special");
   });
 
   it("returns undefined for a pulls list route without a selection", () => {
@@ -112,12 +105,18 @@ describe("globalRepoForSelectedRoute", () => {
   });
 
   it("returns undefined for focus list-only routes (mrs/issues without a specific item)", () => {
-    expect(globalRepoForSelectedRoute({
-      page: "focus", itemType: "mrs",
-    })).toBeUndefined();
-    expect(globalRepoForSelectedRoute({
-      page: "focus", itemType: "issues",
-    })).toBeUndefined();
+    expect(
+      globalRepoForSelectedRoute({
+        page: "focus",
+        itemType: "mrs",
+      }),
+    ).toBeUndefined();
+    expect(
+      globalRepoForSelectedRoute({
+        page: "focus",
+        itemType: "issues",
+      }),
+    ).toBeUndefined();
   });
 
   it("returns undefined when platformHost is missing on the selected item", () => {

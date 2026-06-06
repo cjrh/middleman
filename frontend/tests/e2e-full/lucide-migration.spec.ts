@@ -1,8 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function waitForPRList(page: Page): Promise<void> {
-  await page.locator(".pull-item").first()
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".pull-item").first().waitFor({ state: "visible", timeout: 10_000 });
 }
 
 type WorkspaceFixture = {
@@ -52,9 +51,7 @@ async function installWorkspaceRoutes(
     ...baseWorkspace,
     ...opts?.workspace,
   };
-  const detailResponses = [
-    ...(opts?.detailResponses ?? []),
-  ];
+  const detailResponses = [...(opts?.detailResponses ?? [])];
 
   await page.route("**/api/v1/events", async (route) => {
     await route.fulfill({
@@ -77,47 +74,41 @@ async function installWorkspaceRoutes(
     });
   });
 
-  await page.route(
-    `**/api/v1/workspaces/${workspace.id}`,
-    async (route) => {
-      if (route.request().method() !== "GET") {
-        await route.fallback();
-        return;
-      }
+  await page.route(`**/api/v1/workspaces/${workspace.id}`, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
 
-      const nextResponse = detailResponses.shift();
-      if (nextResponse) {
-        await route.fulfill({
-          status: nextResponse.status,
-          contentType: "application/json",
-          body: JSON.stringify(nextResponse.body ?? {}),
-        });
-        return;
-      }
-
+    const nextResponse = detailResponses.shift();
+    if (nextResponse) {
       await route.fulfill({
-        status: 200,
+        status: nextResponse.status,
         contentType: "application/json",
-        body: JSON.stringify(workspace),
+        body: JSON.stringify(nextResponse.body ?? {}),
       });
-    },
-  );
+      return;
+    }
 
-  await page.route(
-    `**/api/v1/workspaces/${workspace.id}/retry`,
-    async (route) => {
-      if (route.request().method() !== "POST") {
-        await route.fallback();
-        return;
-      }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(workspace),
+    });
+  });
 
-      await route.fulfill({
-        status: 202,
-        contentType: "application/json",
-        body: JSON.stringify(workspace),
-      });
-    },
-  );
+  await page.route(`**/api/v1/workspaces/${workspace.id}/retry`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify(workspace),
+    });
+  });
 }
 
 test.describe("lucide migration", () => {
@@ -227,9 +218,7 @@ test.describe("lucide migration", () => {
 
     const stateMessage = page.locator(".state-message.error");
     await expect(stateMessage).toContainText("Failed to load workspace (500)");
-    await expect(
-      stateMessage.getByLabel("Workspace load failed"),
-    ).toBeVisible();
+    await expect(stateMessage.getByLabel("Workspace load failed")).toBeVisible();
 
     await stateMessage.getByRole("button", { name: "Retry" }).click();
     await expect(page.locator(".header-name")).toContainText("Add auth middleware");
@@ -257,9 +246,7 @@ test.describe("lucide migration", () => {
 
     const stateMessage = page.locator(".state-message.error");
     await expect(stateMessage).toContainText("tmux bootstrap failed");
-    await expect(
-      stateMessage.getByLabel("Workspace setup failed"),
-    ).toBeVisible();
+    await expect(stateMessage.getByLabel("Workspace setup failed")).toBeVisible();
 
     await stateMessage.getByRole("button", { name: "Retry" }).click();
     await expect(page.locator(".header-name")).toContainText("Add auth middleware");

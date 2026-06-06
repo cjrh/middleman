@@ -1,10 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import net from "node:net";
-import {
-  e2eReuseExistingServer,
-  getAvailablePort,
-  parseE2EPort,
-} from "./e2ePort";
+import { e2eReuseExistingServer, getAvailablePort, parseE2EPort } from "./e2ePort";
 
 describe("mock e2e port helpers", () => {
   it("parses explicit Playwright ports conservatively", () => {
@@ -17,15 +13,21 @@ describe("mock e2e port helpers", () => {
 
   it("only reuses an existing server after explicit opt-in", () => {
     expect(e2eReuseExistingServer({})).toBe(false);
-    expect(e2eReuseExistingServer({
-      PLAYWRIGHT_REUSE_EXISTING_SERVER: "0",
-    })).toBe(false);
-    expect(e2eReuseExistingServer({
-      PLAYWRIGHT_REUSE_EXISTING_SERVER: "true",
-    })).toBe(true);
-    expect(e2eReuseExistingServer({
-      PLAYWRIGHT_REUSE_EXISTING_SERVER: "yes",
-    })).toBe(true);
+    expect(
+      e2eReuseExistingServer({
+        PLAYWRIGHT_REUSE_EXISTING_SERVER: "0",
+      }),
+    ).toBe(false);
+    expect(
+      e2eReuseExistingServer({
+        PLAYWRIGHT_REUSE_EXISTING_SERVER: "true",
+      }),
+    ).toBe(true);
+    expect(
+      e2eReuseExistingServer({
+        PLAYWRIGHT_REUSE_EXISTING_SERVER: "yes",
+      }),
+    ).toBe(true);
   });
 
   it("returns a port that can be bound", async () => {

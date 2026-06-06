@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import config, {
   resolveViteAllowedHosts,
   resolveViteHmr,
@@ -18,12 +18,8 @@ describe("vite config", () => {
       (alias) => alias.find instanceof RegExp && alias.find.source === "^@middleman\\/ui\\/api\\/client$",
     );
 
-    expect(uiRootAlias?.replacement).toBe(
-      path.resolve(process.cwd(), "../packages/ui/src/index.ts"),
-    );
-    expect(uiSubpathAlias?.replacement).toBe(
-      path.resolve(process.cwd(), "../packages/ui/src/api/generated/client.ts"),
-    );
+    expect(uiRootAlias?.replacement).toBe(path.resolve(process.cwd(), "../packages/ui/src/index.ts"));
+    expect(uiSubpathAlias?.replacement).toBe(path.resolve(process.cwd(), "../packages/ui/src/api/generated/client.ts"));
   });
 
   it("pins the dev server host to IPv4 loopback", () => {
@@ -89,8 +85,7 @@ describe("vite config", () => {
     expect(resolveViteAllowedHosts({})).toBeUndefined();
     expect(
       resolveViteAllowedHosts({
-        MIDDLEMAN_VITE_ALLOWED_HOSTS:
-          "mariuss-macbook-pro.emperor-gopher.ts.net, another.ts.net",
+        MIDDLEMAN_VITE_ALLOWED_HOSTS: "mariuss-macbook-pro.emperor-gopher.ts.net, another.ts.net",
       }),
     ).toEqual(["mariuss-macbook-pro.emperor-gopher.ts.net", "another.ts.net"]);
   });

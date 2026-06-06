@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { buildDiffSummaryKey } from "./diff-summary-key.js";
 
 describe("buildDiffSummaryKey", () => {
@@ -14,13 +14,7 @@ describe("buildDiffSummaryKey", () => {
       diff_head_sha: "head-1",
       merge_base_sha: "merge-base-1",
     };
-    const initial = buildDiffSummaryKey(
-      "acme",
-      "widget",
-      42,
-      initialDetail,
-      pr,
-    );
+    const initial = buildDiffSummaryKey("acme", "widget", 42, initialDetail, pr);
 
     for (const detail of [
       { ...initialDetail, platform_head_sha: "head-2" },
@@ -28,8 +22,7 @@ describe("buildDiffSummaryKey", () => {
       { ...initialDetail, diff_head_sha: "head-2" },
       { ...initialDetail, merge_base_sha: "merge-base-2" },
     ]) {
-      expect(buildDiffSummaryKey("acme", "widget", 42, detail, pr))
-        .not.toBe(initial);
+      expect(buildDiffSummaryKey("acme", "widget", 42, detail, pr)).not.toBe(initial);
     }
   });
 });

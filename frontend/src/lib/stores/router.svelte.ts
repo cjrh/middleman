@@ -32,11 +32,11 @@ export type Route =
     }
   | { page: "issues"; selected?: HostedItemRef }
   | { page: "settings" }
-  | {
+  | ({
       page: "focus";
       itemType: "pr";
       tab?: "files";
-    } & NumberedItemRef
+    } & NumberedItemRef)
   | ({ page: "focus" } & IssueRouteRef & { itemType: "issue" })
   | { page: "focus"; itemType: "mrs"; repo?: string }
   | { page: "focus"; itemType: "issues"; repo?: string }
@@ -162,7 +162,10 @@ function inferLegacyEmbedProvider(platformHost: string): string {
 }
 
 function splitRepoPath(repoPath: string): { owner: string; name: string } | undefined {
-  const pathParts = repoPath.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  const pathParts = repoPath
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .filter(Boolean);
   if (pathParts.length < 2) return undefined;
   return {
     owner: pathParts.slice(0, -1).join("/"),
@@ -297,18 +300,14 @@ function parseRoute(fullPath: string): Route {
   if (path === "/workspaces/embed/list") {
     return { page: "embed-workspace-list" };
   }
-  const embedTerminalMatch = path.match(
-    /^\/workspaces\/embed\/terminal(?:\/([^/]+))?$/,
-  );
+  const embedTerminalMatch = path.match(/^\/workspaces\/embed\/terminal(?:\/([^/]+))?$/);
   if (embedTerminalMatch) {
     return {
       page: "embed-workspace-terminal",
       workspaceId: embedTerminalMatch[1] ?? "",
     };
   }
-  const embedDetailMatch = path.match(
-    /^\/workspaces\/embed\/detail\/([^/]+)\/(pr|issue)\/([^/]+)\/(\d+)$/,
-  );
+  const embedDetailMatch = path.match(/^\/workspaces\/embed\/detail\/([^/]+)\/(pr|issue)\/([^/]+)\/(\d+)$/);
   if (embedDetailMatch) {
     const sp = new URLSearchParams(search);
     const repoPath = sp.get("repo_path")?.trim();
@@ -319,9 +318,7 @@ function parseRoute(fullPath: string): Route {
     const branch = sp.get("branch") ?? undefined;
     const tabParam = sp.get("tab");
     const tab: EmbedDetailTab | undefined =
-      tabParam === "pr" || tabParam === "issue" || tabParam === "reviews"
-        ? tabParam
-        : undefined;
+      tabParam === "pr" || tabParam === "issue" || tabParam === "reviews" ? tabParam : undefined;
     const r: Route = {
       page: "embed-workspace-detail",
       provider: embedDetailMatch[1]!,
@@ -344,9 +341,7 @@ function parseRoute(fullPath: string): Route {
     const branch = sp.get("branch") ?? undefined;
     const tabParam = sp.get("tab");
     const tab: EmbedDetailTab | undefined =
-      tabParam === "pr" || tabParam === "issue" || tabParam === "reviews"
-        ? tabParam
-        : undefined;
+      tabParam === "pr" || tabParam === "issue" || tabParam === "reviews" ? tabParam : undefined;
     const owner = legacyProviderEmbedDetailMatch[4]!;
     const name = legacyProviderEmbedDetailMatch[5]!;
     const r: Route = {
@@ -371,9 +366,7 @@ function parseRoute(fullPath: string): Route {
     const branch = sp.get("branch") ?? undefined;
     const tabParam = sp.get("tab");
     const tab: EmbedDetailTab | undefined =
-      tabParam === "pr" || tabParam === "issue" || tabParam === "reviews"
-        ? tabParam
-        : undefined;
+      tabParam === "pr" || tabParam === "issue" || tabParam === "reviews" ? tabParam : undefined;
     const platformHost = legacyEmbedDetailMatch[2]!;
     const owner = legacyEmbedDetailMatch[3]!;
     const name = legacyEmbedDetailMatch[4]!;
@@ -391,9 +384,7 @@ function parseRoute(fullPath: string): Route {
     if (tab) r.tab = tab;
     return r;
   }
-  const embedEmptyMatch = path.match(
-    /^\/workspaces\/embed\/empty\/(noSelection|noRepo|noWorkspace)$/,
-  );
+  const embedEmptyMatch = path.match(/^\/workspaces\/embed\/empty\/(noSelection|noRepo|noWorkspace)$/);
   if (embedEmptyMatch) {
     return {
       page: "embed-workspace-empty",
@@ -403,9 +394,7 @@ function parseRoute(fullPath: string): Route {
   if (path === "/workspaces/embed/first-run") {
     return { page: "embed-workspace-first-run" };
   }
-  const embedProjectMatch = path.match(
-    /^\/workspaces\/embed\/project\/([A-Za-z0-9_-]+)$/,
-  );
+  const embedProjectMatch = path.match(/^\/workspaces\/embed\/project\/([A-Za-z0-9_-]+)$/);
   if (embedProjectMatch) {
     return {
       page: "embed-workspace-project",
@@ -420,16 +409,10 @@ function parseRoute(fullPath: string): Route {
 
 const configuredInitialRoute = getInitialRoute();
 if (configuredInitialRoute) {
-  history.replaceState(
-    null,
-    "",
-    basePrefix + configuredInitialRoute,
-  );
+  history.replaceState(null, "", basePrefix + configuredInitialRoute);
 }
 
-let route = $state<Route>(
-  parseRoute(configuredInitialRoute ?? currentLocationPath()),
-);
+let route = $state<Route>(parseRoute(configuredInitialRoute ?? currentLocationPath()));
 
 // Fire onRouteChange for the initial route after the module loads.
 // Deferred so the embedder has time to set up the callback.
@@ -533,9 +516,7 @@ function buildRouteEvent(r: Route): MiddlemanNavigateEvent {
 }
 
 export function isWorkspacePage(page: Page): boolean {
-  return (
-    page === "workspaces" || page === "terminal" || isWorkspaceEmbedPage(page)
-  );
+  return page === "workspaces" || page === "terminal" || isWorkspaceEmbedPage(page);
 }
 
 export function isWorkspaceEmbedPage(page: Page): boolean {
@@ -553,9 +534,7 @@ export function isWorkspaceEmbedPage(page: Page): boolean {
 }
 
 export function isMobilePage(page: Page): boolean {
-  return page === "mobile-activity"
-    || page === "mobile-pulls"
-    || page === "mobile-issues";
+  return page === "mobile-activity" || page === "mobile-pulls" || page === "mobile-issues";
 }
 
 function fireMiddlemanNavigateEvent(r: Route): void {
@@ -598,12 +577,7 @@ export function getDetailTab(): DetailTab {
   if (route.page === "pulls" && "tab" in route && route.tab === "files") {
     return "files";
   }
-  if (
-    route.page === "focus" &&
-    route.itemType === "pr" &&
-    "tab" in route &&
-    route.tab === "files"
-  ) {
+  if (route.page === "focus" && route.itemType === "pr" && "tab" in route && route.tab === "files") {
     return "files";
   }
   return "conversation";
@@ -623,9 +597,7 @@ export type View = "list" | "board";
 export type Tab = "pulls" | "issues";
 
 export function getView(): View {
-  return route.page === "pulls" && "view" in route && route.view === "board"
-    ? "board"
-    : "list";
+  return route.page === "pulls" && "view" in route && route.view === "board" ? "board" : "list";
 }
 
 export function setView(v: View): void {

@@ -26,8 +26,7 @@ export interface RepoVisibilityFilters {
 }
 
 export function rowKey(
-  row: Pick<RepoImportRow, "provider" | "platform_host" | "repo_path"> &
-    Partial<Pick<RepoImportRow, "owner" | "name">>,
+  row: Pick<RepoImportRow, "provider" | "platform_host" | "repo_path"> & Partial<Pick<RepoImportRow, "owner" | "name">>,
 ): string {
   return `${row.provider.toLowerCase()}/${row.platform_host.toLowerCase()}/${row.repo_path.toLowerCase()}`;
 }
@@ -61,7 +60,8 @@ export function filterRows(
     if (visibilityFilters.hidePrivate && row.private) return false;
     if (visibilityFilters.hideForks && row.fork) return false;
     const key = rowKey(row);
-    const matchesText = needle === "" ||
+    const matchesText =
+      needle === "" ||
       key.includes(needle) ||
       row.name.toLowerCase().includes(needle) ||
       (row.description ?? "").toLowerCase().includes(needle);
@@ -97,11 +97,7 @@ export function sortRows(rows: RepoImportRow[], sort: SortState): RepoImportRow[
     .map(({ row }) => row);
 }
 
-export function setAllVisible(
-  selected: Set<string>,
-  visibleRows: RepoImportRow[],
-  checked: boolean,
-): Set<string> {
+export function setAllVisible(selected: Set<string>, visibleRows: RepoImportRow[], checked: boolean): Set<string> {
   const next = new Set(selected);
   for (const row of visibleRows) {
     if (row.already_configured) continue;
@@ -121,9 +117,7 @@ export function applyRangeSelection(input: {
 }): { selected: Set<string>; anchorKey: string } {
   const next = new Set(input.selected);
   const clickedIndex = input.visibleRows.findIndex((row) => rowKey(row) === input.clickedKey);
-  const anchorIndex = input.anchorKey
-    ? input.visibleRows.findIndex((row) => rowKey(row) === input.anchorKey)
-    : -1;
+  const anchorIndex = input.anchorKey ? input.visibleRows.findIndex((row) => rowKey(row) === input.anchorKey) : -1;
   if (clickedIndex === -1) return { selected: next, anchorKey: input.clickedKey };
   const start = anchorIndex === -1 ? clickedIndex : Math.min(anchorIndex, clickedIndex);
   const end = anchorIndex === -1 ? clickedIndex : Math.max(anchorIndex, clickedIndex);

@@ -12,20 +12,14 @@ type IssueRef = {
   number: number;
 };
 
-async function fetchPullDetail(
-  page: import("@playwright/test").Page,
-  pull: PullRef,
-) {
+async function fetchPullDetail(page: import("@playwright/test").Page, pull: PullRef) {
   return page.evaluate(async ({ owner, repo, number }) => {
     const response = await fetch(`/api/v1/pulls/github/${owner}/${repo}/${number}`);
     return response.json();
   }, pull);
 }
 
-async function fetchIssueDetail(
-  page: import("@playwright/test").Page,
-  issue: IssueRef,
-) {
+async function fetchIssueDetail(page: import("@playwright/test").Page, issue: IssueRef) {
   return page.evaluate(async ({ owner, repo, number }) => {
     const response = await fetch(`/api/v1/issues/github/${owner}/${repo}/${number}`);
     return response.json();

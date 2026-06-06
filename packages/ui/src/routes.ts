@@ -1,7 +1,4 @@
-import {
-  providerRouteParams,
-  type ProviderRouteRef as APIProviderRouteRef,
-} from "./api/provider-routes.js";
+import { providerRouteParams, type ProviderRouteRef as APIProviderRouteRef } from "./api/provider-routes.js";
 
 export type RepositoryRouteRef = {
   provider: string;
@@ -25,9 +22,7 @@ export type PullRequestRouteRef = NumberedRouteItemRef;
 
 export type IssueRouteRef = NumberedRouteItemRef;
 
-export type RoutedItemRef =
-  | (PullRequestRouteRef & { itemType: "pr" })
-  | (IssueRouteRef & { itemType: "issue" });
+export type RoutedItemRef = (PullRequestRouteRef & { itemType: "pr" }) | (IssueRouteRef & { itemType: "issue" });
 
 export type FocusListRouteRef = {
   itemType: "mrs" | "issues";
@@ -46,9 +41,7 @@ export function buildProviderPullRequestRoute(ref: ProviderRouteRef & { number: 
   return providerItemPath("pulls", ref);
 }
 
-export function buildProviderPullRequestFilesRoute(
-  ref: ProviderRouteRef & { number: number },
-): string {
+export function buildProviderPullRequestFilesRoute(ref: ProviderRouteRef & { number: number }): string {
   return `${providerItemPath("pulls", ref)}/files`;
 }
 
@@ -77,10 +70,7 @@ export function buildFocusListRoute(ref: FocusListRouteRef): string {
   return ref.repo ? `${route}?repo=${encodeURIComponent(ref.repo)}` : route;
 }
 
-export function buildRoutedItemRoute(
-  ref: RoutedItemRef,
-  options: { focus?: boolean } = {},
-): string {
+export function buildRoutedItemRoute(ref: RoutedItemRef, options: { focus?: boolean } = {}): string {
   if (ref.itemType === "pr") {
     return options.focus ? buildFocusPullRequestRoute(ref) : buildPullRequestRoute(ref);
   }
@@ -115,9 +105,7 @@ function providerItemPath(kind: "pulls" | "issues", ref: ProviderRouteRef & { nu
   return `/${kind}/${encodedProvider}/${encodedOwner}/${encodedName}/${encodedNumber}`;
 }
 
-function providerRouteParts(
-  ref: ProviderRouteRef,
-): ReturnType<typeof providerRouteParams> {
+function providerRouteParts(ref: ProviderRouteRef): ReturnType<typeof providerRouteParams> {
   const repoPath = requireRouteText(ref.repoPath, "repoPath").replace(/^\/+|\/+$/g, "");
   const pathParts = repoPath.split("/").filter(Boolean);
   if (pathParts.length < 2) {

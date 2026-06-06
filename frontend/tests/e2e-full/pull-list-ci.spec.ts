@@ -6,9 +6,7 @@ test.describe("pull list CI cluster", () => {
   test("renders compact tokens from the live list payload (mixed state)", async ({ page }) => {
     const server = await startIsolatedE2EServer();
     try {
-      const seed = await page.request.post(
-        `${server.info.base_url}/__e2e/pr-ci-state/mixed`,
-      );
+      const seed = await page.request.post(`${server.info.base_url}/__e2e/pr-ci-state/mixed`);
       expect(seed.ok()).toBe(true);
 
       await page.goto(`${server.info.base_url}/pulls`);
@@ -26,17 +24,13 @@ test.describe("pull list CI cluster", () => {
   test("renders the unavailable token when CIChecksJSON is malformed", async ({ page }) => {
     const server = await startIsolatedE2EServer();
     try {
-      const seed = await page.request.post(
-        `${server.info.base_url}/__e2e/pr-ci-state/malformed`,
-      );
+      const seed = await page.request.post(`${server.info.base_url}/__e2e/pr-ci-state/malformed`);
       expect(seed.ok()).toBe(true);
 
       await page.goto(`${server.info.base_url}/pulls`);
 
       const row = page.locator(".pull-item", { hasText: "#1" });
-      await expect(
-        row.locator("[data-testid='ci-token-unavailable']"),
-      ).toBeVisible();
+      await expect(row.locator("[data-testid='ci-token-unavailable']")).toBeVisible();
 
       // Verify the accessible-name algorithm picks up the "CI unavailable:"
       // diagnostic from the sr-only span inside the .pull-item button. Using

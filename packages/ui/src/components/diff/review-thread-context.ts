@@ -24,8 +24,7 @@ export function reviewThreadsFromEvents(events: PREvent[] | null | undefined): R
   const seen = new Set<string>();
 
   for (const event of events ?? []) {
-    const thread = event.diff_thread ??
-      (event as PREvent & { DiffThread?: ReviewThread }).DiffThread;
+    const thread = event.diff_thread ?? (event as PREvent & { DiffThread?: ReviewThread }).DiffThread;
     if (!thread || seen.has(thread.id)) continue;
     seen.add(thread.id);
     threads.push(thread);
@@ -39,15 +38,13 @@ export function reviewThreadTargetSide(thread: ReviewThread): "left" | "right" {
 }
 
 export function reviewThreadStartSide(thread: ReviewThread): "left" | "right" {
-  return thread.start_side?.toLowerCase() === "left"
-    ? "left"
-    : reviewThreadTargetSide(thread);
+  return thread.start_side?.toLowerCase() === "left" ? "left" : reviewThreadTargetSide(thread);
 }
 
 export function reviewThreadTargetLine(thread: ReviewThread): number {
   return reviewThreadTargetSide(thread) === "left"
-    ? thread.old_line ?? thread.line
-    : thread.new_line ?? thread.line;
+    ? (thread.old_line ?? thread.line)
+    : (thread.new_line ?? thread.line);
 }
 
 export function reviewThreadStartLine(thread: ReviewThread): number {
@@ -65,15 +62,14 @@ function lineNumberForSide(line: DiffLine, side: "left" | "right"): number | und
 }
 
 function pathMatches(thread: ReviewThread, filePath: string, oldPath: string): boolean {
-  return thread.path === filePath ||
+  return (
+    thread.path === filePath ||
     thread.path === oldPath ||
-    (!!thread.old_path && !!oldPath && thread.old_path === oldPath);
+    (!!thread.old_path && !!oldPath && thread.old_path === oldPath)
+  );
 }
 
-export function reviewThreadContext(
-  diff: DiffResult | null | undefined,
-  thread: ReviewThread,
-): ReviewThreadContext {
+export function reviewThreadContext(diff: DiffResult | null | undefined, thread: ReviewThread): ReviewThreadContext {
   const fallback: ReviewThreadContext = {
     path: thread.path,
     lineLabel: reviewThreadLineLabel(thread),

@@ -1,9 +1,4 @@
-import {
-  getThemeMode,
-  getThemeColors,
-  getThemeFonts,
-  getThemeRadii,
-} from "./embed-config.svelte.js";
+import { getThemeMode, getThemeColors, getThemeFonts, getThemeRadii } from "./embed-config.svelte.js";
 
 const THEME_KEY = "middleman-theme";
 
@@ -64,10 +59,7 @@ function storedTheme(): string | null {
 
 function applyDarkClass(isDarkMode: boolean): void {
   document.documentElement.classList.toggle("dark", isDarkMode);
-  document.documentElement.style.setProperty(
-    "color-scheme",
-    isDarkMode ? "dark" : "light",
-  );
+  document.documentElement.style.setProperty("color-scheme", isDarkMode ? "dark" : "light");
 }
 
 export function initTheme(): void {
@@ -75,17 +67,14 @@ export function initTheme(): void {
 
   if (configMode) {
     if (configMode === "system") {
-      const mq = window.matchMedia(
-        "(prefers-color-scheme: dark)",
-      );
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
       dark = mq.matches;
       const handler = (e: MediaQueryListEvent) => {
         dark = e.matches;
         applyDarkClass(dark);
       };
       mq.addEventListener("change", handler);
-      mediaCleanup = () =>
-        mq.removeEventListener("change", handler);
+      mediaCleanup = () => mq.removeEventListener("change", handler);
     } else {
       dark = configMode === "dark";
     }
@@ -96,27 +85,20 @@ export function initTheme(): void {
     } else {
       // No stored preference — follow OS and track changes until
       // the user manually toggles.
-      const mq = window.matchMedia(
-        "(prefers-color-scheme: dark)",
-      );
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
       dark = mq.matches;
       const handler = (e: MediaQueryListEvent) => {
         dark = e.matches;
         applyDarkClass(dark);
       };
       mq.addEventListener("change", handler);
-      mediaCleanup = () =>
-        mq.removeEventListener("change", handler);
+      mediaCleanup = () => mq.removeEventListener("change", handler);
     }
   }
 
   applyDarkClass(dark);
 
-  applyThemeOverrides(
-    getThemeColors(),
-    getThemeFonts(),
-    getThemeRadii(),
-  );
+  applyThemeOverrides(getThemeColors(), getThemeFonts(), getThemeRadii());
 }
 
 export function reapplyTheme(): void {
@@ -127,17 +109,14 @@ export function reapplyTheme(): void {
   const configMode = getThemeMode();
   if (configMode) {
     if (configMode === "system") {
-      const mq = window.matchMedia(
-        "(prefers-color-scheme: dark)",
-      );
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
       dark = mq.matches;
       const handler = (e: MediaQueryListEvent) => {
         dark = e.matches;
         applyDarkClass(dark);
       };
       mq.addEventListener("change", handler);
-      mediaCleanup = () =>
-        mq.removeEventListener("change", handler);
+      mediaCleanup = () => mq.removeEventListener("change", handler);
     } else {
       dark = configMode === "dark";
     }
@@ -152,26 +131,19 @@ export function reapplyTheme(): void {
     } else if (manualDark !== null) {
       dark = manualDark;
     } else {
-      const mq = window.matchMedia(
-        "(prefers-color-scheme: dark)",
-      );
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
       dark = mq.matches;
       const handler = (e: MediaQueryListEvent) => {
         dark = e.matches;
         applyDarkClass(dark);
       };
       mq.addEventListener("change", handler);
-      mediaCleanup = () =>
-        mq.removeEventListener("change", handler);
+      mediaCleanup = () => mq.removeEventListener("change", handler);
     }
   }
 
   applyDarkClass(dark);
-  applyThemeOverrides(
-    getThemeColors(),
-    getThemeFonts(),
-    getThemeRadii(),
-  );
+  applyThemeOverrides(getThemeColors(), getThemeFonts(), getThemeRadii());
 }
 
 export function cleanupTheme(): void {
@@ -216,10 +188,7 @@ export function applyThemeOverrides(
   }
   appliedVars.clear();
 
-  function apply(
-    map: Record<string, string>,
-    values: Record<string, string>,
-  ): void {
+  function apply(map: Record<string, string>, values: Record<string, string>): void {
     for (const [key, value] of Object.entries(values)) {
       const cssVar = map[key];
       if (cssVar) {

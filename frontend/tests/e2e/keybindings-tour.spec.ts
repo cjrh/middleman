@@ -123,7 +123,9 @@ test("keybindings tour: palette, recents, reserved, cheatsheet, sidebar, modal i
 
   // ---- Step 10: open cheatsheet via ? -----------------------------------
   await page.keyboard.press("?");
-  const cheatsheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  const cheatsheet = page.getByRole("dialog", {
+    name: "Keyboard shortcuts",
+  });
   await expect(cheatsheet).toBeVisible();
   await expect(cheatsheet).toContainText(/Next pull request/i);
   await page.waitForTimeout(500);
@@ -147,18 +149,14 @@ test("keybindings tour: palette, recents, reserved, cheatsheet, sidebar, modal i
   // .sidebar--collapsed. Capture the initial collapsed-ness, toggle once,
   // and verify the state flipped.
   const sidebar = page.locator(".sidebar").first();
-  const wasCollapsed = await sidebar
-    .evaluate((el) => el.classList.contains("sidebar--collapsed"))
-    .catch(() => false);
+  const wasCollapsed = await sidebar.evaluate((el) => el.classList.contains("sidebar--collapsed")).catch(() => false);
   await page.keyboard.press("Meta+[");
   await page.waitForTimeout(400);
   // After toggle the sidebar element may have been swapped between the
   // expanded `aside.sidebar` and the collapsed `aside.sidebar.sidebar--collapsed`,
   // so re-query and re-check the class.
   const sidebarAfter = page.locator(".sidebar").first();
-  const isCollapsedAfter = await sidebarAfter.evaluate((el) =>
-    el.classList.contains("sidebar--collapsed"),
-  );
+  const isCollapsedAfter = await sidebarAfter.evaluate((el) => el.classList.contains("sidebar--collapsed"));
   expect(isCollapsedAfter).toBe(!wasCollapsed);
   // Toggle back so the rest of the recording shows the expanded layout
   // (purely cosmetic — the assertion above is the actual proof).
@@ -171,18 +169,14 @@ test("keybindings tour: palette, recents, reserved, cheatsheet, sidebar, modal i
   // Snapshot the PR-list selection state before the j keypress. With the
   // palette modal frame active, `j` should land in the search input as a
   // literal character and must NOT change the list selection underneath.
-  const beforeSelectedCount = await page
-    .locator(".pull-item.selected")
-    .count();
+  const beforeSelectedCount = await page.locator(".pull-item.selected").count();
   // Clear any prior input text first so the j keypress lands in an
   // empty field and the resulting value is unambiguous to assert.
   await page.locator(".palette-input").fill("");
   await page.locator(".palette-input").focus();
   await page.keyboard.press("j");
   await expect(page.locator(".palette-input")).toHaveValue("j");
-  const afterSelectedCount = await page
-    .locator(".pull-item.selected")
-    .count();
+  const afterSelectedCount = await page.locator(".pull-item.selected").count();
   expect(afterSelectedCount).toBe(beforeSelectedCount);
   await page.waitForTimeout(500);
 
@@ -198,10 +192,7 @@ test.afterAll(async () => {
   // when video is enabled; we just need at least one to be present.
   const fs = await import("node:fs");
   const path = await import("node:path");
-  const root = path.resolve(
-    process.cwd(),
-    "test-results",
-  );
+  const root = path.resolve(process.cwd(), "test-results");
   function walk(dir: string): string[] {
     const out: string[] = [];
     let entries: import("node:fs").Dirent[];
@@ -219,25 +210,14 @@ test.afterAll(async () => {
   }
   const webms = walk(root).filter((p) => p.includes("keybindings-tour"));
   if (webms.length === 0) {
-    throw new Error(
-      `expected at least one webm under ${root}, found none`,
-    );
+    throw new Error(`expected at least one webm under ${root}, found none`);
   }
   const sizes = webms.map((p) => ({ p, size: fs.statSync(p).size }));
-  console.log(
-    `keybindings-tour video files:\n${sizes
-      .map((s) => `  ${s.p} (${s.size} bytes)`)
-      .join("\n")}`,
-  );
+  console.log(`keybindings-tour video files:\n${sizes.map((s) => `  ${s.p} (${s.size} bytes)`).join("\n")}`);
   // Sanity: at least one should be a few KB. Empty webms mean video
   // capture didn't actually record anything.
-  const largest = sizes.reduce(
-    (acc, s) => (s.size > acc.size ? s : acc),
-    sizes[0]!,
-  );
+  const largest = sizes.reduce((acc, s) => (s.size > acc.size ? s : acc), sizes[0]!);
   if (largest.size < 1024) {
-    throw new Error(
-      `largest webm is ${largest.size} bytes (< 1024), video capture likely failed`,
-    );
+    throw new Error(`largest webm is ${largest.size} bytes (< 1024), video capture likely failed`);
   }
 });

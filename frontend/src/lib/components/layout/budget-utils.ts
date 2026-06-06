@@ -42,9 +42,11 @@ export function formatCompact(n: number): string {
  * rate limit observation — a host can have real budget spend even when
  * REST rate headers haven't arrived yet.
  */
-export function aggregateBudget(
-  entries: { budget_limit: number; budget_spent: number }[],
-): { spent: number; limit: number; hasAny: boolean } {
+export function aggregateBudget(entries: { budget_limit: number; budget_spent: number }[]): {
+  spent: number;
+  limit: number;
+  hasAny: boolean;
+} {
   let spent = 0;
   let limit = 0;
   let hasAny = false;

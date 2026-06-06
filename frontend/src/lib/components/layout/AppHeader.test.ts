@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 // Prevent RepoTypeahead from making real API calls in the test environment.
 vi.mock("../../api/runtime.js", () => ({
@@ -177,15 +177,9 @@ describe("AppHeader", () => {
     initTheme();
     const { container } = render(AppHeader);
 
-    expect(
-      container.querySelector("button[title='Toggle theme'] svg"),
-    ).toBeTruthy();
-    expect(
-      container.querySelector("button[title='Settings'] svg"),
-    ).toBeTruthy();
-    expect(
-      container.querySelector("button[title='Select repository'] svg"),
-    ).toBeTruthy();
+    expect(container.querySelector("button[title='Toggle theme'] svg")).toBeTruthy();
+    expect(container.querySelector("button[title='Settings'] svg")).toBeTruthy();
+    expect(container.querySelector("button[title='Select repository'] svg")).toBeTruthy();
   });
 
   it("changes the theme toggle SVG when toggled", async () => {
@@ -209,9 +203,7 @@ describe("AppHeader", () => {
     initTheme();
     render(AppHeader);
 
-    const moon = screen.getByTitle("Toggle theme").querySelector(
-      "[data-filled-icon='moon'] svg",
-    );
+    const moon = screen.getByTitle("Toggle theme").querySelector("[data-filled-icon='moon'] svg");
 
     expect(moon).toBeTruthy();
   });
@@ -225,9 +217,7 @@ describe("AppHeader", () => {
     expect(window.location.pathname + window.location.search).toBe("/settings");
 
     await fireEvent.click(screen.getByTitle("Settings"));
-    expect(window.location.pathname + window.location.search).toBe(
-      "/pulls/github/acme/widgets/1/files",
-    );
+    expect(window.location.pathname + window.location.search).toBe("/pulls/github/acme/widgets/1/files");
   });
 
   it("renders the collapsed sidebar toggle as a header icon button", () => {
@@ -235,9 +225,7 @@ describe("AppHeader", () => {
     setSidebarCollapsed(true);
     const { container } = render(AppHeader);
 
-    expect(
-      container.querySelector("button[title='Expand sidebar'] svg"),
-    ).toBeTruthy();
+    expect(container.querySelector("button[title='Expand sidebar'] svg")).toBeTruthy();
   });
 
   it("opens selected Activity PR in PRs tab with files tab preserved", async () => {
@@ -247,9 +235,7 @@ describe("AppHeader", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "PRs" }));
 
-    expect(window.location.pathname + window.location.search).toBe(
-      "/pulls/github/acme/widgets/1/files",
-    );
+    expect(window.location.pathname + window.location.search).toBe("/pulls/github/acme/widgets/1/files");
   });
 
   it("opens selected Activity issue in Issues tab with platform host preserved", async () => {

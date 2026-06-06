@@ -77,39 +77,31 @@ async function mockMobileRepoSettings(page: Page): Promise<string[]> {
 test.use({ ...devices["iPhone 13"] });
 
 test.describe("mobile activity repository selector", () => {
-  test("uses host-qualified concrete repos and excludes glob rows", async ({
-    page,
-  }) => {
+  test("uses host-qualified concrete repos and excludes glob rows", async ({ page }) => {
     const activityRepos = await mockMobileRepoSettings(page);
 
     await page.goto("/m?range=30d&view=threaded");
-    const repoSelect = page.getByRole("combobox", { name: /Repository/ });
+    const repoSelect = page.getByRole("combobox", {
+      name: /Repository/,
+    });
     await expect(repoSelect).toBeVisible();
 
     await repoSelect.click();
     await expect(page.getByRole("option", { name: "All repos" })).toBeVisible();
+    await expect(page.getByRole("option", { name: "github.com/acme/widgets" })).toBeVisible();
     await expect(
-      page.getByRole("option", { name: "github.com/acme/widgets" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("option", { name: "ghe.example.com/acme/widgets" }),
+      page.getByRole("option", {
+        name: "ghe.example.com/acme/widgets",
+      }),
     ).toBeVisible();
     await expect(page.getByRole("option", { name: "acme/*" })).toHaveCount(0);
 
-    await page
-      .getByRole("option", { name: "ghe.example.com/acme/widgets" })
-      .click();
-    await expect(
-      page.getByRole("combobox", { name: "Repository: acme/widgets" }),
-    ).toHaveText("acme/widgets");
-    await expect
-      .poll(() => activityRepos)
-      .toContain("ghe.example.com/acme/widgets");
+    await page.getByRole("option", { name: "ghe.example.com/acme/widgets" }).click();
+    await expect(page.getByRole("combobox", { name: "Repository: acme/widgets" })).toHaveText("acme/widgets");
+    await expect.poll(() => activityRepos).toContain("ghe.example.com/acme/widgets");
   });
 
-  test("groups and labels activity from nested repo identity", async ({
-    page,
-  }) => {
+  test("groups and labels activity from nested repo identity", async ({ page }) => {
     await mockMobileRepoSettings(page);
     await page.route("**/api/v1/activity**", async (route) => {
       await route.fulfill({
@@ -180,7 +172,9 @@ test.describe("mobile activity repository selector", () => {
     ).toBeVisible();
     await expect(page.getByText("undefined/undefined")).toHaveCount(0);
     await expect(
-      page.locator(".mobile-activity-card__event-count", { hasText: "2" }),
+      page.locator(".mobile-activity-card__event-count", {
+        hasText: "2",
+      }),
     ).toHaveCount(0);
   });
 });
@@ -194,10 +188,7 @@ test.describe("mobile PR status grouping", () => {
 
     await page.getByRole("button", { name: "Status" }).click();
 
-    await expect(page.locator(".workflow-group .group-header")).toHaveText([
-      "New",
-      "Reviewing",
-    ]);
+    await expect(page.locator(".workflow-group .group-header")).toHaveText(["New", "Reviewing"]);
     await expect(page.getByText("Needs Worktree")).toHaveCount(0);
   });
 });

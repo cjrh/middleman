@@ -99,7 +99,10 @@ test.describe("focus mode", () => {
       await route.fulfill({
         status: 500,
         contentType: "application/json",
-        body: JSON.stringify({ title: "Workspace failed", detail: "workspace setup failed" }),
+        body: JSON.stringify({
+          title: "Workspace failed",
+          detail: "workspace setup failed",
+        }),
       });
     });
 
@@ -111,9 +114,9 @@ test.describe("focus mode", () => {
     await expect(page.locator(".actions-row--primary .primary-workspace-action .btn--workspace")).toBeVisible();
     await expect(page.locator(".actions-row--workspace")).toBeHidden();
 
-    const copyNumberHeight = await page.locator(".meta-row .copy-number-btn").evaluate((node) =>
-      node.getBoundingClientRect().height,
-    );
+    const copyNumberHeight = await page
+      .locator(".meta-row .copy-number-btn")
+      .evaluate((node) => node.getBoundingClientRect().height);
     expect(copyNumberHeight).toBeLessThan(28);
     await expect(page.locator(".meta-sep--branch")).toBeHidden();
     await expect(page.locator(".meta-sep--sync")).toBeHidden();
@@ -141,22 +144,16 @@ test.describe("focus mode", () => {
     // Navigate forward to an issue focus route.
     await page.goto("/focus/issues/github/acme/widgets/10");
     await page.locator(".issue-detail").waitFor({ state: "visible", timeout: 10_000 });
-    await expect(page).toHaveURL(
-      /\/focus\/issues\/github\/acme\/widgets\/10$/,
-    );
+    await expect(page).toHaveURL(/\/focus\/issues\/github\/acme\/widgets\/10$/);
 
     // Go back to the PR focus route.
     await page.goBack();
     await page.locator(".pull-detail").waitFor({ state: "visible", timeout: 10_000 });
-    await expect(page).toHaveURL(
-      /\/focus\/pulls\/github\/acme\/widgets\/1$/,
-    );
+    await expect(page).toHaveURL(/\/focus\/pulls\/github\/acme\/widgets\/1$/);
 
     // Go forward to the issue focus route.
     await page.goForward();
     await page.locator(".issue-detail").waitFor({ state: "visible", timeout: 10_000 });
-    await expect(page).toHaveURL(
-      /\/focus\/issues\/github\/acme\/widgets\/10$/,
-    );
+    await expect(page).toHaveURL(/\/focus\/issues\/github\/acme\/widgets\/10$/);
   });
 });

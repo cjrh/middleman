@@ -1,11 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { mockSetTerminalSettings, mockUpdateSettings } = vi.hoisted(() => ({
   mockSetTerminalSettings: vi.fn(),
@@ -328,19 +322,11 @@ describe("TerminalSettings", () => {
       },
     });
 
+    expect((screen.getByLabelText("Line height") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Letter spacing") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Font ligatures") as HTMLInputElement).disabled).toBe(true);
     expect(
-      (screen.getByLabelText("Line height") as HTMLInputElement).disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByLabelText("Letter spacing") as HTMLInputElement).disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByLabelText("Font ligatures") as HTMLInputElement).disabled,
-    ).toBe(true);
-    expect(
-      screen.getByText(
-        "ghostty-web does not expose line height, letter spacing, or ligature controls.",
-      ),
+      screen.getByText("ghostty-web does not expose line height, letter spacing, or ligature controls."),
     ).toBeTruthy();
   });
 
@@ -595,10 +581,7 @@ describe("TerminalSettings", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Choose" }));
     await fireEvent.click(screen.getByRole("button", { name: /Fira Code/ }));
 
-    expect(
-      (screen.getByLabelText("Monospace font family") as HTMLInputElement)
-        .value,
-    ).toBe('"Fira Code", monospace');
+    expect((screen.getByLabelText("Monospace font family") as HTMLInputElement).value).toBe('"Fira Code", monospace');
   });
 
   it("replaces the preferred font while preserving fallbacks", async () => {
@@ -621,9 +604,8 @@ describe("TerminalSettings", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Choose" }));
     await fireEvent.click(screen.getByRole("button", { name: /Fira Code/ }));
 
-    expect(
-      (screen.getByLabelText("Monospace font family") as HTMLInputElement)
-        .value,
-    ).toBe('"Fira Code", "SF Mono", Menlo, monospace');
+    expect((screen.getByLabelText("Monospace font family") as HTMLInputElement).value).toBe(
+      '"Fira Code", "SF Mono", Menlo, monospace',
+    );
   });
 });

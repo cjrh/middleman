@@ -54,13 +54,7 @@ async function fileMtimeMs(filePath: string): Promise<number | null> {
 }
 
 async function newestMtimeUnder(dir: string): Promise<number | null> {
-  const ignoredDirs = new Set([
-    ".svelte-kit",
-    "dist",
-    "node_modules",
-    "playwright-report",
-    "test-results",
-  ]);
+  const ignoredDirs = new Set([".svelte-kit", "dist", "node_modules", "playwright-report", "test-results"]);
   let newest: number | null = null;
   let entries;
   try {
@@ -74,9 +68,7 @@ async function newestMtimeUnder(dir: string): Promise<number | null> {
       continue;
     }
     const entryPath = path.join(dir, entry.name);
-    const mtime = entry.isDirectory()
-      ? await newestMtimeUnder(entryPath)
-      : await fileMtimeMs(entryPath);
+    const mtime = entry.isDirectory() ? await newestMtimeUnder(entryPath) : await fileMtimeMs(entryPath);
     if (mtime !== null && (newest === null || mtime > newest)) {
       newest = mtime;
     }
@@ -84,9 +76,7 @@ async function newestMtimeUnder(dir: string): Promise<number | null> {
   return newest;
 }
 
-async function newestFrontendSourceMtime(
-  rootDir: string,
-): Promise<number | null> {
+async function newestFrontendSourceMtime(rootDir: string): Promise<number | null> {
   const candidates = [
     path.join(rootDir, "frontend", "src"),
     path.join(rootDir, "frontend", "index.html"),
@@ -96,9 +86,7 @@ async function newestFrontendSourceMtime(
   ];
   let newest: number | null = null;
   for (const candidate of candidates) {
-    const mtime =
-      (await newestMtimeUnder(candidate)) ??
-      (await fileMtimeMs(candidate));
+    const mtime = (await newestMtimeUnder(candidate)) ?? (await fileMtimeMs(candidate));
     if (mtime !== null && (newest === null || mtime > newest)) {
       newest = mtime;
     }
@@ -122,7 +110,10 @@ async function tryBuildFrontend(frontendDir: string): Promise<BuildOutcome> {
     build.once("error", (err) => {
       if (settled) return;
       settled = true;
-      resolve({ kind: "missing-tool", cause: err as NodeJS.ErrnoException });
+      resolve({
+        kind: "missing-tool",
+        cause: err as NodeJS.ErrnoException,
+      });
     });
     build.once("exit", (code) => {
       if (settled) return;
@@ -145,10 +136,7 @@ export async function ensureEmbeddedFrontend(rootDir: string = repoRoot): Promis
 
   let frontendMtime = await newestMtimeUnder(frontendDist);
   const sourceMtime = await newestFrontendSourceMtime(rootDir);
-  if (
-    frontendMtime === null ||
-    (sourceMtime !== null && sourceMtime > frontendMtime)
-  ) {
+  if (frontendMtime === null || (sourceMtime !== null && sourceMtime > frontendMtime)) {
     const outcome = await tryBuildFrontend(frontendDir);
     if (outcome.kind === "ok") {
       frontendMtime = await newestMtimeUnder(frontendDist);
@@ -156,9 +144,7 @@ export async function ensureEmbeddedFrontend(rootDir: string = repoRoot): Promis
       // Real build failure (bun ran but vite/svelte rejected the
       // sources). Falling back here would silently run e2e against
       // stale dist while the working tree is broken.
-      throw new Error(
-        `frontend build failed with exit code ${outcome.exitCode ?? "null"}`,
-      );
+      throw new Error(`frontend build failed with exit code ${outcome.exitCode ?? "null"}`);
     } else if (frontendMtime === null) {
       throw new Error(
         `bun is unavailable (${outcome.cause.code ?? outcome.cause.message}) ` +
@@ -220,9 +206,7 @@ async function isServerReachable(baseURL: string): Promise<boolean> {
       { method: "GET", timeout: reachabilityTimeoutMs },
       (response) => {
         response.resume();
-        resolve(
-          (response.statusCode ?? 0) >= 200 && (response.statusCode ?? 0) < 300,
-        );
+        resolve((response.statusCode ?? 0) >= 200 && (response.statusCode ?? 0) < 300);
       },
     );
 
@@ -237,9 +221,7 @@ async function isServerReachable(baseURL: string): Promise<boolean> {
   });
 }
 
-export async function getReusableServerInfo(
-  filePath: string,
-): Promise<E2EServerInfo | null> {
+export async function getReusableServerInfo(filePath: string): Promise<E2EServerInfo | null> {
   const info = await readServerInfo(filePath);
   if (!info) {
     return null;
@@ -261,9 +243,7 @@ export async function waitForServerInfo(
       return info;
     }
     if (child.exitCode !== null) {
-      throw new Error(
-        `e2e server exited with code ${child.exitCode} before becoming ready from ${filePath}`,
-      );
+      throw new Error(`e2e server exited with code ${child.exitCode} before becoming ready from ${filePath}`);
     }
     await delay(pollIntervalMs);
   }
@@ -283,14 +263,7 @@ async function spawnServer(
 }> {
   await ensureEmbeddedFrontend();
 
-  const args = [
-    "run",
-    "./cmd/e2e-server",
-    "-port",
-    "0",
-    "-server-info-file",
-    infoFile,
-  ];
+  const args = ["run", "./cmd/e2e-server", "-port", "0", "-server-info-file", infoFile];
   if (options.defaultPlatformHost) {
     args.push("-default-platform-host", options.defaultPlatformHost);
   }

@@ -1,12 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import {
-  navigate,
-  getRoute,
-  getDetailTab,
-  isDiffView,
-  getSelectedPRFromRoute,
-  getPage,
-} from "./router.svelte.js";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vite-plus/test";
+import { navigate, getRoute, getDetailTab, isDiffView, getSelectedPRFromRoute, getPage } from "./router.svelte.js";
 
 const prRoute = "/pulls/github/acme/widgets/42";
 const prFilesRoute = "/pulls/github/acme/widgets/42/files";
@@ -147,9 +140,7 @@ describe("router basic routes", () => {
   });
 
   it("parses provider pull routes with escaped nested repo paths", () => {
-    navigate(
-      "/host/gitlab.example.com%3A8443/pulls/gitlab/Group%2FSubGroup%2FSubGroup%202/My_Project.v2/12",
-    );
+    navigate("/host/gitlab.example.com%3A8443/pulls/gitlab/Group%2FSubGroup%2FSubGroup%202/My_Project.v2/12");
 
     expect(getRoute()).toEqual({
       page: "pulls",
@@ -197,9 +188,7 @@ describe("router basic routes", () => {
   });
 
   it("parses provider pull files routes with escaped nested repo paths", () => {
-    navigate(
-      "/host/gitlab.example.com%3A8443/pulls/gitlab/Group%2FSubGroup%2FSubGroup%202/My_Project.v2/12/files",
-    );
+    navigate("/host/gitlab.example.com%3A8443/pulls/gitlab/Group%2FSubGroup%2FSubGroup%202/My_Project.v2/12/files");
 
     expect(getRoute()).toEqual({
       page: "pulls",
@@ -242,9 +231,7 @@ describe("router basic routes", () => {
   });
 
   it("parses provider issue routes with special characters in repo paths", () => {
-    navigate(
-      "/host/gitlab.example.test%3A8443/issues/gitlab/Team%20One%2FSub%20Team/project%2B%231/7",
-    );
+    navigate("/host/gitlab.example.test%3A8443/issues/gitlab/Team%20One%2FSub%20Team/project%2B%231/7");
 
     expect(getRoute()).toEqual({
       page: "issues",
@@ -316,9 +303,7 @@ describe("router embed-workspace routes", () => {
   });
 
   it("parses /workspaces/embed/detail/:provider/pr/:host/:number with repo_path", () => {
-    navigate(
-      "/workspaces/embed/detail/github/pr/github.com/42?repo_path=acme%2Fwidgets",
-    );
+    navigate("/workspaces/embed/detail/github/pr/github.com/42?repo_path=acme%2Fwidgets");
     expect(getRoute()).toEqual({
       page: "embed-workspace-detail",
       provider: "github",
@@ -332,9 +317,7 @@ describe("router embed-workspace routes", () => {
   });
 
   it("parses legacy /workspaces/embed/detail/:type/:host/:owner/:name/:number", () => {
-    navigate(
-      "/workspaces/embed/detail/issue/gitlab.example.com/acme/widgets/7?tab=issue",
-    );
+    navigate("/workspaces/embed/detail/issue/gitlab.example.com/acme/widgets/7?tab=issue");
     expect(getRoute()).toEqual({
       page: "embed-workspace-detail",
       provider: "gitlab",
@@ -349,9 +332,7 @@ describe("router embed-workspace routes", () => {
   });
 
   it("keeps legacy GitHub Enterprise embed detail URLs on GitHub", () => {
-    navigate(
-      "/workspaces/embed/detail/pr/ghe.example.com/acme/widgets/42",
-    );
+    navigate("/workspaces/embed/detail/pr/ghe.example.com/acme/widgets/42");
     expect(getRoute()).toEqual({
       page: "embed-workspace-detail",
       provider: "github",
@@ -365,9 +346,7 @@ describe("router embed-workspace routes", () => {
   });
 
   it("parses legacy provider-explicit detail path without repo_path", () => {
-    navigate(
-      "/workspaces/embed/detail/github/pr/github.com/acme/widgets/42?branch=main",
-    );
+    navigate("/workspaces/embed/detail/github/pr/github.com/acme/widgets/42?branch=main");
     expect(getRoute()).toEqual({
       page: "embed-workspace-detail",
       provider: "github",
@@ -401,9 +380,7 @@ describe("router embed-workspace routes", () => {
   });
 
   it("ignores unknown tab values on the detail route", () => {
-    navigate(
-      "/workspaces/embed/detail/github/pr/github.com/1?repo_path=o%2Fn&tab=garbage",
-    );
+    navigate("/workspaces/embed/detail/github/pr/github.com/1?repo_path=o%2Fn&tab=garbage");
     const route = getRoute();
     expect(route).toEqual({
       page: "embed-workspace-detail",
@@ -418,11 +395,7 @@ describe("router embed-workspace routes", () => {
   });
 
   it("parses /workspaces/embed/empty/:reason for each known reason", () => {
-    for (const reason of [
-      "noSelection",
-      "noRepo",
-      "noWorkspace",
-    ] as const) {
+    for (const reason of ["noSelection", "noRepo", "noWorkspace"] as const) {
       navigate(`/workspaces/embed/empty/${reason}`);
       expect(getRoute()).toEqual({
         page: "embed-workspace-empty",
@@ -464,14 +437,22 @@ describe("router navigation events", () => {
 
   afterEach(() => {
     delete (window as unknown as { __middleman_config?: unknown }).__middleman_config;
-    (window as unknown as { __middleman_notify_config_changed?: () => void })
-      .__middleman_notify_config_changed?.();
+    (
+      window as unknown as {
+        __middleman_notify_config_changed?: () => void;
+      }
+    ).__middleman_notify_config_changed?.();
   });
 
   function installOnNavigate(spy: ReturnType<typeof vi.fn>): void {
-    (window as unknown as { __middleman_config?: unknown }).__middleman_config = { onNavigate: spy };
-    (window as unknown as { __middleman_notify_config_changed?: () => void })
-      .__middleman_notify_config_changed?.();
+    (window as unknown as { __middleman_config?: unknown }).__middleman_config = {
+      onNavigate: spy,
+    };
+    (
+      window as unknown as {
+        __middleman_notify_config_changed?: () => void;
+      }
+    ).__middleman_notify_config_changed?.();
   }
 
   it("fires onNavigate with pull payload for files route", () => {
@@ -554,16 +535,20 @@ describe("router window bridges", () => {
   });
 
   it("exposes __middleman_navigate_to_route as a window global", () => {
-    const bridge = (window as unknown as {
-      __middleman_navigate_to_route?: (route: string) => void;
-    }).__middleman_navigate_to_route;
+    const bridge = (
+      window as unknown as {
+        __middleman_navigate_to_route?: (route: string) => void;
+      }
+    ).__middleman_navigate_to_route;
     expect(typeof bridge).toBe("function");
   });
 
   it("__middleman_navigate_to_route updates the SPA route", () => {
-    const bridge = (window as unknown as {
-      __middleman_navigate_to_route: (route: string) => void;
-    }).__middleman_navigate_to_route;
+    const bridge = (
+      window as unknown as {
+        __middleman_navigate_to_route: (route: string) => void;
+      }
+    ).__middleman_navigate_to_route;
 
     bridge("/workspaces/embed/first-run");
     expect(getRoute()).toEqual({ page: "embed-workspace-first-run" });

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import ToolingStatusBlock from "./ToolingStatusBlock.svelte";
 
@@ -31,9 +31,7 @@ describe("ToolingStatusBlock", () => {
     expect(screen.getByText("git")).toBeTruthy();
     expect(screen.getByText("Available (2.45.0)")).toBeTruthy();
     expect(screen.getByText("gh")).toBeTruthy();
-    expect(
-      screen.getByText("Authenticated as wesm on github.com"),
-    ).toBeTruthy();
+    expect(screen.getByText("Authenticated as wesm on github.com")).toBeTruthy();
   });
 
   it("renders the GitLab CLI row for GitLab providers", () => {
@@ -61,9 +59,7 @@ describe("ToolingStatusBlock", () => {
     expect(screen.getByText("git")).toBeTruthy();
     expect(screen.getByText("glab")).toBeTruthy();
     expect(screen.queryByText("gh")).toBeNull();
-    expect(
-      screen.getByText("Authenticated as wesm on gitlab.com"),
-    ).toBeTruthy();
+    expect(screen.getByText("Authenticated as wesm on gitlab.com")).toBeTruthy();
   });
 
   it("surfaces GitLab CLI recovery commands for GitLab providers", async () => {
@@ -80,9 +76,7 @@ describe("ToolingStatusBlock", () => {
     expect(screen.getByText("Not installed")).toBeTruthy();
     expect(screen.getByText("brew install glab")).toBeTruthy();
     await fireEvent.click(screen.getByLabelText("Copy glab install command"));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      "brew install glab",
-    );
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("brew install glab");
   });
 
   it("surfaces a recovery command when gh is not authenticated", () => {
@@ -140,9 +134,7 @@ describe("ToolingStatusBlock", () => {
 
     const button = screen.getByLabelText("Copy auth command");
     await fireEvent.click(button);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      "gh auth login",
-    );
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("gh auth login");
   });
 
   it("renders nothing when tooling is undefined and hideWhenUnknown is set", () => {

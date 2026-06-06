@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import WorkspaceListSidebar from "./WorkspaceListSidebar.svelte";
 
@@ -106,7 +106,9 @@ describe("WorkspaceListSidebar", () => {
       },
     });
 
-    render(WorkspaceListSidebar, { props: { selectedId: "ws-github" } });
+    render(WorkspaceListSidebar, {
+      props: { selectedId: "ws-github" },
+    });
 
     await screen.findByText("acme/widgets");
     expect(screen.getByRole("img", { name: "GitHub" })).toBeTruthy();
@@ -137,7 +139,9 @@ describe("WorkspaceListSidebar", () => {
       },
     });
 
-    render(WorkspaceListSidebar, { props: { selectedId: "ws-github" } });
+    render(WorkspaceListSidebar, {
+      props: { selectedId: "ws-github" },
+    });
 
     await screen.findByText("acme/widgets");
     expect(screen.queryByRole("img", { name: "GitHub" })).toBeNull();
@@ -189,17 +193,13 @@ describe("WorkspaceListSidebar", () => {
       target: { value: "huma" },
     });
     expect(container.querySelectorAll(".ws-row")).toHaveLength(1);
-    expect(
-      screen.getByText("Migrate native HTTP surface to Huma v2"),
-    ).toBeTruthy();
+    expect(screen.getByText("Migrate native HTTP surface to Huma v2")).toBeTruthy();
 
     await fireEvent.input(filter, {
       target: { value: "kenn-platform" },
     });
     expect(container.querySelectorAll(".ws-row")).toHaveLength(1);
-    expect(
-      screen.getByText("Hosted code fetch and caching strategy"),
-    ).toBeTruthy();
+    expect(screen.getByText("Hosted code fetch and caching strategy")).toBeTruthy();
 
     await fireEvent.input(filter, {
       target: { value: "#224" },

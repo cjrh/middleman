@@ -1,10 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  bulkAddRepos,
-  previewRepos,
-  removeRepo,
-  updateSettings,
-} from "./settings.js";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { bulkAddRepos, previewRepos, removeRepo, updateSettings } from "./settings.js";
 
 describe("settings api", () => {
   beforeEach(() => {
@@ -44,24 +39,26 @@ describe("settings api", () => {
   });
 
   it("encodes repo names for delete requests", async () => {
-    await removeRepo("acme", "widgets-?", { provider: "github", host: "github.com" });
+    await removeRepo("acme", "widgets-?", {
+      provider: "github",
+      host: "github.com",
+    });
 
     const request = vi.mocked(fetch).mock.calls[0]?.[0];
     expect(request).toBeInstanceOf(Request);
-    expect(new URL((request as Request).url).pathname).toBe(
-      "/api/v1/repo/github/acme/widgets-%3F",
-    );
+    expect(new URL((request as Request).url).pathname).toBe("/api/v1/repo/github/acme/widgets-%3F");
     expect((request as Request).method).toBe("DELETE");
   });
 
   it("posts preview requests", async () => {
-    await previewRepos("acme", "widget-*", { provider: "github", host: "github.com" });
+    await previewRepos("acme", "widget-*", {
+      provider: "github",
+      host: "github.com",
+    });
 
     const request = vi.mocked(fetch).mock.calls[0]?.[0];
     expect(request).toBeInstanceOf(Request);
-    expect(new URL((request as Request).url).pathname).toBe(
-      "/api/v1/repos/preview",
-    );
+    expect(new URL((request as Request).url).pathname).toBe("/api/v1/repos/preview");
     expect((request as Request).method).toBe("POST");
     await expect((request as Request).clone().json()).resolves.toEqual({
       provider: "github",
@@ -88,16 +85,28 @@ describe("settings api", () => {
   });
 
   it("posts bulk add requests", async () => {
-    await bulkAddRepos([{ provider: "github", host: "github.com", owner: "acme", name: "api" }]);
+    await bulkAddRepos([
+      {
+        provider: "github",
+        host: "github.com",
+        owner: "acme",
+        name: "api",
+      },
+    ]);
 
     const request = vi.mocked(fetch).mock.calls[0]?.[0];
     expect(request).toBeInstanceOf(Request);
-    expect(new URL((request as Request).url).pathname).toBe(
-      "/api/v1/repos/bulk",
-    );
+    expect(new URL((request as Request).url).pathname).toBe("/api/v1/repos/bulk");
     expect((request as Request).method).toBe("POST");
     await expect((request as Request).clone().json()).resolves.toEqual({
-      repos: [{ provider: "github", host: "github.com", owner: "acme", name: "api" }],
+      repos: [
+        {
+          provider: "github",
+          host: "github.com",
+          owner: "acme",
+          name: "api",
+        },
+      ],
     });
   });
 
@@ -137,13 +146,9 @@ describe("settings api", () => {
 
     const request = vi.mocked(fetch).mock.calls[0]?.[0];
     expect(request).toBeInstanceOf(Request);
-    expect(new URL((request as Request).url).pathname).toBe(
-      "/api/v1/settings",
-    );
+    expect(new URL((request as Request).url).pathname).toBe("/api/v1/settings");
     expect((request as Request).method).toBe("PUT");
-    expect((request as Request).headers.get("Content-Type")).toBe(
-      "application/json",
-    );
+    expect((request as Request).headers.get("Content-Type")).toBe("application/json");
     await expect((request as Request).clone().json()).resolves.toEqual({
       agents: [
         {
@@ -167,6 +172,11 @@ describe("settings api", () => {
       ),
     );
 
-    await expect(previewRepos("acme", "[", { provider: "github", host: "github.com" })).rejects.toThrow("invalid glob pattern");
+    await expect(
+      previewRepos("acme", "[", {
+        provider: "github",
+        host: "github.com",
+      }),
+    ).rejects.toThrow("invalid glob pattern");
   });
 });

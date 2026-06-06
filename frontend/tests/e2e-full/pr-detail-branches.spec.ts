@@ -4,8 +4,7 @@ import { startIsolatedE2EServer } from "./support/e2eServer";
 test.describe("PR detail branch info", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/pulls/github/acme/widgets/1");
-    await page.locator(".pull-detail")
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".pull-detail").waitFor({ state: "visible", timeout: 10_000 });
   });
 
   test("shows head and base branch buttons", async ({ page }) => {
@@ -21,26 +20,24 @@ test.describe("PR detail branch info", () => {
     await expect(arrow).toBeVisible();
   });
 
-  test("click branch shows copied feedback", async ({
-    page, context, browserName,
-  }) => {
+  test("click branch shows copied feedback", async ({ page, context, browserName }) => {
     if (browserName === "chromium") {
       await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     }
 
-    const headBtn = page.locator(
-      ".meta-branch .branch-name-btn",
-    ).first();
-    await expect(headBtn).toHaveAttribute(
-      "title", "Click to copy",
-    );
+    const headBtn = page.locator(".meta-branch .branch-name-btn").first();
+    await expect(headBtn).toHaveAttribute("title", "Click to copy");
 
     await headBtn.click();
 
-    await expect.poll(async () => headBtn.evaluate((element) =>
-      element.classList.contains("branch-name-btn--copied") &&
-      element.getAttribute("title") === "Copied!"
-    )).toBe(true);
+    await expect
+      .poll(async () =>
+        headBtn.evaluate(
+          (element) =>
+            element.classList.contains("branch-name-btn--copied") && element.getAttribute("title") === "Copied!",
+        ),
+      )
+      .toBe(true);
   });
 
   test("reveals current approvers from full-stack review events", async ({ page }) => {
@@ -99,8 +96,7 @@ test.describe("PR detail branch info", () => {
     });
 
     await page.goto("/pulls/github/acme/widgets/1");
-    await page.locator(".pull-detail")
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".pull-detail").waitFor({ state: "visible", timeout: 10_000 });
 
     const trigger = page.locator(".diff-summary-trigger");
     await expect(trigger).toHaveText(/\+240\s+−30/);
@@ -109,12 +105,9 @@ test.describe("PR detail branch info", () => {
 
     const popover = page.locator(".diff-summary-popover");
     await expect(popover).toBeVisible();
-    await expect(popover).toContainText(
-      /Plans\/docs\s+\+10\s+−2[\s\S]*Code\s+\+180\s+−20[\s\S]*Tests\s+\+49\s+−7/,
-    );
+    await expect(popover).toContainText(/Plans\/docs\s+\+10\s+−2[\s\S]*Code\s+\+180\s+−20[\s\S]*Tests\s+\+49\s+−7/);
     await expect(popover).not.toContainText("Other");
   });
-
 });
 
 test("diff summary uses real files after the PR head advances", async ({ page }) => {
@@ -126,8 +119,7 @@ test("diff summary uses real files after the PR head advances", async ({ page })
         realSetInterval(handler, timeout === 60_000 ? 100 : timeout, ...args)) as typeof window.setInterval;
     });
     await page.goto(`${server.info.base_url}/pulls/github/acme/widgets/1`);
-    await page.locator(".pull-detail")
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".pull-detail").waitFor({ state: "visible", timeout: 10_000 });
     await expect(page.locator(".sync-indicator")).toHaveCount(0);
 
     const trigger = page.locator(".diff-summary-trigger");
@@ -140,16 +132,11 @@ test("diff summary uses real files after the PR head advances", async ({ page })
     await expect(popover).not.toContainText("Tests");
     const initialSummary = await popover.textContent();
 
-    const response = await page.request.post(
-      `${server.info.base_url}/__e2e/pr-diff-summary/advance-head`,
-    );
+    const response = await page.request.post(`${server.info.base_url}/__e2e/pr-diff-summary/advance-head`);
     expect(response.ok()).toBe(true);
-    const advanced = await response.json() as { head_sha: string };
+    const advanced = (await response.json()) as { head_sha: string };
 
-    await expect(trigger).toHaveAttribute(
-      "aria-describedby",
-      new RegExp(advanced.head_sha.slice(0, 10)),
-    );
+    await expect(trigger).toHaveAttribute("aria-describedby", new RegExp(advanced.head_sha.slice(0, 10)));
     await expect(popover).toContainText(/Plans\/docs\s+\+\d+\s+−\d+/);
     await expect(popover).toContainText(/Tests\s+\+\d+\s+−\d+/);
     await expect(popover).not.toHaveText(initialSummary ?? "");

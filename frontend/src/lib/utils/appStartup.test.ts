@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { runAppStartup } from "./appStartup.js";
 import type { StoreInstances } from "@middleman/ui";
 import type { Settings } from "@middleman/ui/api/types";
@@ -82,15 +82,9 @@ describe("runAppStartup", () => {
 
     await flushMicrotasks();
 
-    expect(stores.settings.setConfiguredRepos).toHaveBeenCalledWith(
-      settings.repos,
-    );
-    expect(stores.settings.setTerminalSettings).toHaveBeenCalledWith(
-      settings.terminal,
-    );
-    expect(stores.activity.hydrateDefaults).toHaveBeenCalledWith(
-      settings.activity,
-    );
+    expect(stores.settings.setConfiguredRepos).toHaveBeenCalledWith(settings.repos);
+    expect(stores.settings.setTerminalSettings).toHaveBeenCalledWith(settings.terminal);
+    expect(stores.activity.hydrateDefaults).toHaveBeenCalledWith(settings.activity);
     expect(onReady).toHaveBeenCalledTimes(1);
     expect(stores.sync.startPolling).toHaveBeenCalledTimes(1);
     expect(stores.pulls.loadPulls).toHaveBeenCalledTimes(1);
@@ -115,10 +109,8 @@ describe("runAppStartup", () => {
     expect(beforeInitialLoad).toHaveBeenCalledTimes(1);
     const beforeOrder = beforeInitialLoad.mock.invocationCallOrder[0] ?? 0;
     const readyOrder = onReady.mock.invocationCallOrder[0] ?? 0;
-    const pullLoadOrder =
-      vi.mocked(stores.pulls.loadPulls).mock.invocationCallOrder[0] ?? 0;
-    const issueLoadOrder =
-      vi.mocked(stores.issues.loadIssues).mock.invocationCallOrder[0] ?? 0;
+    const pullLoadOrder = vi.mocked(stores.pulls.loadPulls).mock.invocationCallOrder[0] ?? 0;
+    const issueLoadOrder = vi.mocked(stores.issues.loadIssues).mock.invocationCallOrder[0] ?? 0;
     expect(beforeOrder).toBeLessThan(readyOrder);
     expect(beforeOrder).toBeLessThan(pullLoadOrder);
     expect(beforeOrder).toBeLessThan(issueLoadOrder);
@@ -192,10 +184,7 @@ describe("runAppStartup", () => {
     expect(stores.settings.setConfiguredRepos).not.toHaveBeenCalled();
     expect(stores.settings.setTerminalFontFamily).not.toHaveBeenCalled();
     expect(stores.activity.hydrateDefaults).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      "Failed to load settings, using defaults:",
-      expect.any(Error),
-    );
+    expect(warn).toHaveBeenCalledWith("Failed to load settings, using defaults:", expect.any(Error));
     expect(onReady).toHaveBeenCalledTimes(1);
     expect(stores.sync.startPolling).toHaveBeenCalledTimes(1);
     expect(stores.pulls.loadPulls).toHaveBeenCalledTimes(1);

@@ -1,8 +1,5 @@
 import type { Issue, IssueDetail, IssuesParams, Label } from "../api/types.js";
-import {
-  providerItemPath,
-  providerRouteParams,
-} from "../api/provider-routes.js";
+import { providerItemPath, providerRouteParams } from "../api/provider-routes.js";
 import type { MiddlemanClient } from "../types.js";
 
 export type IssueDetailSyncMode = boolean | "background";
@@ -42,10 +39,7 @@ export interface IssuesStoreOptions {
   };
 }
 
-function apiErrorMessage(
-  error: { detail?: string; title?: string },
-  fallback: string,
-): string {
+function apiErrorMessage(error: { detail?: string; title?: string }, fallback: string): string {
   return error.detail ?? error.title ?? fallback;
 }
 
@@ -59,10 +53,7 @@ function syncIntentRank(mode: IssueDetailSyncMode): number {
   return 0;
 }
 
-function strongerSyncMode(
-  a: IssueDetailSyncMode,
-  b: IssueDetailSyncMode,
-): IssueDetailSyncMode {
+function strongerSyncMode(a: IssueDetailSyncMode, b: IssueDetailSyncMode): IssueDetailSyncMode {
   return syncIntentRank(b) > syncIntentRank(a) ? b : a;
 }
 
@@ -282,11 +273,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     return unsavedLocalBody !== null;
   }
 
-  function currentIssuePlatformHost(
-    owner: string,
-    name: string,
-    number: number,
-  ): string | undefined {
+  function currentIssuePlatformHost(owner: string, name: string, number: number): string | undefined {
     if (
       issueDetail &&
       issueDetail.repo_owner === owner &&
@@ -318,11 +305,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     );
   }
 
-  function currentIssueDetailRef(
-    owner: string,
-    name: string,
-    number: number,
-  ): IssueDetailRequestRef {
+  function currentIssueDetailRef(owner: string, name: string, number: number): IssueDetailRequestRef {
     const provider = issueDetail?.repo?.provider ?? selectedIssue?.provider;
     const repoPath = issueDetail?.repo?.repo_path ?? selectedIssue?.repoPath;
     if (!provider || !repoPath) {
@@ -330,8 +313,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     }
     return issueDetailRequestRef(owner, name, number, {
       provider,
-      platformHost:
-        issueDetail?.repo?.platform_host ?? selectedIssue?.platformHost,
+      platformHost: issueDetail?.repo?.platform_host ?? selectedIssue?.platformHost,
       repoPath,
     });
   }
@@ -364,15 +346,8 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     // sync mode joins the in-flight load and may promote the sync
     // intent if its requested mode is stronger.
     const key = `${requestRef.provider}:${requestRef.platformHost}:${requestRef.repoPath}/${number}`;
-    if (
-      detailLoading &&
-      activeDetailLoad?.key === key &&
-      activeDetailLoad.promise !== null
-    ) {
-      activeDetailLoad.syncMode = strongerSyncMode(
-        activeDetailLoad.syncMode,
-        syncMode,
-      );
+    if (detailLoading && activeDetailLoad?.key === key && activeDetailLoad.promise !== null) {
+      activeDetailLoad.syncMode = strongerSyncMode(activeDetailLoad.syncMode, syncMode);
       return activeDetailLoad.promise;
     }
 
@@ -389,17 +364,14 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     detailError = null;
     const promise = (async () => {
       try {
-        const { data, error: requestError } = await apiClient.GET(
-          providerItemPath("issues", requestRef, ""),
-          {
-            params: {
-              path: {
-                ...providerRouteParams(requestRef),
-                number: requestRef.number,
-              },
+        const { data, error: requestError } = await apiClient.GET(providerItemPath("issues", requestRef, ""), {
+          params: {
+            path: {
+              ...providerRouteParams(requestRef),
+              number: requestRef.number,
             },
           },
-        );
+        });
         if (gen !== issueSyncGeneration) return;
         if (requestError) {
           throw new Error(apiErrorMessage(requestError, "failed to load issue"));
@@ -425,14 +397,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
       if (gen === issueSyncGeneration && finalSyncMode === true) {
         void syncIssueDetail(owner, name, number, gen, requestRef);
       } else if (gen === issueSyncGeneration && finalSyncMode === "background") {
-        void enqueueBackgroundIssueSync(
-          owner,
-          name,
-          number,
-          gen,
-          issueDetail?.detail_fetched_at,
-          requestRef,
-        );
+        void enqueueBackgroundIssueSync(owner, name, number, gen, issueDetail?.detail_fetched_at, requestRef);
       }
     })();
     currentLoad.promise = promise;
@@ -449,26 +414,16 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
   ): Promise<void> {
     detailSyncing = true;
     try {
-      const { error: requestError } = await apiClient.POST(
-        providerItemPath("issues", requestRef, "/sync/async"),
-        {
-          params: {
-            path: {
-              ...providerRouteParams(requestRef),
-              number: requestRef.number,
-            },
+      const { error: requestError } = await apiClient.POST(providerItemPath("issues", requestRef, "/sync/async"), {
+        params: {
+          path: {
+            ...providerRouteParams(requestRef),
+            number: requestRef.number,
           },
         },
-      );
+      });
       if (requestError) return;
-      await refreshAfterBackgroundIssueSync(
-        owner,
-        name,
-        number,
-        gen,
-        previousFetchedAt,
-        requestRef,
-      );
+      await refreshAfterBackgroundIssueSync(owner, name, number, gen, previousFetchedAt, requestRef);
     } finally {
       if (gen === issueSyncGeneration) detailSyncing = false;
       void syncDep?.refreshSyncStatus?.();
@@ -504,14 +459,11 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
   ): Promise<void> {
     detailSyncing = true;
     try {
-      const { data, error: requestError } = await apiClient.POST(
-        providerItemPath("issues", ref, "/sync"),
-        {
-          params: {
-            path: { ...providerRouteParams(ref), number: ref.number },
-          },
+      const { data, error: requestError } = await apiClient.POST(providerItemPath("issues", ref, "/sync"), {
+        params: {
+          path: { ...providerRouteParams(ref), number: ref.number },
         },
-      );
+      });
       if (gen !== issueSyncGeneration) return;
       if (requestError) {
         throw new Error(apiErrorMessage(requestError, "sync failed"));
@@ -545,14 +497,11 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     expectedGen: number = issueSyncGeneration,
   ): Promise<void> {
     try {
-      const { data } = await apiClient.GET(
-        providerItemPath("issues", ref, ""),
-        {
-          params: {
-            path: { ...providerRouteParams(ref), number: ref.number },
-          },
+      const { data } = await apiClient.GET(providerItemPath("issues", ref, ""), {
+        params: {
+          path: { ...providerRouteParams(ref), number: ref.number },
         },
-      );
+      });
       // Re-check the generation after the awaited request: if the
       // selected issue changed mid-flight, dropping the assignment
       // keeps the new selection's data from being clobbered.
@@ -600,27 +549,16 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     unsavedLocalBody = null;
   }
 
-  async function setIssueLabels(
-    owner: string,
-    name: string,
-    number: number,
-    labels: string[],
-  ): Promise<Label[]> {
+  async function setIssueLabels(owner: string, name: string, number: number, labels: string[]): Promise<Label[]> {
     const ref = currentIssueDetailRef(owner, name, number);
-    const { data, error: requestError } = await apiClient.PUT(
-      providerItemPath("issues", ref, "/labels"),
-      {
-        params: {
-          path: { ...providerRouteParams(ref), number },
-        },
-        body: { labels },
+    const { data, error: requestError } = await apiClient.PUT(providerItemPath("issues", ref, "/labels"), {
+      params: {
+        path: { ...providerRouteParams(ref), number },
       },
-    );
+      body: { labels },
+    });
     if (requestError) {
-      const message = apiErrorMessage(
-        requestError,
-        "failed to update labels",
-      );
+      const message = apiErrorMessage(requestError, "failed to update labels");
       detailError = message;
       throw new Error(message);
     }
@@ -638,29 +576,19 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     return nextLabels;
   }
 
-  async function submitIssueComment(
-    owner: string,
-    name: string,
-    number: number,
-    body: string,
-  ): Promise<void> {
+  async function submitIssueComment(owner: string, name: string, number: number, body: string): Promise<void> {
     const ref = currentIssueDetailRef(owner, name, number);
 
     detailError = null;
     try {
-      const { error: requestError } = await apiClient.POST(
-        providerItemPath("issues", ref, "/comments"),
-        {
-          params: {
-            path: { ...providerRouteParams(ref), number },
-          },
-          body: { body },
+      const { error: requestError } = await apiClient.POST(providerItemPath("issues", ref, "/comments"), {
+        params: {
+          path: { ...providerRouteParams(ref), number },
         },
-      );
+        body: { body },
+      });
       if (requestError) {
-        throw new Error(
-          apiErrorMessage(requestError, "failed to post comment"),
-        );
+        throw new Error(apiErrorMessage(requestError, "failed to post comment"));
       }
     } catch (err) {
       detailError = err instanceof Error ? err.message : String(err);
@@ -691,23 +619,18 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
 
     detailError = null;
     try {
-      const { error: requestError } = await apiClient.PATCH(
-        providerItemPath("issues", ref, "/comments/{comment_id}"),
-        {
-          params: {
-            path: {
-              ...providerRouteParams(ref),
-              number,
-              comment_id: commentID,
-            },
+      const { error: requestError } = await apiClient.PATCH(providerItemPath("issues", ref, "/comments/{comment_id}"), {
+        params: {
+          path: {
+            ...providerRouteParams(ref),
+            number,
+            comment_id: commentID,
           },
-          body: { body },
         },
-      );
+        body: { body },
+      });
       if (requestError) {
-        throw new Error(
-          apiErrorMessage(requestError, "failed to edit comment"),
-        );
+        throw new Error(apiErrorMessage(requestError, "failed to edit comment"));
       }
     } catch (err) {
       detailError = err instanceof Error ? err.message : String(err);
@@ -731,11 +654,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     body: string,
   ): void {
     if (!issueDetail) return;
-    if (
-      issueDetail.repo_owner !== owner ||
-      issueDetail.repo_name !== name ||
-      issueDetail.issue.Number !== number
-    ) {
+    if (issueDetail.repo_owner !== owner || issueDetail.repo_name !== name || issueDetail.issue.Number !== number) {
       return;
     }
     unsavedLocalBody = { provider, platformHost, owner, name, number };
@@ -772,9 +691,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     // forge a collision with a different target. provider and
     // platformHost are part of the key so the same owner/name/number
     // on different hosts or providers can't share a queue slot.
-    return JSON.stringify([
-      provider, platformHost ?? "", owner, name, number,
-    ]);
+    return JSON.stringify([provider, platformHost ?? "", owner, name, number]);
   }
 
   async function runIssueBodyPatch(
@@ -796,23 +713,17 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
     // that happens to share owner/name/number.
     let localBodyMatchesSent = false;
     try {
-      const { data, error: requestError } =
-        await apiClient.PATCH(
-          providerItemPath("issues", ref, ""),
-          {
-            params: {
-              path: {
-                ...providerRouteParams(ref),
-                number,
-              },
-            },
-            body: { body },
+      const { data, error: requestError } = await apiClient.PATCH(providerItemPath("issues", ref, ""), {
+        params: {
+          path: {
+            ...providerRouteParams(ref),
+            number,
           },
-        );
+        },
+        body: { body },
+      });
       if (requestError) {
-        throw new Error(
-          apiErrorMessage(requestError, "failed to update issue"),
-        );
+        throw new Error(apiErrorMessage(requestError, "failed to update issue"));
       }
       succeeded = true;
       localBodyMatchesSent =
@@ -827,8 +738,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
         issueDetail = data as IssueDetail;
       }
     } catch (err) {
-      detailError =
-        err instanceof Error ? err.message : String(err);
+      detailError = err instanceof Error ? err.message : String(err);
     }
     if (
       succeeded &&
@@ -865,9 +775,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
       repoPath: string;
     },
   ): Promise<void> {
-    const key = issueSaveQueueKey(
-      routeRef.provider, routeRef.platformHost, owner, name, number,
-    );
+    const key = issueSaveQueueKey(routeRef.provider, routeRef.platformHost, owner, name, number);
     queuedIssueSaves.set(key, { body, routeRef });
     const existing = inflightIssueSaves.get(key);
     if (existing) return existing;
@@ -876,9 +784,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
         while (queuedIssueSaves.has(key)) {
           const next = queuedIssueSaves.get(key)!;
           queuedIssueSaves.delete(key);
-          await runIssueBodyPatch(
-            owner, name, number, next.body, next.routeRef,
-          );
+          await runIssueBodyPatch(owner, name, number, next.body, next.routeRef);
         }
       } finally {
         inflightIssueSaves.delete(key);
@@ -910,9 +816,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
           },
         });
         if (requestError) {
-          throw new Error(
-            apiErrorMessage(requestError, "failed to unstar issue"),
-          );
+          throw new Error(apiErrorMessage(requestError, "failed to unstar issue"));
         }
       } else {
         const { error: requestError } = await apiClient.PUT("/starred", {
@@ -927,9 +831,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
           },
         });
         if (requestError) {
-          throw new Error(
-            apiErrorMessage(requestError, "failed to star issue"),
-          );
+          throw new Error(apiErrorMessage(requestError, "failed to star issue"));
         }
       }
     } catch (err) {
@@ -983,8 +885,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
         (i.repo_owner ?? "") === selectedIssue!.owner &&
         (i.repo_name ?? "") === selectedIssue!.name &&
         i.Number === selectedIssue!.number &&
-        (!selectedIssue!.platformHost ||
-          i.platform_host === selectedIssue!.platformHost),
+        (!selectedIssue!.platformHost || i.platform_host === selectedIssue!.platformHost),
     );
     if (idx < list.length - 1) {
       const next = list[idx + 1];
@@ -1023,8 +924,7 @@ export function createIssuesStore(opts: IssuesStoreOptions) {
         (i.repo_owner ?? "") === selectedIssue!.owner &&
         (i.repo_name ?? "") === selectedIssue!.name &&
         i.Number === selectedIssue!.number &&
-        (!selectedIssue!.platformHost ||
-          i.platform_host === selectedIssue!.platformHost),
+        (!selectedIssue!.platformHost || i.platform_host === selectedIssue!.platformHost),
     );
     if (idx > 0) {
       const prev = list[idx - 1];

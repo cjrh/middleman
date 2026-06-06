@@ -1,17 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/svelte";
-import {
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { tick } from "svelte";
 import FilterDropdown from "./FilterDropdown.svelte";
 
@@ -85,11 +73,7 @@ describe("FilterDropdown", () => {
       name: /filters/i,
     });
 
-    expect(
-      trigger.querySelector(
-        'polygon[points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"]',
-      ),
-    ).toBeNull();
+    expect(trigger.querySelector('polygon[points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"]')).toBeNull();
   });
 
   it("supports single-select actions that close after selection", async () => {
@@ -163,11 +147,7 @@ describe("FilterDropdown", () => {
       }),
     );
 
-    expect(
-      document
-        .querySelector(".filter-dropdown")
-        ?.classList.contains("filter-dropdown--align-end"),
-    ).toBe(true);
+    expect(document.querySelector(".filter-dropdown")?.classList.contains("filter-dropdown--align-end")).toBe(true);
   });
 
   it("closes and blocks selection when disabled flips true while open", async () => {
@@ -195,9 +175,7 @@ describe("FilterDropdown", () => {
       },
     });
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: /status/i }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: /status/i }));
     expect(document.querySelector(".filter-dropdown")).toBeTruthy();
 
     await rerender({

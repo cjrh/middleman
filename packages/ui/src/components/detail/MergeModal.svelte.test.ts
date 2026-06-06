@@ -1,12 +1,8 @@
 import { cleanup, render } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import MergeModal from "./MergeModal.svelte";
-import {
-  getStackDepth,
-  getTopFrame,
-  resetModalStack,
-} from "../../stores/keyboard/modal-stack.svelte.js";
+import { getStackDepth, getTopFrame, resetModalStack } from "../../stores/keyboard/modal-stack.svelte.js";
 
 const baseProps = {
   owner: "octo",

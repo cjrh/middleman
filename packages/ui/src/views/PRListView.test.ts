@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { tick } from "svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { NAVIGATE_KEY, SIDEBAR_KEY, STORES_KEY } from "../context.js";
 import type { PullRequestRouteRef } from "../routes.js";
 
@@ -36,7 +36,11 @@ class ResizeObserverMock {
 
   observe(): void {
     this.callback(
-      [{ contentRect: { width: observedWidth.value } } as ResizeObserverEntry],
+      [
+        {
+          contentRect: { width: observedWidth.value },
+        } as ResizeObserverEntry,
+      ],
       this as unknown as ResizeObserver,
     );
   }

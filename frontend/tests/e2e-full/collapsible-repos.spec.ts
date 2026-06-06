@@ -5,13 +5,11 @@ import { expect, test, type Page } from "@playwright/test";
 // Open issues (5): widgets#10, #11, #13, tools#5, group/project#11
 
 async function waitForPullList(page: Page): Promise<void> {
-  await page.locator(".pull-item").first()
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".pull-item").first().waitFor({ state: "visible", timeout: 10_000 });
 }
 
 async function waitForIssueList(page: Page): Promise<void> {
-  await page.locator(".issue-item").first()
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".issue-item").first().waitFor({ state: "visible", timeout: 10_000 });
 }
 
 function widgetsHeader(page: Page) {
@@ -26,10 +24,7 @@ function newStatusHeader(page: Page) {
   return page.locator(".repo-header", { hasText: "New" });
 }
 
-async function selectPullGrouping(
-  page: Page,
-  label: string | RegExp,
-): Promise<void> {
+async function selectPullGrouping(page: Page, label: string | RegExp): Promise<void> {
   const groupButton = page.locator(".group-btn", { hasText: label });
   if (await groupButton.isVisible()) {
     await groupButton.click();
@@ -37,9 +32,7 @@ async function selectPullGrouping(
   }
 
   await page.getByRole("button", { name: "Filters" }).click();
-  await page.locator(".filter-dropdown .filter-item", { hasText: label })
-    .last()
-    .click();
+  await page.locator(".filter-dropdown .filter-item", { hasText: label }).last().click();
 }
 
 test.describe("collapsible repo groups", () => {
@@ -67,9 +60,7 @@ test.describe("collapsible repo groups", () => {
 
     await expect(widgetsHeader(page)).toHaveAttribute("aria-expanded", "false");
     await expect(widgetsHeader(page)).toBeVisible();
-    await expect(
-      widgetsHeader(page).locator(".repo-header__count"),
-    ).toHaveText("4");
+    await expect(widgetsHeader(page).locator(".repo-header__count")).toHaveText("4");
 
     // Only acme/tools' PRs remain visible (tools#1 + stack #10/#11/#12).
     await expect(page.locator(".pull-item")).toHaveCount(4);
@@ -153,9 +144,7 @@ test.describe("collapsible repo groups", () => {
     // Collapse widgets: 2 issues remain (tools#5 and GitLab group/project#11).
     await widgetsHeader(page).click();
     await expect(widgetsHeader(page)).toHaveAttribute("aria-expanded", "false");
-    await expect(
-      widgetsHeader(page).locator(".repo-header__count"),
-    ).toHaveText("3");
+    await expect(widgetsHeader(page).locator(".repo-header__count")).toHaveText("3");
     await expect(page.locator(".issue-item")).toHaveCount(2);
 
     // Expand again: back to 5.

@@ -5,13 +5,11 @@ import { expect, test, type Page } from "@playwright/test";
 // Open issues (5): widgets#10, #11, #13, tools#5, group/project#11
 
 async function waitForPullList(page: Page): Promise<void> {
-  await page.locator(".pull-item").first()
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".pull-item").first().waitFor({ state: "visible", timeout: 10_000 });
 }
 
 async function waitForIssueList(page: Page): Promise<void> {
-  await page.locator(".issue-item").first()
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".issue-item").first().waitFor({ state: "visible", timeout: 10_000 });
 }
 
 async function openActivityViewDropdown(page: Page) {
@@ -24,18 +22,12 @@ async function openActivityViewDropdown(page: Page) {
   return dropdown;
 }
 
-async function selectActivityViewItem(
-  page: Page,
-  label: string | RegExp,
-): Promise<void> {
+async function selectActivityViewItem(page: Page, label: string | RegExp): Promise<void> {
   const dropdown = await openActivityViewDropdown(page);
   await dropdown.locator(".filter-item", { hasText: label }).click();
 }
 
-async function selectPullGrouping(
-  page: Page,
-  label: string | RegExp,
-): Promise<void> {
+async function selectPullGrouping(page: Page, label: string | RegExp): Promise<void> {
   const groupButton = page.locator(".group-btn", { hasText: label });
   if (await groupButton.isVisible()) {
     await groupButton.click();
@@ -43,9 +35,7 @@ async function selectPullGrouping(
   }
 
   await page.getByRole("button", { name: "Filters" }).click();
-  await page.locator(".filter-dropdown .filter-item", { hasText: label })
-    .last()
-    .click();
+  await page.locator(".filter-dropdown .filter-item", { hasText: label }).last().click();
 }
 
 test.describe("grouping toggle", () => {
@@ -76,7 +66,9 @@ test.describe("grouping toggle", () => {
     await selectPullGrouping(page, "All");
 
     // Repo headers should disappear.
-    await expect(page.locator(".repo-header")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator(".repo-header")).toHaveCount(0, {
+      timeout: 5_000,
+    });
 
     // Repo badges should appear on each item.
     const badges = page.locator(".repo-chip");
@@ -91,7 +83,9 @@ test.describe("grouping toggle", () => {
   test("toggle persists across page reload", async ({ page }) => {
     // Switch to ungrouped.
     await selectPullGrouping(page, "All");
-    await expect(page.locator(".repo-header")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator(".repo-header")).toHaveCount(0, {
+      timeout: 5_000,
+    });
 
     // Verify persisted state in a fresh page in same browser context.
     const refreshedPage = await page.context().newPage();
@@ -108,7 +102,9 @@ test.describe("grouping toggle", () => {
   test("toggle syncs from PRs to issues", async ({ page }) => {
     // Switch to ungrouped in PR list.
     await selectPullGrouping(page, "All");
-    await expect(page.locator(".repo-header")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator(".repo-header")).toHaveCount(0, {
+      timeout: 5_000,
+    });
 
     // Navigate to issues.
     await page.goto("/issues");
@@ -122,7 +118,9 @@ test.describe("grouping toggle", () => {
   test("toggle syncs to activity threaded view", async ({ page }) => {
     // Switch to ungrouped in PR list.
     await selectPullGrouping(page, "All");
-    await expect(page.locator(".repo-header")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator(".repo-header")).toHaveCount(0, {
+      timeout: 5_000,
+    });
 
     // Navigate to activity.
     await page.goto("/");
@@ -131,8 +129,7 @@ test.describe("grouping toggle", () => {
     await selectActivityViewItem(page, "Threaded");
 
     // Wait for threaded view to render.
-    await page.locator(".threaded-view .item-row").first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".threaded-view .item-row").first().waitFor({ state: "visible", timeout: 10_000 });
 
     // Repo headers should not be visible (ungrouped).
     await expect(page.locator(".threaded-view .repo-header")).toHaveCount(0);
@@ -148,13 +145,11 @@ test.describe("grouping toggle", () => {
 
     // Switch to threaded + ungrouped.
     await selectActivityViewItem(page, "Threaded");
-    await page.locator(".threaded-view .item-row").first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".threaded-view .item-row").first().waitFor({ state: "visible", timeout: 10_000 });
     await selectActivityViewItem(page, "All");
 
     // Wait for repo tags to appear (ungrouped).
-    await page.locator(".repo-tag").first()
-      .waitFor({ state: "visible", timeout: 5_000 });
+    await page.locator(".repo-tag").first().waitFor({ state: "visible", timeout: 5_000 });
 
     // Find all item rows whose ref is exactly "#1" (not #10, #11, etc.).
     const refOnes = page.locator(".item-row .item-ref").filter({ hasText: /^#1$/ });
@@ -168,8 +163,7 @@ test.describe("grouping toggle", () => {
 
     // In flat mode (default), the view dropdown should not offer grouping.
     let dropdown = await openActivityViewDropdown(page);
-    await expect(dropdown.locator(".filter-item", { hasText: /By repo/i }))
-      .toHaveCount(0);
+    await expect(dropdown.locator(".filter-item", { hasText: /By repo/i })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     // Switch to threaded mode.
@@ -178,16 +172,19 @@ test.describe("grouping toggle", () => {
 
     // Now grouping controls should be available from the view dropdown.
     dropdown = await openActivityViewDropdown(page);
-    await expect(dropdown.locator(".filter-item", { hasText: /By repo/i }))
-      .toBeVisible();
+    await expect(dropdown.locator(".filter-item", { hasText: /By repo/i })).toBeVisible();
   });
 
   test("activity flat table rows respect hide org name", async ({ page }) => {
     await page.goto("/?view=flat");
 
-    const row = page.locator(".activity-table .activity-row", {
-      has: page.locator(".item-title", { hasText: "Add widget caching layer" }),
-    }).first();
+    const row = page
+      .locator(".activity-table .activity-row", {
+        has: page.locator(".item-title", {
+          hasText: "Add widget caching layer",
+        }),
+      })
+      .first();
     await expect(row).toBeVisible({ timeout: 10_000 });
 
     const repoLabel = row.locator(".col-repo");
@@ -203,8 +200,7 @@ test.describe("grouping toggle", () => {
     await page.goto("/");
 
     await selectActivityViewItem(page, "Threaded");
-    await page.locator(".threaded-view .repo-header").first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".threaded-view .repo-header").first().waitFor({ state: "visible", timeout: 10_000 });
 
     await expect(
       page.locator(".threaded-view .repo-header .repo-name", {
@@ -230,13 +226,16 @@ test.describe("grouping toggle", () => {
     await page.goto("/");
 
     await selectActivityViewItem(page, "Threaded");
-    await page.locator(".threaded-view .item-row").first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".threaded-view .item-row").first().waitFor({ state: "visible", timeout: 10_000 });
     await selectActivityViewItem(page, "All");
 
-    const row = page.locator(".threaded-view .item-row", {
-      has: page.locator(".item-title", { hasText: "Add widget caching layer" }),
-    }).first();
+    const row = page
+      .locator(".threaded-view .item-row", {
+        has: page.locator(".item-title", {
+          hasText: "Add widget caching layer",
+        }),
+      })
+      .first();
     await expect(row).toBeVisible();
     // PR #1 was opened by alice; bob posted the latest review. The item row
     // attributes the thread to its author (alice), not the latest actor.
@@ -261,22 +260,26 @@ test.describe("grouping toggle", () => {
     await input.fill("zzz_no_match_zzz");
     // Wait for the flat view to show the zero-results message
     // (not the loading placeholder) to prove the API returned 0 items.
-    await expect(page.locator(".activity-feed .empty-state"))
-      .toHaveText("No activity found", { timeout: 10_000 });
+    await expect(page.locator(".activity-feed .empty-state")).toHaveText("No activity found", {
+      timeout: 10_000,
+    });
 
     // Now switch to threaded + ungrouped. ActivityThreaded receives [].
     await selectActivityViewItem(page, "Threaded");
     await selectActivityViewItem(page, "All");
 
     // The threaded view's own empty state should render.
-    await expect(page.locator(".threaded-view .empty-state"))
-      .toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".threaded-view .empty-state")).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test("j/k navigation follows flat order in ungrouped mode", async ({ page }) => {
     // Switch to ungrouped.
     await selectPullGrouping(page, "All");
-    await expect(page.locator(".repo-header")).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator(".repo-header")).toHaveCount(0, {
+      timeout: 5_000,
+    });
 
     // Capture the visible flat order of items.
     const allItems = page.locator(".pull-item");

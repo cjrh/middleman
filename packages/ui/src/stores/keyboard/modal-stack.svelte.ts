@@ -14,10 +14,7 @@ interface InternalFrame extends ModalFrame {
 
 let stack = $state<InternalFrame[]>([]);
 
-export function pushModalFrame(
-  frameId: string,
-  actions: ModalFrameAction[],
-): () => void {
+export function pushModalFrame(frameId: string, actions: ModalFrameAction[]): () => void {
   const token = Symbol(frameId);
   stack = [...stack, { frameId, actions: [...actions], __token: token }];
   return () => {
@@ -41,7 +38,10 @@ export function getStackDepth(): number {
 }
 
 export function getStack(): ModalFrame[] {
-  return stack.map((f) => ({ frameId: f.frameId, actions: [...f.actions] }));
+  return stack.map((f) => ({
+    frameId: f.frameId,
+    actions: [...f.actions],
+  }));
 }
 
 export function resetModalStack(): void {

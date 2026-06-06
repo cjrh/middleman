@@ -9,25 +9,30 @@ test.beforeEach(async ({ page }) => {
 test("design system page renders chip matrix with shared styles", async ({ page }) => {
   await page.goto("/design-system");
 
-  await expect(
-    page.getByRole("heading", { name: "Design system" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Design system" })).toBeVisible();
 
-  const smGreenChip = page.locator('[data-size="sm"] .chip--green', {
-    hasText: "Green",
-  }).first();
-  const mdGreenChip = page.locator('[data-size="md"] .chip--green', {
-    hasText: "Green",
-  }).first();
-  const mutedChip = page.locator(".chip--muted", {
-    hasText: "Muted",
-  }).first();
-  const plainCaseChip = page.getByText("plain case", { exact: true }).first();
-  const descenderChip = page.getByText("kenn-io/msgvault", { exact: true })
+  const smGreenChip = page
+    .locator('[data-size="sm"] .chip--green', {
+      hasText: "Green",
+    })
     .first();
-  const interactiveChip = page.getByRole("button", {
-    name: "Interactive",
-  }).first();
+  const mdGreenChip = page
+    .locator('[data-size="md"] .chip--green', {
+      hasText: "Green",
+    })
+    .first();
+  const mutedChip = page
+    .locator(".chip--muted", {
+      hasText: "Muted",
+    })
+    .first();
+  const plainCaseChip = page.getByText("plain case", { exact: true }).first();
+  const descenderChip = page.getByText("kenn-io/msgvault", { exact: true }).first();
+  const interactiveChip = page
+    .getByRole("button", {
+      name: "Interactive",
+    })
+    .first();
 
   await expect(smGreenChip).toBeVisible();
   await expect(mdGreenChip).toBeVisible();
@@ -99,14 +104,8 @@ test("design system page renders chip matrix with shared styles", async ({ page 
 });
 
 test("chip descenders render without clipping", async ({ page }, testInfo) => {
-  test.skip(
-    process.env.MIDDLEMAN_VISUAL_E2E !== "1",
-    "Set MIDDLEMAN_VISUAL_E2E=1 to run chip visual snapshots.",
-  );
-  test.skip(
-    testInfo.project.name !== "chromium",
-    "Chip visual snapshot is Chromium-only.",
-  );
+  test.skip(process.env.MIDDLEMAN_VISUAL_E2E !== "1", "Set MIDDLEMAN_VISUAL_E2E=1 to run chip visual snapshots.");
+  test.skip(testInfo.project.name !== "chromium", "Chip visual snapshot is Chromium-only.");
 
   await page.goto("/design-system");
   const descenderChip = page.getByTestId("descender-chip");

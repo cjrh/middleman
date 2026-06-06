@@ -1,9 +1,5 @@
 import type { KanbanStatus, PullRequest } from "../api/types.js";
-import {
-  providerItemPath,
-  providerRouteParams,
-  type ProviderRouteRef,
-} from "../api/provider-routes.js";
+import { providerItemPath, providerRouteParams, type ProviderRouteRef } from "../api/provider-routes.js";
 import type { MiddlemanClient } from "../types.js";
 
 export type FetchPullResult =
@@ -37,10 +33,7 @@ export interface PullsStoreOptions {
   getView?: () => "list" | "board";
 }
 
-function apiErrorMessage(
-  error: { detail?: string; title?: string },
-  fallback: string,
-): string {
+function apiErrorMessage(error: { detail?: string; title?: string }, fallback: string): string {
   return error.detail ?? error.title ?? fallback;
 }
 
@@ -83,8 +76,7 @@ export function createPullsStore(opts: PullsStoreOptions) {
   function pullsByRepo(): Map<string, PullRequest[]> {
     const map = new Map<string, PullRequest[]>();
     for (const pr of pulls) {
-      const key =
-        `${pr.repo_owner ?? ""}/${pr.repo_name ?? ""}`;
+      const key = `${pr.repo_owner ?? ""}/${pr.repo_name ?? ""}`;
       const existing = map.get(key);
       if (existing !== undefined) {
         existing.push(pr);
@@ -144,15 +136,12 @@ export function createPullsStore(opts: PullsStoreOptions) {
       return;
     }
     const idx = list.findIndex(
-      (pr) =>
-        (pr.repo_owner ?? "") === sel.owner &&
-        (pr.repo_name ?? "") === sel.name &&
-        pr.Number === sel.number,
+      (pr) => (pr.repo_owner ?? "") === sel.owner && (pr.repo_name ?? "") === sel.name && pr.Number === sel.number,
     );
-      const next = list[idx + 1];
-      if (next !== undefined) {
-        selectPRFromPull(next);
-      }
+    const next = list[idx + 1];
+    if (next !== undefined) {
+      selectPRFromPull(next);
+    }
   }
 
   function selectPrevPR(): void {
@@ -167,10 +156,7 @@ export function createPullsStore(opts: PullsStoreOptions) {
       return;
     }
     const idx = list.findIndex(
-      (pr) =>
-        (pr.repo_owner ?? "") === sel.owner &&
-        (pr.repo_name ?? "") === sel.name &&
-        pr.Number === sel.number,
+      (pr) => (pr.repo_owner ?? "") === sel.owner && (pr.repo_name ?? "") === sel.name && pr.Number === sel.number,
     );
     if (idx > 0) {
       const prev = list[idx - 1];
@@ -182,9 +168,7 @@ export function createPullsStore(opts: PullsStoreOptions) {
 
   // --- writes ---
 
-  function setFilterKanban(
-    kanban: KanbanStatus | undefined,
-  ): void {
+  function setFilterKanban(kanban: KanbanStatus | undefined): void {
     filterKanban = kanban;
   }
 
@@ -215,14 +199,7 @@ export function createPullsStore(opts: PullsStoreOptions) {
   }
 
   function selectPRFromPull(pr: PullRequest): void {
-    selectPR(
-      pr.repo.owner,
-      pr.repo.name,
-      pr.Number,
-      pr.repo.provider,
-      pr.repo.platform_host,
-      pr.repo.repo_path,
-    );
+    selectPR(pr.repo.owner, pr.repo.name, pr.Number, pr.repo.provider, pr.repo.platform_host, pr.repo.repo_path);
   }
 
   function clearSelection(): void {
@@ -230,42 +207,19 @@ export function createPullsStore(opts: PullsStoreOptions) {
   }
 
   /** Returns the current kanban status for a PR. */
-  function getPullKanbanStatus(
-    owner: string,
-    name: string,
-    number: number,
-  ): KanbanStatus | undefined {
-    const pr = pulls.find(
-      (p) =>
-        p.repo_owner === owner &&
-        p.repo_name === name &&
-        p.Number === number,
-    );
+  function getPullKanbanStatus(owner: string, name: string, number: number): KanbanStatus | undefined {
+    const pr = pulls.find((p) => p.repo_owner === owner && p.repo_name === name && p.Number === number);
     return pr?.KanbanStatus as KanbanStatus | undefined;
   }
 
   /** Optimistically update a single PR's kanban status. */
-  function optimisticKanbanUpdate(
-    owner: string,
-    name: string,
-    number: number,
-    status: KanbanStatus,
-  ): void {
+  function optimisticKanbanUpdate(owner: string, name: string, number: number, status: KanbanStatus): void {
     pulls = pulls.map((pr) =>
-      pr.repo_owner === owner &&
-      pr.repo_name === name &&
-      pr.Number === number
-        ? { ...pr, KanbanStatus: status }
-        : pr,
+      pr.repo_owner === owner && pr.repo_name === name && pr.Number === number ? { ...pr, KanbanStatus: status } : pr,
     );
   }
 
-  async function togglePRStar(
-    owner: string,
-    name: string,
-    number: number,
-    currentlyStarred: boolean,
-  ): Promise<void> {
+  async function togglePRStar(owner: string, name: string, number: number, currentlyStarred: boolean): Promise<void> {
     try {
       if (currentlyStarred) {
         const { error } = await apiClient.DELETE("/starred", {
@@ -277,9 +231,7 @@ export function createPullsStore(opts: PullsStoreOptions) {
           },
         });
         if (error) {
-          throw new Error(
-            apiErrorMessage(error, "failed to unstar PR"),
-          );
+          throw new Error(apiErrorMessage(error, "failed to unstar PR"));
         }
       } else {
         const { error } = await apiClient.PUT("/starred", {
@@ -291,14 +243,11 @@ export function createPullsStore(opts: PullsStoreOptions) {
           },
         });
         if (error) {
-          throw new Error(
-            apiErrorMessage(error, "failed to star PR"),
-          );
+          throw new Error(apiErrorMessage(error, "failed to star PR"));
         }
       }
     } catch (err) {
-      storeError =
-        err instanceof Error ? err.message : String(err);
+      storeError = err instanceof Error ? err.message : String(err);
       return;
     }
     await loadPulls();
@@ -312,14 +261,11 @@ export function createPullsStore(opts: PullsStoreOptions) {
   ): Promise<FetchPullResult> {
     const ref = identity;
     try {
-      const { data, error, response } = await apiClient.GET(
-        providerItemPath("pulls", ref, ""),
-        {
-          params: {
-            path: { ...providerRouteParams(ref), number },
-          },
+      const { data, error, response } = await apiClient.GET(providerItemPath("pulls", ref, ""), {
+        params: {
+          path: { ...providerRouteParams(ref), number },
         },
-      );
+      });
       if (error || !data) {
         if (response?.status === 404) {
           return { status: "not-found" };
@@ -346,16 +292,12 @@ export function createPullsStore(opts: PullsStoreOptions) {
     } catch (err) {
       return {
         status: "error",
-        message: err instanceof Error
-          ? err.message
-          : "network error",
+        message: err instanceof Error ? err.message : "network error",
       };
     }
   }
 
-  async function loadPulls(
-    params?: PullsParams,
-  ): Promise<void> {
+  async function loadPulls(params?: PullsParams): Promise<void> {
     loading = true;
     storeError = null;
     try {
@@ -374,14 +316,11 @@ export function createPullsStore(opts: PullsStoreOptions) {
         params: { query: merged },
       });
       if (error) {
-        throw new Error(
-          apiErrorMessage(error, "failed to load pulls"),
-        );
+        throw new Error(apiErrorMessage(error, "failed to load pulls"));
       }
       pulls = (data as PullRequest[]) ?? [];
     } catch (err) {
-      storeError =
-        err instanceof Error ? err.message : String(err);
+      storeError = err instanceof Error ? err.message : String(err);
     } finally {
       loading = false;
     }

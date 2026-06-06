@@ -1,11 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/svelte";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { STORES_KEY } from "../../context.js";
 import { createDiffStore } from "../../stores/diff.svelte.js";
 import DiffToolbar from "./DiffToolbar.svelte";
@@ -32,39 +26,28 @@ describe("DiffToolbar", () => {
     expect(diff.getFileCategoryFilter()).toBe("all");
     expect(screen.queryByRole("combobox")).toBeNull();
 
-    const labels = within(screen.getByRole("group", {
-      name: "Filter changed files",
-    }))
+    const labels = within(
+      screen.getByRole("group", {
+        name: "Filter changed files",
+      }),
+    )
       .getAllByRole("button")
       .map((button) => button.textContent?.replace(/\s+/g, " ").trim());
-    expect(labels).toEqual([
-      "Plans/docs (0)",
-      "Code (0)",
-      "Tests (0)",
-      "Other (0)",
-      "Generated (0)",
-      "All (0)",
-    ]);
+    expect(labels).toEqual(["Plans/docs (0)", "Code (0)", "Tests (0)", "Other (0)", "Generated (0)", "All (0)"]);
 
-    expect(screen.getByRole("button", { name: "All (0)" })
-      .getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "All (0)" }).getAttribute("aria-pressed")).toBe("true");
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Code (0)" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Code (0)" }));
 
     expect(diff.getFileCategoryFilter()).toBe("code");
-    expect(screen.getByRole("button", { name: "Code (0)" })
-      .getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Code (0)" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("toggles the word wrap preference", async () => {
     const { diff } = renderToolbar();
     expect(screen.queryByRole("switch", { name: "Word wrap" })).toBeNull();
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "More diff filters" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "More diff filters" }));
     const wordWrap = screen.getByRole("switch", { name: "Word wrap" });
 
     expect(diff.getWordWrap()).toBe(false);
@@ -80,10 +63,10 @@ describe("DiffToolbar", () => {
   it("toggles the side-by-side diff preference", async () => {
     const { diff } = renderToolbar();
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "More diff filters" }),
-    );
-    const sideBySide = screen.getByRole("switch", { name: "Side-by-side diffs" });
+    await fireEvent.click(screen.getByRole("button", { name: "More diff filters" }));
+    const sideBySide = screen.getByRole("switch", {
+      name: "Side-by-side diffs",
+    });
 
     expect(diff.getViewMode()).toBe("unified");
     expect(sideBySide.getAttribute("aria-checked")).toBe("false");
@@ -104,9 +87,7 @@ describe("DiffToolbar", () => {
   it("hides rich preview controls when disabled", async () => {
     renderToolbar({ compact: true, showRichPreview: false });
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "More diff filters" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "More diff filters" }));
 
     expect(screen.queryByRole("switch", { name: "Rich preview" })).toBeNull();
   });
@@ -116,20 +97,18 @@ describe("DiffToolbar", () => {
 
     expect(screen.getByText("All")).toBeTruthy();
     expect(screen.getByText("Tab 4")).toBeTruthy();
-    expect(screen.queryByRole("group", {
-      name: "Filter changed files",
-    })).toBeNull();
+    expect(
+      screen.queryByRole("group", {
+        name: "Filter changed files",
+      }),
+    ).toBeNull();
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "More diff filters" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "More diff filters" }));
 
     const fileFilters = screen.getByRole("group", {
       name: "Filter changed files",
     });
-    await fireEvent.click(
-      within(fileFilters).getByRole("button", { name: "Code (0)" }),
-    );
+    await fireEvent.click(within(fileFilters).getByRole("button", { name: "Code (0)" }));
 
     expect(diff.getFileCategoryFilter()).toBe("code");
     expect(screen.getAllByText("Code").length).toBeGreaterThan(0);

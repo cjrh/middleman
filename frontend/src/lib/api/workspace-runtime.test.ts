@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   getWorkspaceRuntime,
@@ -15,24 +15,23 @@ describe("workspace-runtime api", () => {
   });
 
   it("loads runtime state and normalizes nullable arrays", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          launch_targets: null,
-          sessions: null,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            launch_targets: null,
+            sessions: null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
     );
 
     const runtime = await getWorkspaceRuntime("ws-1", fetchMock);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/workspaces/ws-1/runtime",
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/workspaces/ws-1/runtime");
     expect(runtime.launch_targets).toEqual([]);
     expect(runtime.sessions).toEqual([]);
   });
@@ -77,78 +76,54 @@ describe("workspace-runtime api", () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await launchWorkspaceSession("ws-1", "helper", fetchMock);
-    await renameWorkspaceSession(
-      "ws-1",
-      "ws-1:helper",
-      "Review helper",
-      fetchMock,
-    );
+    await renameWorkspaceSession("ws-1", "ws-1:helper", "Review helper", fetchMock);
     await stopWorkspaceSession("ws-1", "ws-1:helper", fetchMock);
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "/api/v1/workspaces/ws-1/runtime/sessions",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_key: "helper" }),
-      },
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/v1/workspaces/ws-1/runtime/sessions/ws-1%3Ahelper",
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "Review helper" }),
-      },
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      "/api/v1/workspaces/ws-1/runtime/sessions/ws-1%3Ahelper",
-      {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      },
-    );
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/workspaces/ws-1/runtime/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_key: "helper" }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/workspaces/ws-1/runtime/sessions/ws-1%3Ahelper", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Review helper" }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/v1/workspaces/ws-1/runtime/sessions/ws-1%3Ahelper", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
   });
 
   it("builds runtime websocket paths", () => {
-    expect(
-      workspaceSessionWebSocketPath("ws-1", "ws-1:helper"),
-    ).toBe(
+    expect(workspaceSessionWebSocketPath("ws-1", "ws-1:helper")).toBe(
       "/ws/v1/workspaces/ws-1/runtime/sessions/ws-1%3Ahelper/terminal",
     );
-    expect(workspaceTmuxWebSocketPath("ws-1")).toBe(
-      "/ws/v1/workspaces/ws-1/terminal",
-    );
+    expect(workspaceTmuxWebSocketPath("ws-1")).toBe("/ws/v1/workspaces/ws-1/terminal");
   });
 
   it("includes the configured base path in runtime and websocket paths", async () => {
     window.__BASE_PATH__ = "/middleman/";
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          launch_targets: [],
-          sessions: [],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            launch_targets: [],
+            sessions: [],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
     );
 
     await getWorkspaceRuntime("ws-1", fetchMock);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/middleman/api/v1/workspaces/ws-1/runtime",
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/middleman/api/v1/workspaces/ws-1/runtime");
     expect(workspaceSessionWebSocketPath("ws-1", "ws-1:helper")).toBe(
       "/middleman/ws/v1/workspaces/ws-1/runtime/sessions/ws-1%3Ahelper/terminal",
     );
-    expect(workspaceTmuxWebSocketPath("ws-1")).toBe(
-      "/middleman/ws/v1/workspaces/ws-1/terminal",
-    );
+    expect(workspaceTmuxWebSocketPath("ws-1")).toBe("/middleman/ws/v1/workspaces/ws-1/terminal");
   });
 });

@@ -92,10 +92,7 @@ export function defaultTerminalLayout(): TerminalLayoutState {
 
 export function clampTerminalHeight(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TERMINAL_HEIGHT;
-  return Math.max(
-    MIN_TERMINAL_HEIGHT,
-    Math.min(MAX_TERMINAL_HEIGHT, Math.round(value)),
-  );
+  return Math.max(MIN_TERMINAL_HEIGHT, Math.min(MAX_TERMINAL_HEIGHT, Math.round(value)));
 }
 
 export function clampRatio(value: number): number {
@@ -137,10 +134,7 @@ export function createLeaf(sessionKey: string, id = newPaneID()): PaneLeaf {
   return { type: "leaf", id, sessionKey };
 }
 
-export function createTerminalGroup(
-  sessionKey: string,
-  id = newPaneID(),
-): TerminalGroup {
+export function createTerminalGroup(sessionKey: string, id = newPaneID()): TerminalGroup {
   return {
     id,
     activeSessionKey: sessionKey,
@@ -197,29 +191,27 @@ export function splitSessionIntoPane(
   }
   const withoutSource = closeSessionInTree(node, sessionKey) ?? node;
   if (!withoutSource) return createLeaf(sessionKey);
-  return replaceLeaf(withoutSource, targetLeafID, (leaf): PaneSplit => ({
-    type: "split",
-    id: newPaneID(),
-    direction,
-    ratio: 0.5,
-    first: placement === "before" ? createLeaf(sessionKey) : leaf,
-    second: placement === "before" ? leaf : createLeaf(sessionKey),
-  }));
+  return replaceLeaf(
+    withoutSource,
+    targetLeafID,
+    (leaf): PaneSplit => ({
+      type: "split",
+      id: newPaneID(),
+      direction,
+      ratio: 0.5,
+      first: placement === "before" ? createLeaf(sessionKey) : leaf,
+      second: placement === "before" ? leaf : createLeaf(sessionKey),
+    }),
+  );
 }
 
-export function addSessionToTree(
-  node: PaneNode | null,
-  sessionKey: string,
-): PaneNode {
+export function addSessionToTree(node: PaneNode | null, sessionKey: string): PaneNode {
   if (!node) return createLeaf(sessionKey);
   if (containsSession(node, sessionKey)) return node;
   return splitPane(node, firstLeaf(node)?.id ?? null, sessionKey, "horizontal");
 }
 
-export function closeSessionInTree(
-  node: PaneNode | null,
-  sessionKey: string,
-): PaneNode | null {
+export function closeSessionInTree(node: PaneNode | null, sessionKey: string): PaneNode | null {
   if (!node) return null;
   if (node.type === "leaf") {
     return node.sessionKey === sessionKey ? null : node;
@@ -231,19 +223,13 @@ export function closeSessionInTree(
   return { ...node, first, second };
 }
 
-export function pruneTree(
-  node: PaneNode | null,
-  sessionKeys: readonly string[],
-): PaneNode | null {
+export function pruneTree(node: PaneNode | null, sessionKeys: readonly string[]): PaneNode | null {
   if (!node) return null;
   const allowed = new Set(sessionKeys);
   return pruneNode(node, allowed);
 }
 
-function pruneNode(
-  node: PaneNode,
-  allowed: ReadonlySet<string>,
-): PaneNode | null {
+function pruneNode(node: PaneNode, allowed: ReadonlySet<string>): PaneNode | null {
   if (node.type === "leaf") {
     return allowed.has(node.sessionKey) ? node : null;
   }
@@ -259,11 +245,7 @@ function pruneNode(
   };
 }
 
-export function updateSplitRatio(
-  node: PaneNode | null,
-  splitID: string,
-  ratio: number,
-): PaneNode | null {
+export function updateSplitRatio(node: PaneNode | null, splitID: string, ratio: number): PaneNode | null {
   if (!node) return null;
   if (node.type === "split" && node.id === splitID) {
     return { ...node, ratio: clampRatio(ratio) };
@@ -282,33 +264,21 @@ export function firstLeaf(node: PaneNode | null): PaneLeaf | null {
   return firstLeaf(node.first) ?? firstLeaf(node.second);
 }
 
-export function findLeafBySession(
-  node: PaneNode | null,
-  sessionKey: string,
-): PaneLeaf | null {
+export function findLeafBySession(node: PaneNode | null, sessionKey: string): PaneLeaf | null {
   if (!node) return null;
   if (node.type === "leaf") {
     return node.sessionKey === sessionKey ? node : null;
   }
-  return (
-    findLeafBySession(node.first, sessionKey) ??
-    findLeafBySession(node.second, sessionKey)
-  );
+  return findLeafBySession(node.first, sessionKey) ?? findLeafBySession(node.second, sessionKey);
 }
 
 export function collectSessionKeys(node: PaneNode | null): string[] {
   if (!node) return [];
   if (node.type === "leaf") return [node.sessionKey];
-  return [
-    ...collectSessionKeys(node.first),
-    ...collectSessionKeys(node.second),
-  ];
+  return [...collectSessionKeys(node.first), ...collectSessionKeys(node.second)];
 }
 
-export function containsSession(
-  node: PaneNode | null,
-  sessionKey: string,
-): boolean {
+export function containsSession(node: PaneNode | null, sessionKey: string): boolean {
   return findLeafBySession(node, sessionKey) !== null;
 }
 
@@ -318,39 +288,22 @@ export function countLeaves(node: PaneNode | null): number {
   return countLeaves(node.first) + countLeaves(node.second);
 }
 
-export function activeTerminalGroup(
-  layout: TerminalLayoutState,
-): TerminalGroup | null {
+export function activeTerminalGroup(layout: TerminalLayoutState): TerminalGroup | null {
   return (
-    layout.terminalGroups.find(
-      (group) => group.id === layout.activeTerminalGroupID,
-    ) ??
-    layout.terminalGroups[0] ??
-    null
+    layout.terminalGroups.find((group) => group.id === layout.activeTerminalGroupID) ?? layout.terminalGroups[0] ?? null
   );
 }
 
-export function terminalGroupForSession(
-  groups: readonly TerminalGroup[],
-  sessionKey: string,
-): TerminalGroup | null {
-  return (
-    groups.find((group) => containsSession(group.tree, sessionKey)) ?? null
-  );
+export function terminalGroupForSession(groups: readonly TerminalGroup[], sessionKey: string): TerminalGroup | null {
+  return groups.find((group) => containsSession(group.tree, sessionKey)) ?? null;
 }
 
-export function addTerminalGroup(
-  groups: readonly TerminalGroup[],
-  sessionKey: string,
-): TerminalGroup[] {
+export function addTerminalGroup(groups: readonly TerminalGroup[], sessionKey: string): TerminalGroup[] {
   if (terminalGroupForSession(groups, sessionKey)) return [...groups];
   return [...groups, createTerminalGroup(sessionKey)];
 }
 
-export function closeSessionInTerminalGroups(
-  groups: readonly TerminalGroup[],
-  sessionKey: string,
-): TerminalGroup[] {
+export function closeSessionInTerminalGroups(groups: readonly TerminalGroup[], sessionKey: string): TerminalGroup[] {
   return groups.flatMap((group) => {
     const tree = closeSessionInTree(group.tree, sessionKey);
     if (!tree) return [];
@@ -359,9 +312,7 @@ export function closeSessionInTerminalGroups(
         ...group,
         tree,
         activeSessionKey:
-          group.activeSessionKey === sessionKey
-            ? firstLeaf(tree)?.sessionKey ?? null
-            : group.activeSessionKey,
+          group.activeSessionKey === sessionKey ? (firstLeaf(tree)?.sessionKey ?? null) : group.activeSessionKey,
       },
     ];
   });
@@ -372,53 +323,33 @@ export function updateTerminalGroupTree(
   groupID: string,
   updater: (group: TerminalGroup) => TerminalGroup,
 ): TerminalGroup[] {
-  return groups.map((group) =>
-    group.id === groupID ? updater(group) : group,
-  );
+  return groups.map((group) => (group.id === groupID ? updater(group) : group));
 }
 
-export function collectWorkflowTabKeys(
-  node: WorkflowNode | null,
-): WorkflowTabKey[] {
+export function collectWorkflowTabKeys(node: WorkflowNode | null): WorkflowTabKey[] {
   if (!node) return [];
   if (node.type === "leaf") return node.tabs;
-  return [
-    ...collectWorkflowTabKeys(node.first),
-    ...collectWorkflowTabKeys(node.second),
-  ];
+  return [...collectWorkflowTabKeys(node.first), ...collectWorkflowTabKeys(node.second)];
 }
 
-export function firstWorkflowLeaf(
-  node: WorkflowNode | null,
-): WorkflowLeaf | null {
+export function firstWorkflowLeaf(node: WorkflowNode | null): WorkflowLeaf | null {
   if (!node) return null;
   if (node.type === "leaf") return node;
   return firstWorkflowLeaf(node.first) ?? firstWorkflowLeaf(node.second);
 }
 
-export function findWorkflowLeafByTab(
-  node: WorkflowNode | null,
-  tabKey: WorkflowTabKey,
-): WorkflowLeaf | null {
+export function findWorkflowLeafByTab(node: WorkflowNode | null, tabKey: WorkflowTabKey): WorkflowLeaf | null {
   if (!node) return null;
   if (node.type === "leaf") {
     return node.tabs.includes(tabKey) ? node : null;
   }
-  return (
-    findWorkflowLeafByTab(node.first, tabKey) ??
-    findWorkflowLeafByTab(node.second, tabKey)
-  );
+  return findWorkflowLeafByTab(node.first, tabKey) ?? findWorkflowLeafByTab(node.second, tabKey);
 }
 
-export function activateWorkflowTab(
-  node: WorkflowNode | null,
-  tabKey: WorkflowTabKey,
-): WorkflowNode | null {
+export function activateWorkflowTab(node: WorkflowNode | null, tabKey: WorkflowTabKey): WorkflowNode | null {
   if (!node) return null;
   if (node.type === "leaf") {
-    return node.tabs.includes(tabKey)
-      ? { ...node, activeTabKey: tabKey }
-      : node;
+    return node.tabs.includes(tabKey) ? { ...node, activeTabKey: tabKey } : node;
   }
   return {
     ...node,
@@ -490,9 +421,7 @@ export function normalizeWorkflowTree(
   node: WorkflowNode | null,
   availableTabKeys: readonly WorkflowTabKey[],
 ): WorkflowNode {
-  const available = uniqueWorkflowTabs(
-    availableTabKeys.length > 0 ? [...availableTabKeys] : ["home"],
-  );
+  const available = uniqueWorkflowTabs(availableTabKeys.length > 0 ? [...availableTabKeys] : ["home"]);
   const validTabs = new Set<WorkflowTabKey>(available);
   let tree = pruneWorkflowNode(node, validTabs);
   if (!tree) {
@@ -513,30 +442,21 @@ export function normalizeTerminalLayout(
   const validKeys = new Set(sessionKeys);
   const terminalGroups = normalizeTerminalGroups(layout, validKeys);
   const activeFromLayout =
-    layout.activeSessionKey && validKeys.has(layout.activeSessionKey)
-      ? layout.activeSessionKey
-      : null;
+    layout.activeSessionKey && validKeys.has(layout.activeSessionKey) ? layout.activeSessionKey : null;
   const activeGroupFromID = layout.activeTerminalGroupID
     ? terminalGroups.find((group) => group.id === layout.activeTerminalGroupID)
     : null;
-  const activeGroupFromSession = activeFromLayout
-    ? terminalGroupForSession(terminalGroups, activeFromLayout)
-    : null;
-  const selectedGroup =
-    activeGroupFromID ?? activeGroupFromSession ?? terminalGroups[0] ?? null;
+  const activeGroupFromSession = activeFromLayout ? terminalGroupForSession(terminalGroups, activeFromLayout) : null;
+  const selectedGroup = activeGroupFromID ?? activeGroupFromSession ?? terminalGroups[0] ?? null;
   const activeTerminalGroupID = selectedGroup?.id ?? null;
   const activeSessionKey =
     activeFromLayout && selectedGroup?.tree && containsSession(selectedGroup.tree, activeFromLayout)
       ? activeFromLayout
-      : selectedGroup?.activeSessionKey ?? firstLeaf(selectedGroup?.tree ?? null)?.sessionKey ?? null;
+      : (selectedGroup?.activeSessionKey ?? firstLeaf(selectedGroup?.tree ?? null)?.sessionKey ?? null);
   const syncedTerminalGroups = terminalGroups.map((group) =>
-    group.id === activeTerminalGroupID
-      ? { ...group, activeSessionKey }
-      : group,
+    group.id === activeTerminalGroupID ? { ...group, activeSessionKey } : group,
   );
-  const tree =
-    syncedTerminalGroups.find((group) => group.id === activeTerminalGroupID)
-      ?.tree ?? null;
+  const tree = syncedTerminalGroups.find((group) => group.id === activeTerminalGroupID)?.tree ?? null;
   const sessionRegions: Record<string, SessionRegion> = {};
   for (const key of Object.keys(layout.sessionRegions)) {
     if (validKeys.has(key)) {
@@ -555,10 +475,9 @@ export function normalizeTerminalLayout(
     workflowMode: layout.workflowMode === "grid" ? "grid" : "tabs",
     workflowTree: layout.workflowTree,
     activeWorkflowLeafID:
-      layout.activeWorkflowLeafID &&
-      workflowLeafIDs(layout.workflowTree).includes(layout.activeWorkflowLeafID)
+      layout.activeWorkflowLeafID && workflowLeafIDs(layout.workflowTree).includes(layout.activeWorkflowLeafID)
         ? layout.activeWorkflowLeafID
-        : firstWorkflowLeaf(layout.workflowTree)?.id ?? null,
+        : (firstWorkflowLeaf(layout.workflowTree)?.id ?? null),
     recentWorkflowLeafIDs: layout.recentWorkflowLeafIDs.filter((id) =>
       workflowLeafIDs(layout.workflowTree).includes(id),
     ),
@@ -576,30 +495,17 @@ export function parseTerminalLayout(raw: string | null): TerminalLayoutState {
       version: 1,
       open: typeof parsed.open === "boolean" ? parsed.open : defaults.open,
       dock: parsed.dock === "top" ? "top" : "bottom",
-      height: clampTerminalHeight(
-        typeof parsed.height === "number" ? parsed.height : defaults.height,
-      ),
-      activeSessionKey:
-        typeof parsed.activeSessionKey === "string"
-          ? parsed.activeSessionKey
-          : null,
+      height: clampTerminalHeight(typeof parsed.height === "number" ? parsed.height : defaults.height),
+      activeSessionKey: typeof parsed.activeSessionKey === "string" ? parsed.activeSessionKey : null,
       tree: parsePaneNode(parsed.tree),
       terminalGroups: parseTerminalGroups(parsed.terminalGroups),
-      activeTerminalGroupID:
-        typeof parsed.activeTerminalGroupID === "string"
-          ? parsed.activeTerminalGroupID
-          : null,
+      activeTerminalGroupID: typeof parsed.activeTerminalGroupID === "string" ? parsed.activeTerminalGroupID : null,
       sessionRegions: parseSessionRegions(parsed.sessionRegions),
       workflowMode: parsed.workflowMode === "grid" ? "grid" : "tabs",
       workflowTree: parseWorkflowNode(parsed.workflowTree),
-      activeWorkflowLeafID:
-        typeof parsed.activeWorkflowLeafID === "string"
-          ? parsed.activeWorkflowLeafID
-          : null,
+      activeWorkflowLeafID: typeof parsed.activeWorkflowLeafID === "string" ? parsed.activeWorkflowLeafID : null,
       recentWorkflowLeafIDs: Array.isArray(parsed.recentWorkflowLeafIDs)
-        ? parsed.recentWorkflowLeafIDs.filter(
-            (id): id is string => typeof id === "string",
-          )
+        ? parsed.recentWorkflowLeafIDs.filter((id): id is string => typeof id === "string")
         : [],
       customSessionLabels: parseCustomSessionLabels(parsed.customSessionLabels),
     };
@@ -609,21 +515,14 @@ export function parseTerminalLayout(raw: string | null): TerminalLayoutState {
 }
 
 export function isWorkflowTabKey(value: string): value is WorkflowTabKey {
-  return (
-    value === "home" ||
-    value === "shell" ||
-    value === "terminal" ||
-    value.startsWith("session:")
-  );
+  return value === "home" || value === "shell" || value === "terminal" || value.startsWith("session:");
 }
 
 function parsePaneNode(value: unknown): PaneNode | null {
   const node = recordFrom(value);
   if (!node || typeof node.id !== "string") return null;
   if (node.type === "leaf") {
-    return typeof node.sessionKey === "string"
-      ? { type: "leaf", id: node.id, sessionKey: node.sessionKey }
-      : null;
+    return typeof node.sessionKey === "string" ? { type: "leaf", id: node.id, sessionKey: node.sessionKey } : null;
   }
   if (node.type !== "split") return null;
   const first = parsePaneNode(node.first);
@@ -633,9 +532,7 @@ function parsePaneNode(value: unknown): PaneNode | null {
     type: "split",
     id: node.id,
     direction: node.direction === "vertical" ? "vertical" : "horizontal",
-    ratio: clampRatio(
-      typeof node.ratio === "number" ? node.ratio : 0.5,
-    ),
+    ratio: clampRatio(typeof node.ratio === "number" ? node.ratio : 0.5),
     first,
     second,
   };
@@ -649,10 +546,7 @@ function parseTerminalGroups(value: unknown): TerminalGroup[] {
     return [
       {
         id: group.id,
-        activeSessionKey:
-          typeof group.activeSessionKey === "string"
-            ? group.activeSessionKey
-            : null,
+        activeSessionKey: typeof group.activeSessionKey === "string" ? group.activeSessionKey : null,
         tree: parsePaneNode(group.tree),
       } satisfies TerminalGroup,
     ];
@@ -664,14 +558,11 @@ function parseWorkflowNode(value: unknown): WorkflowNode | null {
   if (!node || typeof node.id !== "string") return null;
   if (node.type === "leaf") {
     if (!Array.isArray(node.tabs)) return null;
-    const tabs = node.tabs.filter(
-      (tab): tab is WorkflowTabKey =>
-        typeof tab === "string" && isWorkflowTabKey(tab),
-    );
+    const tabs = node.tabs.filter((tab): tab is WorkflowTabKey => typeof tab === "string" && isWorkflowTabKey(tab));
     const activeTabKey =
       typeof node.activeTabKey === "string" && isWorkflowTabKey(node.activeTabKey)
         ? node.activeTabKey
-        : tabs[0] ?? "home";
+        : (tabs[0] ?? "home");
     return createWorkflowLeaf(tabs, activeTabKey, node.id);
   }
   if (node.type !== "split") return null;
@@ -682,9 +573,7 @@ function parseWorkflowNode(value: unknown): WorkflowNode | null {
     type: "split",
     id: node.id,
     direction: node.direction === "vertical" ? "vertical" : "horizontal",
-    ratio: clampRatio(
-      typeof node.ratio === "number" ? node.ratio : 0.5,
-    ),
+    ratio: clampRatio(typeof node.ratio === "number" ? node.ratio : 0.5),
     first,
     second,
   };
@@ -720,10 +609,7 @@ function parseCustomSessionLabels(value: unknown): Record<string, string> {
   return parsed;
 }
 
-function filterRecordByKeys(
-  value: Record<string, string>,
-  validKeys: ReadonlySet<string>,
-): Record<string, string> {
+function filterRecordByKeys(value: Record<string, string>, validKeys: ReadonlySet<string>): Record<string, string> {
   const filtered: Record<string, string> = {};
   for (const [key, label] of Object.entries(value)) {
     if (validKeys.has(key) && label.trim() !== "") {
@@ -733,21 +619,15 @@ function filterRecordByKeys(
   return filtered;
 }
 
-function normalizeTerminalGroups(
-  layout: TerminalLayoutState,
-  validKeys: ReadonlySet<string>,
-): TerminalGroup[] {
-  const sourceGroups =
-    layout.terminalGroups.length > 0
-      ? layout.terminalGroups
-      : legacyTerminalGroups(layout);
+function normalizeTerminalGroups(layout: TerminalLayoutState, validKeys: ReadonlySet<string>): TerminalGroup[] {
+  const sourceGroups = layout.terminalGroups.length > 0 ? layout.terminalGroups : legacyTerminalGroups(layout);
   return sourceGroups.flatMap((group) => {
     const tree = pruneTree(group.tree, [...validKeys]);
     if (!tree) return [];
     const activeSessionKey =
       group.activeSessionKey && validKeys.has(group.activeSessionKey)
         ? group.activeSessionKey
-        : firstLeaf(tree)?.sessionKey ?? null;
+        : (firstLeaf(tree)?.sessionKey ?? null);
     return [{ ...group, tree, activeSessionKey }];
   });
 }
@@ -780,22 +660,15 @@ function workflowLeafIDs(node: WorkflowNode | null): string[] {
   return [...workflowLeafIDs(node.first), ...workflowLeafIDs(node.second)];
 }
 
-function pruneWorkflowNode(
-  node: WorkflowNode | null,
-  validTabs: ReadonlySet<WorkflowTabKey>,
-): WorkflowNode | null {
+function pruneWorkflowNode(node: WorkflowNode | null, validTabs: ReadonlySet<WorkflowTabKey>): WorkflowNode | null {
   if (!node) return null;
   if (node.type === "leaf") {
-    const tabs = uniqueWorkflowTabs(
-      node.tabs.filter((tab) => validTabs.has(tab)),
-    );
+    const tabs = uniqueWorkflowTabs(node.tabs.filter((tab) => validTabs.has(tab)));
     if (tabs.length === 0) return null;
     return {
       ...node,
       tabs,
-      activeTabKey: tabs.includes(node.activeTabKey)
-        ? node.activeTabKey
-        : tabs[0]!,
+      activeTabKey: tabs.includes(node.activeTabKey) ? node.activeTabKey : tabs[0]!,
     };
   }
   const first = pruneWorkflowNode(node.first, validTabs);
@@ -810,10 +683,7 @@ function pruneWorkflowNode(
   };
 }
 
-function removeWorkflowTab(
-  node: WorkflowNode | null,
-  tabKey: WorkflowTabKey,
-): WorkflowNode | null {
+function removeWorkflowTab(node: WorkflowNode | null, tabKey: WorkflowTabKey): WorkflowNode | null {
   if (!node) return null;
   if (node.type === "leaf") {
     if (!node.tabs.includes(tabKey)) return node;
@@ -822,8 +692,7 @@ function removeWorkflowTab(
     return {
       ...node,
       tabs,
-      activeTabKey:
-        node.activeTabKey === tabKey ? tabs[0]! : node.activeTabKey,
+      activeTabKey: node.activeTabKey === tabKey ? tabs[0]! : node.activeTabKey,
     };
   }
   const first = removeWorkflowTab(node.first, tabKey);
@@ -842,11 +711,7 @@ function insertWorkflowTabBefore(
   if (node.type === "leaf") {
     const targetIndex = node.tabs.indexOf(targetTabKey);
     if (targetIndex < 0) return node;
-    const tabs = [
-      ...node.tabs.slice(0, targetIndex),
-      sourceTabKey,
-      ...node.tabs.slice(targetIndex),
-    ];
+    const tabs = [...node.tabs.slice(0, targetIndex), sourceTabKey, ...node.tabs.slice(targetIndex)];
     return {
       ...node,
       tabs: uniqueWorkflowTabs(tabs),
@@ -868,8 +733,7 @@ function insertWorkflowTabIntoLeaf(
   if (!node) return createWorkflowLeaf([tabKey], tabKey);
   if (node.type === "leaf") {
     if (node.id !== leafID) return node;
-    const tabs =
-      placement === "start" ? [tabKey, ...node.tabs] : [...node.tabs, tabKey];
+    const tabs = placement === "start" ? [tabKey, ...node.tabs] : [...node.tabs, tabKey];
     return {
       ...node,
       tabs: uniqueWorkflowTabs(tabs),
@@ -883,10 +747,7 @@ function insertWorkflowTabIntoLeaf(
   };
 }
 
-function insertWorkflowTabIntoFirstLeaf(
-  node: WorkflowNode,
-  tabKey: WorkflowTabKey,
-): WorkflowNode {
+function insertWorkflowTabIntoFirstLeaf(node: WorkflowNode, tabKey: WorkflowTabKey): WorkflowNode {
   if (node.type === "leaf") {
     return {
       ...node,
@@ -924,11 +785,7 @@ function splitWorkflowLeaf(
   };
 }
 
-function replaceLeaf(
-  node: PaneNode,
-  leafID: string,
-  replacement: (leaf: PaneLeaf) => PaneNode,
-): PaneNode {
+function replaceLeaf(node: PaneNode, leafID: string, replacement: (leaf: PaneLeaf) => PaneNode): PaneNode {
   if (node.type === "leaf") {
     return node.id === leafID ? replacement(node) : node;
   }
@@ -943,7 +800,5 @@ function newPaneID(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `pane-${crypto.randomUUID()}`;
   }
-  return `pane-${Date.now().toString(36)}-${Math.random()
-    .toString(16)
-    .slice(2)}`;
+  return `pane-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
 }

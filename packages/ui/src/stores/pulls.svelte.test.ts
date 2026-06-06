@@ -1,13 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 import type { PullRequest } from "../api/types.js";
 import type { MiddlemanClient } from "../types.js";
 import { createPullsStore } from "./pulls.svelte.js";
 
-function pull(
-  id: number,
-  repoName: string,
-  lastActivityAt: string,
-): PullRequest {
+function pull(id: number, repoName: string, lastActivityAt: string): PullRequest {
   return {
     ID: id,
     Number: id,

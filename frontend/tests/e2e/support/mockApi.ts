@@ -239,11 +239,7 @@ function makeRateLimits() {
   };
 }
 
-async function fulfillJson(
-  route: Route,
-  body: unknown,
-  status = 200,
-): Promise<void> {
+async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({
     status,
     contentType: "application/json",
@@ -278,10 +274,7 @@ function defaultPlatformHost(provider: string): string {
   }
 }
 
-function routePlatformHost(
-  provider: string,
-  hostSegment: string | undefined,
-): string {
+function routePlatformHost(provider: string, hostSegment: string | undefined): string {
   const host = decodePathSegment(hostSegment).trim();
   return host || defaultPlatformHost(provider);
 }
@@ -330,21 +323,15 @@ export async function mockApi(page: Page): Promise<void> {
     );
     if (
       providerPrMatch &&
-      ((method === "GET" && !providerPrMatch[6]) ||
-        (method === "POST" && providerPrMatch[6]?.startsWith("sync")))
+      ((method === "GET" && !providerPrMatch[6]) || (method === "POST" && providerPrMatch[6]?.startsWith("sync")))
     ) {
-      const prProvider = canonicalProvider(
-        decodePathSegment(providerPrMatch[2]),
-      );
-      const platformHost = routePlatformHost(
-        prProvider,
-        providerPrMatch[1],
-      );
+      const prProvider = canonicalProvider(decodePathSegment(providerPrMatch[2]));
+      const platformHost = routePlatformHost(prProvider, providerPrMatch[1]);
       const prOwner = decodePathSegment(providerPrMatch[3]);
       const prName = decodePathSegment(providerPrMatch[4]);
       const prNumber = parseInt(providerPrMatch[5]!, 10);
-      const pr = localPulls.find(
-        (p) => matchesRouteIdentity(p, {
+      const pr = localPulls.find((p) =>
+        matchesRouteIdentity(p, {
           provider: prProvider,
           platformHost,
           owner: prOwner,
@@ -368,19 +355,12 @@ export async function mockApi(page: Page): Promise<void> {
       return;
     }
 
-    const singlePrMatch = pathname.match(
-      /^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/,
-    );
+    const singlePrMatch = pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/);
     if (method === "GET" && singlePrMatch) {
       const prOwner = singlePrMatch[1];
       const prName = singlePrMatch[2];
       const prNumber = parseInt(singlePrMatch[3]!, 10);
-      const pr = localPulls.find(
-        (p) =>
-          p.repo_owner === prOwner &&
-          p.repo_name === prName &&
-          p.Number === prNumber,
-      );
+      const pr = localPulls.find((p) => p.repo_owner === prOwner && p.repo_name === prName && p.Number === prNumber);
       if (pr) {
         await fulfillJson(route, {
           merge_request: pr,
@@ -406,21 +386,15 @@ export async function mockApi(page: Page): Promise<void> {
     );
     if (
       providerIssueMatch &&
-      ((method === "GET" && !providerIssueMatch[6]) ||
-        (method === "POST" && providerIssueMatch[6]?.startsWith("sync")))
+      ((method === "GET" && !providerIssueMatch[6]) || (method === "POST" && providerIssueMatch[6]?.startsWith("sync")))
     ) {
-      const issueProvider = canonicalProvider(
-        decodePathSegment(providerIssueMatch[2]),
-      );
-      const platformHost = routePlatformHost(
-        issueProvider,
-        providerIssueMatch[1],
-      );
+      const issueProvider = canonicalProvider(decodePathSegment(providerIssueMatch[2]));
+      const platformHost = routePlatformHost(issueProvider, providerIssueMatch[1]);
       const issueOwner = decodePathSegment(providerIssueMatch[3]);
       const issueName = decodePathSegment(providerIssueMatch[4]);
       const issueNumber = parseInt(providerIssueMatch[5]!, 10);
-      const issue = issues.find(
-        (candidate) => matchesRouteIdentity(candidate, {
+      const issue = issues.find((candidate) =>
+        matchesRouteIdentity(candidate, {
           provider: issueProvider,
           platformHost,
           owner: issueOwner,
@@ -444,18 +418,14 @@ export async function mockApi(page: Page): Promise<void> {
       return;
     }
 
-    const singleIssueMatch = pathname.match(
-      /^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)$/,
-    );
+    const singleIssueMatch = pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)$/);
     if (method === "GET" && singleIssueMatch) {
       const issueOwner = singleIssueMatch[1];
       const issueName = singleIssueMatch[2];
       const issueNumber = parseInt(singleIssueMatch[3]!, 10);
       const issue = issues.find(
         (candidate) =>
-          candidate.repo_owner === issueOwner &&
-          candidate.repo_name === issueName &&
-          candidate.Number === issueNumber,
+          candidate.repo_owner === issueOwner && candidate.repo_name === issueName && candidate.Number === issueNumber,
       );
       if (!issue) {
         await fulfillJson(route, { title: "Not found" }, 404);
@@ -473,18 +443,14 @@ export async function mockApi(page: Page): Promise<void> {
       return;
     }
 
-    const syncIssueMatch = pathname.match(
-      /^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/sync$/,
-    );
+    const syncIssueMatch = pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/sync$/);
     if (method === "POST" && syncIssueMatch) {
       const issueOwner = syncIssueMatch[1];
       const issueName = syncIssueMatch[2];
       const issueNumber = parseInt(syncIssueMatch[3]!, 10);
       const issue = issues.find(
         (candidate) =>
-          candidate.repo_owner === issueOwner &&
-          candidate.repo_name === issueName &&
-          candidate.Number === issueNumber,
+          candidate.repo_owner === issueOwner && candidate.repo_name === issueName && candidate.Number === issueNumber,
       );
       if (!issue) {
         await fulfillJson(route, { title: "Not found" }, 404);
@@ -507,13 +473,9 @@ export async function mockApi(page: Page): Promise<void> {
       return;
     }
 
-    const singleRepoMatch = pathname.match(
-      /^\/api\/v1\/repos\/([^/]+)\/([^/]+)$/,
-    );
+    const singleRepoMatch = pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)$/);
     if (method === "GET" && singleRepoMatch) {
-      const repo = repos.find(
-        (r) => r.Owner === singleRepoMatch[1] && r.Name === singleRepoMatch[2],
-      );
+      const repo = repos.find((r) => r.Owner === singleRepoMatch[1] && r.Name === singleRepoMatch[2]);
       if (!repo) {
         await fulfillJson(route, { error: "Not found" }, 404);
         return;
@@ -556,19 +518,12 @@ export async function mockApi(page: Page): Promise<void> {
       return;
     }
 
-    const patchPrMatch = pathname.match(
-      /^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/,
-    );
+    const patchPrMatch = pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/);
     if (method === "PATCH" && patchPrMatch) {
       const prOwner = patchPrMatch[1];
       const prName = patchPrMatch[2];
       const prNumber = parseInt(patchPrMatch[3]!, 10);
-      const pr = localPulls.find(
-        (p) =>
-          p.repo_owner === prOwner &&
-          p.repo_name === prName &&
-          p.Number === prNumber,
-      );
+      const pr = localPulls.find((p) => p.repo_owner === prOwner && p.repo_name === prName && p.Number === prNumber);
       if (!pr) {
         await fulfillJson(route, { title: "Not found" }, 404);
         return;

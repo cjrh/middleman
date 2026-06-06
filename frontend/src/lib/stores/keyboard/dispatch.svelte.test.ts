@@ -1,14 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { dispatchKeydown } from "./dispatch.svelte.js";
-import {
-  registerScopedActions,
-  resetRegistry,
-} from "./registry.svelte.js";
-import {
-  pushModalFrame,
-  resetModalStack,
-} from "@middleman/ui/stores/keyboard/modal-stack";
+import { registerScopedActions, resetRegistry } from "./registry.svelte.js";
+import { pushModalFrame, resetModalStack } from "@middleman/ui/stores/keyboard/modal-stack";
 import type { Action, Context } from "./types.js";
 
 const flashModule = await import("@middleman/ui/stores/flash");
@@ -160,9 +154,22 @@ describe("dispatchKeydown — in-flight de-dup", () => {
 
   it("does not re-invoke an in-flight async action", async () => {
     let resolve!: () => void;
-    const handler = vi.fn(() => new Promise<void>((r) => { resolve = r; }));
+    const handler = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          resolve = r;
+        }),
+    );
     registerScopedActions("a", [
-      { id: "slow", label: "x", scope: "global", binding: { key: "j" }, priority: 0, when: () => true, handler },
+      {
+        id: "slow",
+        label: "x",
+        scope: "global",
+        binding: { key: "j" },
+        priority: 0,
+        when: () => true,
+        handler,
+      },
     ]);
     dispatchKeydown(event({ key: "j" }), () => ctx);
     dispatchKeydown(event({ key: "j" }), () => ctx);

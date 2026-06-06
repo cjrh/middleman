@@ -1,11 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
   getWorkspaceRuntime: vi.fn(),
@@ -40,51 +34,61 @@ class MockWebSocket {
 }
 
 vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn().mockImplementation((options) => ({
-    cols: 80,
-    rows: 24,
-    clearTextureAtlas: vi.fn(),
-    dispose: mocks.mockDispose,
-    loadAddon: mocks.mockLoadAddon,
-    onBinary: vi.fn(),
-    onData: mocks.mockOnData,
-    open: mocks.mockOpen,
-    refresh: vi.fn(),
-    write: mocks.terminalWrite,
-    options: { ...options },
-  })),
+  Terminal: vi.fn().mockImplementation(function (options) {
+    return {
+      cols: 80,
+      rows: 24,
+      clearTextureAtlas: vi.fn(),
+      dispose: mocks.mockDispose,
+      loadAddon: mocks.mockLoadAddon,
+      onBinary: vi.fn(),
+      onData: mocks.mockOnData,
+      open: mocks.mockOpen,
+      refresh: vi.fn(),
+      write: mocks.terminalWrite,
+      options: { ...options },
+    };
+  }),
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: vi.fn().mockImplementation(() => ({
-    fit: mocks.mockFit,
-  })),
+  FitAddon: vi.fn().mockImplementation(function () {
+    return {
+      fit: mocks.mockFit,
+    };
+  }),
 }));
 
 vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: vi.fn().mockImplementation(() => ({
-    dispose: vi.fn(),
-    onContextLoss: vi.fn(),
-  })),
+  WebglAddon: vi.fn().mockImplementation(function () {
+    return {
+      dispose: vi.fn(),
+      onContextLoss: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 vi.mock("ghostty-web", () => ({
   init: vi.fn().mockResolvedValue(undefined),
-  FitAddon: vi.fn().mockImplementation(() => ({
-    fit: mocks.mockFit,
-  })),
-  Terminal: vi.fn().mockImplementation((options) => ({
-    cols: 80,
-    rows: 24,
-    open: mocks.mockOpen,
-    loadAddon: mocks.mockLoadAddon,
-    onData: mocks.mockOnData,
-    dispose: mocks.mockDispose,
-    write: mocks.terminalWrite,
-    options: { ...options },
-  })),
+  FitAddon: vi.fn().mockImplementation(function () {
+    return {
+      fit: mocks.mockFit,
+    };
+  }),
+  Terminal: vi.fn().mockImplementation(function (options) {
+    return {
+      cols: 80,
+      rows: 24,
+      open: mocks.mockOpen,
+      loadAddon: mocks.mockLoadAddon,
+      onData: mocks.mockOnData,
+      dispose: mocks.mockDispose,
+      write: mocks.terminalWrite,
+      options: { ...options },
+    };
+  }),
 }));
 
 vi.mock("@middleman/ui", async (importOriginal) => {
@@ -124,8 +128,7 @@ vi.mock("../../api/workspace-runtime.js", () => ({
   stopWorkspaceSession: mocks.stopWorkspaceSession,
   workspaceSessionWebSocketPath: (workspaceId: string, sessionKey: string) =>
     `/ws/v1/workspaces/${workspaceId}/runtime/sessions/${sessionKey}/terminal`,
-  workspaceTmuxWebSocketPath: (workspaceId: string) =>
-    `/ws/v1/workspaces/${workspaceId}/terminal`,
+  workspaceTmuxWebSocketPath: (workspaceId: string) => `/ws/v1/workspaces/${workspaceId}/terminal`,
 }));
 
 import WorkspaceTerminalView from "./WorkspaceTerminalView.svelte";
@@ -219,9 +222,7 @@ function runtimeWithDuplicateWorkflowSessions() {
   };
 }
 
-function runtimeWithTerminalSession(
-  session = runningShellSession,
-) {
+function runtimeWithTerminalSession(session = runningShellSession) {
   return {
     launch_targets: [],
     sessions: [session],
@@ -241,9 +242,7 @@ function runtimeWithTwoTerminalSessions() {
   };
 }
 
-function persistedTerminalLayout(
-  workflowMode: "tabs" | "grid",
-) {
+function persistedTerminalLayout(workflowMode: "tabs" | "grid") {
   return JSON.stringify({
     version: 1,
     open: false,
@@ -283,10 +282,7 @@ describe("WorkspaceTerminalView", () => {
   beforeEach(() => {
     delete window.__BASE_PATH__;
     localStorage.clear();
-    localStorage.setItem(
-      "middleman-workspace-active-tab:ws-1",
-      "session:ws-1:helper",
-    );
+    localStorage.setItem("middleman-workspace-active-tab:ws-1", "session:ws-1:helper");
     sockets = [];
     mocks.getWorkspaceRuntime.mockReset();
     mocks.getWorkspaceRuntime.mockResolvedValue(runtimeWithStaleSession());
@@ -294,9 +290,7 @@ describe("WorkspaceTerminalView", () => {
     mocks.renameWorkspaceSession.mockReset();
     mocks.renameWorkspaceSession.mockImplementation(
       async (_workspaceId: string, sessionKey: string, label: string) => ({
-        ...(sessionKey === duplicateAgentSession.key
-          ? duplicateAgentSession
-          : runningSession),
+        ...(sessionKey === duplicateAgentSession.key ? duplicateAgentSession : runningSession),
         key: sessionKey,
         label,
       }),
@@ -365,15 +359,9 @@ describe("WorkspaceTerminalView", () => {
       }),
     );
 
-    await waitFor(() =>
-      expect(screen.queryByRole("tab", { name: /Helper/ })).toBeNull(),
-    );
-    expect(
-      screen.getByRole("tab", { name: /Home/ }).getAttribute("aria-selected"),
-    ).toBe("true");
-    expect(localStorage.getItem("middleman-workspace-active-tab:ws-1")).toBe(
-      "home",
-    );
+    await waitFor(() => expect(screen.queryByRole("tab", { name: /Helper/ })).toBeNull());
+    expect(screen.getByRole("tab", { name: /Home/ }).getAttribute("aria-selected")).toBe("true");
+    expect(localStorage.getItem("middleman-workspace-active-tab:ws-1")).toBe("home");
   });
 
   it("shows a relaunched agent with the same key and a new generation", async () => {
@@ -397,19 +385,12 @@ describe("WorkspaceTerminalView", () => {
       }),
     );
 
-    await waitFor(() =>
-      expect(mocks.getWorkspaceRuntime).toHaveBeenCalledTimes(2),
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Helper/ })).toBeTruthy(),
-    );
+    await waitFor(() => expect(mocks.getWorkspaceRuntime).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Helper/ })).toBeTruthy());
   });
 
   it("restores a selected workflow tab without keeping the tiled grid view", async () => {
-    localStorage.setItem(
-      "middleman-workspace-terminal-layout:ws-1",
-      persistedTerminalLayout("grid"),
-    );
+    localStorage.setItem("middleman-workspace-terminal-layout:ws-1", persistedTerminalLayout("grid"));
 
     const { container } = render(WorkspaceTerminalView, {
       props: {
@@ -417,7 +398,9 @@ describe("WorkspaceTerminalView", () => {
       },
     });
 
-    const helperTab = await screen.findByRole("tab", { name: /Helper/ });
+    const helperTab = await screen.findByRole("tab", {
+      name: /Helper/,
+    });
 
     expect(helperTab.getAttribute("aria-selected")).toBe("true");
     expect(container.querySelector(".workspace-stage.grid")).toBeNull();
@@ -435,11 +418,7 @@ describe("WorkspaceTerminalView", () => {
     const shellTab = await screen.findByRole("tab", { name: /Shell/ });
 
     expect(shellTab.getAttribute("aria-selected")).toBe("true");
-    await waitFor(() =>
-      expect(
-        container.querySelector(".group-tab-panel.active .terminal-container"),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(container.querySelector(".group-tab-panel.active .terminal-container")).toBeTruthy());
   });
 
   it("closes a terminal-panel shell when its terminal exits", async () => {
@@ -465,11 +444,7 @@ describe("WorkspaceTerminalView", () => {
       }),
     );
 
-    await waitFor(() =>
-      expect(
-        screen.getByText("No terminals"),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("No terminals")).toBeTruthy());
   });
 
   it("uses an in-app modal when stopping a running shell", async () => {
@@ -495,28 +470,15 @@ describe("WorkspaceTerminalView", () => {
 
     expect(confirm).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceSession).not.toHaveBeenCalled();
-    expect(
-      await screen.findByRole("dialog", { name: "Stop Shell?" }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Stop Shell?" })).toBeTruthy();
 
     await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Stop Shell?" }),
-      ).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Stop Shell?" })).toBeNull());
 
     await fireEvent.click(screen.getByRole("button", { name: "Close Shell" }));
-    await fireEvent.click(
-      await screen.findByRole("button", { name: "Stop session" }),
-    );
+    await fireEvent.click(await screen.findByRole("button", { name: "Stop session" }));
 
-    await waitFor(() =>
-      expect(mocks.stopWorkspaceSession).toHaveBeenCalledWith(
-        "ws-1",
-        "ws-1_shell_a",
-      ),
-    );
+    await waitFor(() => expect(mocks.stopWorkspaceSession).toHaveBeenCalledWith("ws-1", "ws-1_shell_a"));
   });
 
   it("uses an in-app modal when renaming a tab", async () => {
@@ -530,44 +492,28 @@ describe("WorkspaceTerminalView", () => {
     });
 
     await screen.findByRole("tab", { name: /Helper/ });
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Rename Helper" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Rename Helper" }));
 
     expect(prompt).not.toHaveBeenCalled();
-    expect(
-      await screen.findByRole("dialog", { name: "Rename tab" }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Rename tab" })).toBeTruthy();
     const input = screen.getByRole("textbox", { name: "Name" });
     expect((input as HTMLInputElement).value).toBe("Helper");
 
     await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Rename tab" }),
-      ).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Rename tab" })).toBeNull());
     expect(screen.getByRole("tab", { name: /Helper/ })).toBeTruthy();
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Rename Helper" }),
-    );
-    const reopenedInput = await screen.findByRole("textbox", { name: "Name" });
+    await fireEvent.click(screen.getByRole("button", { name: "Rename Helper" }));
+    const reopenedInput = await screen.findByRole("textbox", {
+      name: "Name",
+    });
     await fireEvent.input(reopenedInput, {
       target: { value: "Review helper" },
     });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByRole("tab", { name: /Review helper/ }),
-      ).toBeTruthy(),
-    );
-    expect(mocks.renameWorkspaceSession).toHaveBeenCalledWith(
-      "ws-1",
-      "ws-1:helper",
-      "Review helper",
-    );
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Review helper/ })).toBeTruthy());
+    expect(mocks.renameWorkspaceSession).toHaveBeenCalledWith("ws-1", "ws-1:helper", "Review helper");
   });
 
   it("renders duplicate runtime labels literally instead of synthesizing names", async () => {
@@ -588,9 +534,7 @@ describe("WorkspaceTerminalView", () => {
       },
     });
 
-    await waitFor(() =>
-      expect(screen.getAllByRole("tab", { name: "Helper" })).toHaveLength(2),
-    );
+    await waitFor(() => expect(screen.getAllByRole("tab", { name: "Helper" })).toHaveLength(2));
     expect(screen.queryByRole("tab", { name: /Helper 2/ })).toBeNull();
   });
 
@@ -606,9 +550,7 @@ describe("WorkspaceTerminalView", () => {
     await screen.findByRole("tab", { name: /^Helper$/ });
     await screen.findByRole("tab", { name: /Helper 2/ });
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Rename Helper" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Rename Helper" }));
     const input = await screen.findByRole("textbox", { name: "Name" });
     expect((input as HTMLInputElement).value).toBe("Helper");
 
@@ -617,17 +559,9 @@ describe("WorkspaceTerminalView", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByRole("tab", { name: /Plan review/ }),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Plan review/ })).toBeTruthy());
     expect(screen.getByRole("tab", { name: /Helper 2/ })).toBeTruthy();
-    expect(mocks.renameWorkspaceSession).toHaveBeenCalledWith(
-      "ws-1",
-      "ws-1:helper",
-      "Plan review",
-    );
+    expect(mocks.renameWorkspaceSession).toHaveBeenCalledWith("ws-1", "ws-1:helper", "Plan review");
   });
 
   it("shows a moving insertion slot while sorting workflow tabs", async () => {
@@ -639,8 +573,12 @@ describe("WorkspaceTerminalView", () => {
       },
     });
 
-    const helperTab = await screen.findByRole("tab", { name: /Helper/ });
-    const reviewerTab = await screen.findByRole("tab", { name: /Reviewer/ });
+    const helperTab = await screen.findByRole("tab", {
+      name: /Helper/,
+    });
+    const reviewerTab = await screen.findByRole("tab", {
+      name: /Reviewer/,
+    });
     const helperTabHost = helperTab.closest(".group-tab");
     expect(helperTabHost).toBeTruthy();
     const dataTransfer = fakeDataTransfer();
@@ -652,16 +590,12 @@ describe("WorkspaceTerminalView", () => {
     });
 
     expect(screen.getByTestId("workflow-tab-drop-placeholder")).toBeTruthy();
-    expect(reviewerTab.closest(".group-tab")?.classList.contains("dragging")).toBe(
-      true,
-    );
+    expect(reviewerTab.closest(".group-tab")?.classList.contains("dragging")).toBe(true);
 
     await fireEvent.dragEnd(reviewerTab);
 
     expect(screen.queryByTestId("workflow-tab-drop-placeholder")).toBeNull();
-    expect(reviewerTab.closest(".group-tab")?.classList.contains("dragging")).toBe(
-      false,
-    );
+    expect(reviewerTab.closest(".group-tab")?.classList.contains("dragging")).toBe(false);
   });
 
   it("does not reopen the just-exited terminal from stale runtime data", async () => {
@@ -685,11 +619,7 @@ describe("WorkspaceTerminalView", () => {
         data: JSON.stringify({ type: "exited", code: 0 }),
       }),
     );
-    await waitFor(() =>
-      expect(
-        screen.getByText("No terminals"),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("No terminals")).toBeTruthy());
     expect(sockets).toHaveLength(1);
   });
 
@@ -707,19 +637,11 @@ describe("WorkspaceTerminalView", () => {
       name: "Open terminal panel",
     });
     await fireEvent.click(terminalButton);
-    await waitFor(() =>
-      expect(
-        sockets.some((socket) => socket.url.includes("ws-1_shell_a")),
-      ).toBe(true),
-    );
+    await waitFor(() => expect(sockets.some((socket) => socket.url.includes("ws-1_shell_a"))).toBe(true));
 
     await fireEvent.click(screen.getByRole("button", { name: "Shell 2" }));
 
-    await waitFor(() =>
-      expect(
-        sockets.some((socket) => socket.url.includes("ws-1_shell_b")),
-      ).toBe(true),
-    );
+    await waitFor(() => expect(sockets.some((socket) => socket.url.includes("ws-1_shell_b"))).toBe(true));
   });
 
   it("renders a split terminal immediately after launching its session", async () => {
@@ -740,21 +662,11 @@ describe("WorkspaceTerminalView", () => {
       name: "Open terminal panel",
     });
     await fireEvent.click(terminalButton);
-    await waitFor(() =>
-      expect(
-        sockets.some((socket) => socket.url.includes("ws-1_shell_a")),
-      ).toBe(true),
-    );
+    await waitFor(() => expect(sockets.some((socket) => socket.url.includes("ws-1_shell_a"))).toBe(true));
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Split terminal right" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Split terminal right" }));
 
-    await waitFor(() =>
-      expect(
-        sockets.some((socket) => socket.url.includes("ws-1_shell_b")),
-      ).toBe(true),
-    );
+    await waitFor(() => expect(sockets.some((socket) => socket.url.includes("ws-1_shell_b"))).toBe(true));
     expect(screen.getByRole("button", { name: "Shell 2" })).toBeTruthy();
   });
 
@@ -785,31 +697,17 @@ describe("WorkspaceTerminalView", () => {
         data: JSON.stringify({ type: "exited", code: 0 }),
       }),
     );
-    await waitFor(() =>
-      expect(
-        screen.getByText("No terminals"),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("No terminals")).toBeTruthy());
 
-    await fireEvent.click(
-      screen.getAllByRole("button", { name: "New terminal" })[0]!,
-    );
+    await fireEvent.click(screen.getAllByRole("button", { name: "New terminal" })[0]!);
     freshRefresh.resolve(runtimeWithTerminalSession(relaunchedShellSession));
-    await waitFor(() =>
-      expect(
-        sockets.some((socket) => socket.url.includes("ws-1_shell_b")),
-      ).toBe(true),
-    );
+    await waitFor(() => expect(sockets.some((socket) => socket.url.includes("ws-1_shell_b"))).toBe(true));
 
     staleRefresh.resolve(runtimeWithTerminalSession());
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(
-      sockets.filter((socket) => socket.url.includes("ws-1_shell_a")),
-    ).toHaveLength(1);
-    expect(
-      sockets.filter((socket) => socket.url.includes("ws-1_shell_b")),
-    ).toHaveLength(1);
+    expect(sockets.filter((socket) => socket.url.includes("ws-1_shell_a"))).toHaveLength(1);
+    expect(sockets.filter((socket) => socket.url.includes("ws-1_shell_b"))).toHaveLength(1);
   });
 
   it("moves a workflow shell back into the terminal panel", async () => {
@@ -828,26 +726,14 @@ describe("WorkspaceTerminalView", () => {
       }),
     );
     await waitFor(() => expect(sockets).toHaveLength(1));
-    expect(
-      screen
-        .getByRole("button", { name: "Focus Shell" })
-        .getAttribute("draggable"),
-    ).toBe("true");
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Move Shell to workflow" }),
-    );
+    expect(screen.getByRole("button", { name: "Focus Shell" }).getAttribute("draggable")).toBe("true");
+    await fireEvent.click(screen.getByRole("button", { name: "Move Shell to workflow" }));
 
     await screen.findByRole("tab", { name: /Shell/ });
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Move Shell to terminal" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Move Shell to terminal" }));
 
-    await waitFor(() =>
-      expect(screen.queryByRole("tab", { name: /Shell/ })).toBeNull(),
-    );
-    expect(
-      screen.getByRole("button", { name: "Focus Shell" }),
-    ).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("tab", { name: /Shell/ })).toBeNull());
+    expect(screen.getByRole("button", { name: "Focus Shell" })).toBeTruthy();
   });
 
   it("shows a workspace sidebar collapse button", async () => {

@@ -1,10 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { PullRequest } from "../../api/types.js";
-import {
-  kanbanDragPayloadFromPull,
-  parseKanbanDragPayload,
-  providerRouteRefFromKanbanDragPayload,
-} from "./drag.js";
+import { kanbanDragPayloadFromPull, parseKanbanDragPayload, providerRouteRefFromKanbanDragPayload } from "./drag.js";
 
 describe("kanban drag payloads", () => {
   it("preserves provider repository identity", () => {
@@ -44,13 +40,15 @@ describe("kanban drag payloads", () => {
 
   it("rejects drag payloads without item numbers", () => {
     expect(() =>
-      parseKanbanDragPayload(JSON.stringify({
-        provider: "gitlab",
-        platformHost: "gitlab.example.com",
-        owner: "group/subgroup",
-        name: "project",
-        repoPath: "group/subgroup/project",
-      })),
+      parseKanbanDragPayload(
+        JSON.stringify({
+          provider: "gitlab",
+          platformHost: "gitlab.example.com",
+          owner: "group/subgroup",
+          name: "project",
+          repoPath: "group/subgroup/project",
+        }),
+      ),
     ).toThrow("number");
   });
 });

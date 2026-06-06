@@ -11,7 +11,7 @@
 // captured-fetch problem entirely.
 
 import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
   runtimeClient: {
@@ -40,27 +40,33 @@ vi.mock("../../api/workspace-runtime.js", () => ({
 
 // Stub xterm so the terminal panes don't try to render in jsdom.
 vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn().mockImplementation(() => ({
-    cols: 80,
-    rows: 24,
-    open: vi.fn(),
-    loadAddon: vi.fn(),
-    onData: vi.fn(),
-    onBinary: vi.fn(),
-    dispose: vi.fn(),
-    write: vi.fn(),
-    refresh: vi.fn(),
-    clearTextureAtlas: vi.fn(),
-    options: {},
-  })),
+  Terminal: vi.fn().mockImplementation(function () {
+    return {
+      cols: 80,
+      rows: 24,
+      open: vi.fn(),
+      loadAddon: vi.fn(),
+      onData: vi.fn(),
+      onBinary: vi.fn(),
+      dispose: vi.fn(),
+      write: vi.fn(),
+      refresh: vi.fn(),
+      clearTextureAtlas: vi.fn(),
+      options: {},
+    };
+  }),
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })),
+  FitAddon: vi.fn().mockImplementation(function () {
+    return { fit: vi.fn() };
+  }),
 }));
 
 vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: vi.fn().mockImplementation(() => ({})),
+  WebglAddon: vi.fn().mockImplementation(function () {
+    return {};
+  }),
 }));
 
 vi.mock("@middleman/ui", async (importOriginal) => {
@@ -156,11 +162,7 @@ describe("WorkspaceTerminalView embed props", () => {
     // Wait for the header branch element that only renders once the
     // workspace payload resolves; this confirms the component reached
     // steady state rather than failing the load early.
-    await waitFor(() =>
-      expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(
-        0,
-      ),
-    );
+    await waitFor(() => expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(0));
 
     // The workspace-list column header reads "Workspaces"; with
     // hideWorkspaceList the entire column is skipped so the heading
@@ -173,11 +175,7 @@ describe("WorkspaceTerminalView embed props", () => {
       props: { workspaceId: "ws-1" },
     });
 
-    await waitFor(() =>
-      expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(
-        0,
-      ),
-    );
+    await waitFor(() => expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(0));
 
     expect(screen.queryByText("Workspaces")).not.toBeNull();
   });
@@ -191,11 +189,7 @@ describe("WorkspaceTerminalView embed props", () => {
       },
     });
 
-    await waitFor(() =>
-      expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(
-        0,
-      ),
-    );
+    await waitFor(() => expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(0));
 
     expect(screen.queryByRole("button", { name: "PR" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reviews" })).toBeNull();
@@ -206,11 +200,7 @@ describe("WorkspaceTerminalView embed props", () => {
       props: { workspaceId: "ws-1" },
     });
 
-    await waitFor(() =>
-      expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(
-        0,
-      ),
-    );
+    await waitFor(() => expect(screen.getAllByText("feature/embed-props").length).toBeGreaterThan(0));
 
     expect(screen.getByRole("button", { name: "PR" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reviews" })).toBeTruthy();

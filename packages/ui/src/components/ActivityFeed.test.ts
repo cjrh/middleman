@@ -1,12 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ActivityItem } from "../api/types.js";
 import ActivityFeed from "./ActivityFeed.svelte";
 
-function activityItem(
-  id: string,
-  overrides: Partial<ActivityItem> = {},
-): ActivityItem {
+function activityItem(id: string, overrides: Partial<ActivityItem> = {}): ActivityItem {
   return {
     id,
     cursor: id,
@@ -33,10 +30,7 @@ function activityItem(
   };
 }
 
-function branchActivityItem(
-  id: string,
-  overrides: Partial<ActivityItem> = {},
-): ActivityItem {
+function branchActivityItem(id: string, overrides: Partial<ActivityItem> = {}): ActivityItem {
   return activityItem(id, {
     activity_type: "default_branch_commit",
     author: "alice",
@@ -56,7 +50,9 @@ function branchActivityItem(
 }
 
 const items = vi.hoisted(() => ({ value: [] as ActivityItem[] }));
-const viewMode = vi.hoisted(() => ({ value: "flat" as "flat" | "threaded" }));
+const viewMode = vi.hoisted(() => ({
+  value: "flat" as "flat" | "threaded",
+}));
 const collapseThreads = vi.hoisted(() => ({ value: false }));
 const collapseAllThreads = vi.hoisted(() => vi.fn());
 const expandAllThreads = vi.hoisted(() => vi.fn());
@@ -74,8 +70,7 @@ vi.mock("../context.js", () => ({
       startActivityPolling: vi.fn(),
       stopActivityPolling: vi.fn(),
       getActivitySearch: () => "",
-      getEnabledEvents: () =>
-        new Set(["comment", "review", "commit", "force_push"]),
+      getEnabledEvents: () => new Set(["comment", "review", "commit", "force_push"]),
       getHideClosedMerged: () => false,
       getHideBots: () => false,
       getHideDefaultBranchActivity: () => hideDefaultBranchActivity.value,
@@ -169,9 +164,9 @@ describe("ActivityFeed compact mode", () => {
       props: { compact: true },
     });
 
-    const repoLabels = Array.from(
-      container.querySelectorAll(".compact-meta > span:first-child"),
-    ).map((el) => el.textContent?.trim());
+    const repoLabels = Array.from(container.querySelectorAll(".compact-meta > span:first-child")).map((el) =>
+      el.textContent?.trim(),
+    );
     expect(repoLabels).toEqual(["widgets", "widgets"]);
     expect(container.textContent).not.toContain("acme/widgets");
   });
@@ -183,9 +178,9 @@ describe("ActivityFeed compact mode", () => {
       props: { compact: false },
     });
 
-    const repoCells = Array.from(
-      container.querySelectorAll(".activity-row .col-repo"),
-    ).map((el) => el.textContent?.trim());
+    const repoCells = Array.from(container.querySelectorAll(".activity-row .col-repo")).map((el) =>
+      el.textContent?.trim(),
+    );
     expect(repoCells).toEqual(["widgets", "widgets"]);
     expect(container.textContent).not.toContain("acme/widgets");
   });
@@ -213,16 +208,12 @@ describe("ActivityFeed compact mode", () => {
       },
     });
 
-    expect(
-      container.querySelectorAll(".activity-compact-row.selected"),
-    ).toHaveLength(2);
+    expect(container.querySelectorAll(".activity-compact-row.selected")).toHaveLength(2);
   });
 
   it("hides the collapse-all control in flat mode", () => {
     render(ActivityFeed, { props: { compact: true } });
-    expect(
-      screen.queryByRole("button", { name: /Collapse all|Expand all/ }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Collapse all|Expand all/ })).toBeNull();
   });
 
   it("uses shared semantic chips for compact item kind and state", () => {
@@ -239,10 +230,8 @@ describe("ActivityFeed compact mode", () => {
     });
 
     const row = container.querySelector(".activity-compact-row");
-    expect(row?.querySelector(".chip--kind-pr")?.textContent?.trim())
-      .toBe("PR");
-    expect(row?.querySelector(".chip--state-merged")?.textContent)
-      .toContain("Merged");
+    expect(row?.querySelector(".chip--kind-pr")?.textContent?.trim()).toBe("PR");
+    expect(row?.querySelector(".chip--state-merged")?.textContent).toContain("Merged");
     expect(row?.querySelector(".badge")).not.toBeNull();
     expect(row?.querySelector(".state-badge")).not.toBeNull();
   });

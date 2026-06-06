@@ -3,7 +3,9 @@ import type { DiffFile } from "../api/types.js";
 export type DiffFileCategory = "plansDocs" | "generated" | "code" | "tests" | "other";
 export type DiffFileCategoryFilter = DiffFileCategory | "all";
 export type DiffFileCategoryCounts = Record<DiffFileCategoryFilter, number>;
-type CategorizableDiffFile = Pick<DiffFile, "path"> & { is_generated?: boolean };
+type CategorizableDiffFile = Pick<DiffFile, "path"> & {
+  is_generated?: boolean;
+};
 
 export const diffFileCategoryOptions: {
   value: DiffFileCategoryFilter;
@@ -52,13 +54,7 @@ const codeExtensions = new Set([
   ".zsh",
 ]);
 
-const docsExtensions = new Set([
-  ".adoc",
-  ".md",
-  ".mdx",
-  ".rst",
-  ".txt",
-]);
+const docsExtensions = new Set([".adoc", ".md", ".mdx", ".rst", ".txt"]);
 
 const docsDirectoryNames = new Set(["doc", "docs", "documentation"]);
 const generatedBasenames = new Set([
@@ -83,15 +79,13 @@ const generatedBasenames = new Set([
   "uv.lock",
   "yarn.lock",
 ]);
-const generatedSuffixes = [
-  ".lock",
-  ".lock.json",
-  ".lock.yaml",
-  ".lock.yml",
-];
+const generatedSuffixes = [".lock", ".lock.json", ".lock.yaml", ".lock.yml"];
 
 function pathParts(path: string): string[] {
-  return path.toLowerCase().split(/[\\/]+/).filter(Boolean);
+  return path
+    .toLowerCase()
+    .split(/[\\/]+/)
+    .filter(Boolean);
 }
 
 function basename(path: string): string {
@@ -107,12 +101,8 @@ function extension(path: string): string {
 
 function hasTestSignal(parts: string[], base: string): boolean {
   return (
-    parts.some((part) =>
-      part === "test" ||
-      part === "tests" ||
-      part === "__tests__" ||
-      part === "e2e" ||
-      part === "spec"
+    parts.some(
+      (part) => part === "test" || part === "tests" || part === "__tests__" || part === "e2e" || part === "spec",
     ) ||
     base.includes(".test.") ||
     base.includes(".spec.") ||
@@ -127,21 +117,14 @@ function hasDocsSignal(parts: string[], base: string, ext: string): boolean {
   return (
     parts.some((part) => docsDirectoryNames.has(part)) ||
     docsExtensions.has(ext) ||
-    [
-      "changelog",
-      "code_of_conduct",
-      "contributing",
-      "license",
-      "notice",
-      "readme",
-      "security",
-    ].some((name) => base === name || base.startsWith(`${name}.`))
+    ["changelog", "code_of_conduct", "contributing", "license", "notice", "readme", "security"].some(
+      (name) => base === name || base.startsWith(`${name}.`),
+    )
   );
 }
 
 function hasGeneratedSignal(base: string): boolean {
-  return generatedBasenames.has(base) ||
-    generatedSuffixes.some((suffix) => base.endsWith(suffix));
+  return generatedBasenames.has(base) || generatedSuffixes.some((suffix) => base.endsWith(suffix));
 }
 
 export function categorizeDiffFile(file: string | CategorizableDiffFile): DiffFileCategory {
@@ -159,10 +142,7 @@ export function categorizeDiffFile(file: string | CategorizableDiffFile): DiffFi
   return "other";
 }
 
-export function filterDiffFilesByCategory(
-  files: DiffFile[],
-  filter: DiffFileCategoryFilter,
-): DiffFile[] {
+export function filterDiffFilesByCategory(files: DiffFile[], filter: DiffFileCategoryFilter): DiffFile[] {
   if (filter === "all") return files;
   return files.filter((file) => categorizeDiffFile(file) === filter);
 }

@@ -127,9 +127,7 @@ async function mockActivity(page: Page, items: unknown[]): Promise<void> {
 }
 
 test.describe("threaded activity columns", () => {
-  test("item row author column shows the PR author, not the latest actor", async ({
-    page,
-  }) => {
+  test("item row author column shows the PR author, not the latest actor", async ({ page }) => {
     await mockSettings(page);
     // Two events on the same PR opened by "alice": her opening event and a
     // newer review by "bob". The threaded row attributes the item to its
@@ -158,17 +156,13 @@ test.describe("threaded activity columns", () => {
     ]);
     await page.goto("/?view=threaded");
 
-    const row = page
-      .locator(".item-row:not(.branch-activity-row)")
-      .first();
+    const row = page.locator(".item-row:not(.branch-activity-row)").first();
     await expect(row).toBeVisible();
     const authorCell = row.locator(".cell--author");
     await expect(authorCell).toHaveText("alice");
   });
 
-  test("branch commit row shows the commit author in the author column", async ({
-    page,
-  }) => {
+  test("branch commit row shows the commit author in the author column", async ({ page }) => {
     await mockSettings(page);
     await mockActivity(page, [
       branchCommit({
@@ -188,9 +182,7 @@ test.describe("threaded activity columns", () => {
     await expect(row.locator(".cell--type")).toHaveText("Commit");
   });
 
-  test("hide-org toggle swaps the repo chip between owner/name and bare name", async ({
-    page,
-  }) => {
+  test("hide-org toggle swaps the repo chip between owner/name and bare name", async ({ page }) => {
     await mockSettings(page);
     await mockActivity(page, [
       itemEvent({
@@ -216,17 +208,13 @@ test.describe("threaded activity columns", () => {
 
     // Toggle "Hide org name" via the View dropdown.
     await page.getByRole("button", { name: "View", exact: true }).click();
-    await page
-      .locator(".filter-item", { hasText: "Hide org name" })
-      .click();
+    await page.locator(".filter-item", { hasText: "Hide org name" }).click();
     await page.keyboard.press("Escape");
 
     await expect(repoLabel).toHaveText("widgets");
 
     // Reload to verify the toggle persists via localStorage.
     await page.reload();
-    await expect(
-      page.locator(".item-row .repo-chip__label").first(),
-    ).toHaveText("widgets");
+    await expect(page.locator(".item-row .repo-chip__label").first()).toHaveText("widgets");
   });
 });

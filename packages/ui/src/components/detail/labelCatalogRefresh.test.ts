@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { loadLabelCatalogWithRefresh } from "./labelCatalogRefresh.js";
 
 function response(name: string, state: { stale?: boolean; syncing?: boolean } = {}) {
-  return { labels: [{ name, color: "fbca04" }], stale: state.stale ?? false, syncing: state.syncing ?? false };
+  return {
+    labels: [{ name, color: "fbca04" }],
+    stale: state.stale ?? false,
+    syncing: state.syncing ?? false,
+  };
 }
 
 describe("loadLabelCatalogWithRefresh", () => {

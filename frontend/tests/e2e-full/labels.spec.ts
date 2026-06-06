@@ -19,7 +19,11 @@ test.describe("label editing", () => {
 
       await page.goto(`${baseURL}/pulls/github/acme/widgets/1`);
       await expect(page.locator(".pull-detail")).toBeVisible();
-      await expect(page.locator(".pull-detail .chips-row .label-pill", { hasText: "bug" })).toBeVisible();
+      await expect(
+        page.locator(".pull-detail .chips-row .label-pill", {
+          hasText: "bug",
+        }),
+      ).toBeVisible();
 
       await page.getByRole("button", { name: "Labels" }).click();
       await expect(page.getByRole("dialog", { name: "Edit labels" })).toBeVisible();
@@ -30,18 +34,27 @@ test.describe("label editing", () => {
       await expect(page.getByRole("menuitemcheckbox", { name: /bug/i })).toHaveCount(0);
       await expect(page.getByRole("menuitemcheckbox", { name: /triage/i })).toBeVisible();
 
-      const updateResponse = page.waitForResponse((response) =>
-        response.request().method() === "PUT"
-        && response.url() === `${baseURL}/api/v1/pulls/github/acme/widgets/1/labels`,
+      const updateResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          response.url() === `${baseURL}/api/v1/pulls/github/acme/widgets/1/labels`,
       );
       await page.getByRole("menuitemcheckbox", { name: /triage/i }).click();
       expect((await updateResponse).status()).toBe(200);
 
       await expect(page.getByRole("menuitemcheckbox", { name: /triage/i })).toHaveAttribute("aria-checked", "true");
-      await expect(page.locator(".pull-detail .chips-row .label-pill", { hasText: "triage" })).toBeVisible();
+      await expect(
+        page.locator(".pull-detail .chips-row .label-pill", {
+          hasText: "triage",
+        }),
+      ).toBeVisible();
 
       await page.reload();
-      await expect(page.locator(".pull-detail .chips-row .label-pill", { hasText: "triage" })).toBeVisible();
+      await expect(
+        page.locator(".pull-detail .chips-row .label-pill", {
+          hasText: "triage",
+        }),
+      ).toBeVisible();
     } finally {
       await isolatedServer?.stop();
     }
@@ -56,9 +69,7 @@ test.describe("label editing", () => {
       await page.goto(`${baseURL}/pulls/github/acme/widgets/1`);
       await expect(page.locator(".pull-detail")).toBeVisible();
 
-      const labelsButton = page
-        .locator(".pull-detail .chips-row")
-        .getByRole("button", { name: "Labels", exact: true });
+      const labelsButton = page.locator(".pull-detail .chips-row").getByRole("button", { name: "Labels", exact: true });
       await labelsButton.click();
       await expect(page.getByRole("dialog", { name: "Edit labels" })).toBeVisible();
 
@@ -80,15 +91,18 @@ test.describe("label editing", () => {
       await page.getByRole("button", { name: "Labels" }).click();
       await expect(page.getByRole("dialog", { name: "Edit labels" })).toBeVisible();
 
-      const updateResponse = page.waitForResponse((response) =>
-        response.request().method() === "PUT"
-        && response.url() === `${baseURL}/api/v1/pulls/github/acme/widgets/1/labels`,
+      const updateResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          response.url() === `${baseURL}/api/v1/pulls/github/acme/widgets/1/labels`,
       );
       await page.getByRole("button", { name: "Clear selected labels" }).click();
       expect((await updateResponse).status()).toBe(200);
 
       await expect(page.locator(".pull-detail .label-editor-row")).toHaveCount(0);
-      await expect(page.locator(".pull-detail .chips-row").getByRole("button", { name: "Labels", exact: true })).toBeVisible();
+      await expect(
+        page.locator(".pull-detail .chips-row").getByRole("button", { name: "Labels", exact: true }),
+      ).toBeVisible();
       await expect(page.locator(".pull-detail .label-editor-empty")).toHaveCount(0);
     } finally {
       await isolatedServer?.stop();
@@ -103,21 +117,28 @@ test.describe("label editing", () => {
 
       await page.goto(`${baseURL}/issues/github/acme/widgets/10`);
       await expect(page.locator(".issue-detail")).toBeVisible();
-      await expect(page.locator(".issue-detail .meta-row .label-pill", { hasText: "bug" })).toBeVisible();
+      await expect(
+        page.locator(".issue-detail .meta-row .label-pill", {
+          hasText: "bug",
+        }),
+      ).toBeVisible();
 
       await page.getByRole("button", { name: "Labels" }).click();
       await expect(page.getByRole("dialog", { name: "Edit labels" })).toBeVisible();
       await expect(page.getByLabel("Filter labels")).toBeFocused();
 
-      const updateResponse = page.waitForResponse((response) =>
-        response.request().method() === "PUT"
-        && response.url() === `${baseURL}/api/v1/issues/github/acme/widgets/10/labels`,
+      const updateResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          response.url() === `${baseURL}/api/v1/issues/github/acme/widgets/10/labels`,
       );
       await page.getByRole("button", { name: "Clear selected labels" }).click();
       expect((await updateResponse).status()).toBe(200);
 
       await expect(page.locator(".issue-detail .meta-row .label-pill")).toHaveCount(0);
-      await expect(page.locator(".issue-detail .meta-row").getByRole("button", { name: "Labels", exact: true })).toBeVisible();
+      await expect(
+        page.locator(".issue-detail .meta-row").getByRole("button", { name: "Labels", exact: true }),
+      ).toBeVisible();
       await page.reload();
       await expect(page.locator(".issue-detail .meta-row .label-pill")).toHaveCount(0);
     } finally {
@@ -134,9 +155,7 @@ test.describe("label editing", () => {
       await page.goto(`${baseURL}/issues/github/acme/widgets/10`);
       await expect(page.locator(".issue-detail")).toBeVisible();
 
-      const labelsButton = page
-        .locator(".issue-detail .meta-row")
-        .getByRole("button", { name: "Labels", exact: true });
+      const labelsButton = page.locator(".issue-detail .meta-row").getByRole("button", { name: "Labels", exact: true });
       await labelsButton.click();
       await expect(page.getByRole("dialog", { name: "Edit labels" })).toBeVisible();
 
@@ -159,11 +178,17 @@ test.describe("label editing", () => {
       expect(firstBody.stale).toBe(true);
       expect(firstBody.syncing).toBe(true);
 
-      await expect.poll(async () => {
-        const response = await page.request.get(`${baseURL}/api/v1/repo/github/acme/widgets/labels`);
-        const body = await response.json();
-        return { stale: body.stale, syncing: body.syncing, count: body.labels.length };
-      }).toEqual({ stale: false, syncing: false, count: 3 });
+      await expect
+        .poll(async () => {
+          const response = await page.request.get(`${baseURL}/api/v1/repo/github/acme/widgets/labels`);
+          const body = await response.json();
+          return {
+            stale: body.stale,
+            syncing: body.syncing,
+            count: body.labels.length,
+          };
+        })
+        .toEqual({ stale: false, syncing: false, count: 3 });
     } finally {
       await isolatedServer?.stop();
     }
@@ -179,29 +204,47 @@ test.describe("label editing", () => {
       await expect(page.locator(".pull-detail")).toBeVisible();
       await openLabelsFromPalette(page);
       await expect(page.getByRole("menuitemcheckbox", { name: /bug/i })).toHaveAttribute("aria-checked", "true");
-      const pullUpdate = page.waitForResponse((response) =>
-        response.request().method() === "PUT"
-        && response.url() === `${baseURL}/api/v1/pulls/github/acme/widgets/1/labels`,
+      const pullUpdate = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          response.url() === `${baseURL}/api/v1/pulls/github/acme/widgets/1/labels`,
       );
       await page.getByRole("menuitemcheckbox", { name: /docs/i }).click();
       expect((await pullUpdate).status()).toBe(200);
-      await expect(page.locator(".pull-detail .chips-row .label-pill", { hasText: "docs" })).toBeVisible();
+      await expect(
+        page.locator(".pull-detail .chips-row .label-pill", {
+          hasText: "docs",
+        }),
+      ).toBeVisible();
       await page.reload();
-      await expect(page.locator(".pull-detail .chips-row .label-pill", { hasText: "docs" })).toBeVisible();
+      await expect(
+        page.locator(".pull-detail .chips-row .label-pill", {
+          hasText: "docs",
+        }),
+      ).toBeVisible();
 
       await page.goto(`${baseURL}/issues/github/acme/widgets/10`);
       await expect(page.locator(".issue-detail")).toBeVisible();
       await openLabelsFromPalette(page);
       await expect(page.getByRole("menuitemcheckbox", { name: /bug/i })).toHaveAttribute("aria-checked", "true");
-      const issueUpdate = page.waitForResponse((response) =>
-        response.request().method() === "PUT"
-        && response.url() === `${baseURL}/api/v1/issues/github/acme/widgets/10/labels`,
+      const issueUpdate = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          response.url() === `${baseURL}/api/v1/issues/github/acme/widgets/10/labels`,
       );
       await page.getByRole("menuitemcheckbox", { name: /triage/i }).click();
       expect((await issueUpdate).status()).toBe(200);
-      await expect(page.locator(".issue-detail .meta-row .label-pill", { hasText: "triage" })).toBeVisible();
+      await expect(
+        page.locator(".issue-detail .meta-row .label-pill", {
+          hasText: "triage",
+        }),
+      ).toBeVisible();
       await page.reload();
-      await expect(page.locator(".issue-detail .meta-row .label-pill", { hasText: "triage" })).toBeVisible();
+      await expect(
+        page.locator(".issue-detail .meta-row .label-pill", {
+          hasText: "triage",
+        }),
+      ).toBeVisible();
     } finally {
       await isolatedServer?.stop();
     }

@@ -62,12 +62,10 @@ function splitFontFamilyList(value: string): string[] {
 
 function normalizeFontFamily(family: string): string {
   const trimmed = family.trim();
-  const unquoted = (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  )
-    ? trimmed.slice(1, -1)
-    : trimmed;
+  const unquoted =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      ? trimmed.slice(1, -1)
+      : trimmed;
   return unquoted.toLowerCase();
 }
 
@@ -75,21 +73,14 @@ function isGenericFontFamily(family: string): boolean {
   return GENERIC_FONT_FAMILIES.has(normalizeFontFamily(family));
 }
 
-function appendUnique(
-  result: string[],
-  seen: Set<string>,
-  family: string,
-): void {
+function appendUnique(result: string[], seen: Set<string>, family: string): void {
   const key = normalizeFontFamily(family);
   if (seen.has(key)) return;
   seen.add(key);
   result.push(family);
 }
 
-export function buildTerminalFontFamily(
-  configuredFontFamily: string,
-  defaultFontFamily: string,
-): string {
+export function buildTerminalFontFamily(configuredFontFamily: string, defaultFontFamily: string): string {
   const configured = configuredFontFamily.trim();
   const fallback = defaultFontFamily.trim();
 

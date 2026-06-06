@@ -15,12 +15,7 @@ export function getCommentDraftKey(
   return `${target}:${repoKey}/${number}`;
 }
 
-function getLegacyCommentDraftKey(
-  target: CommentDraftTarget,
-  owner: string,
-  name: string,
-  number: number,
-): string {
+function getLegacyCommentDraftKey(target: CommentDraftTarget, owner: string, name: string, number: number): string {
   return getCommentDraftKey(target, owner, name, number);
 }
 
@@ -36,9 +31,7 @@ function getCommentDraftKeys(
 } {
   return {
     primary: getCommentDraftKey(target, owner, name, number, platformHost),
-    legacy: platformHost
-      ? getLegacyCommentDraftKey(target, owner, name, number)
-      : undefined,
+    legacy: platformHost ? getLegacyCommentDraftKey(target, owner, name, number) : undefined,
   };
 }
 
@@ -105,11 +98,7 @@ export function isCommentSubmitPending(
   platformHost?: string | undefined,
 ): boolean {
   const keys = getCommentDraftKeys(target, owner, name, number, platformHost);
-  return (
-    (pendingSubmitCounts[keys.primary]
-      ?? (keys.legacy ? pendingSubmitCounts[keys.legacy] : undefined)
-      ?? 0) > 0
-  );
+  return (pendingSubmitCounts[keys.primary] ?? (keys.legacy ? pendingSubmitCounts[keys.legacy] : undefined) ?? 0) > 0;
 }
 
 export function beginCommentSubmit(
@@ -155,11 +144,7 @@ export function getCommentSubmitError(
   platformHost?: string | undefined,
 ): string | null {
   const keys = getCommentDraftKeys(target, owner, name, number, platformHost);
-  return (
-    submitErrors[keys.primary]
-      ?? (keys.legacy ? submitErrors[keys.legacy] : undefined)
-      ?? null
-  );
+  return submitErrors[keys.primary] ?? (keys.legacy ? submitErrors[keys.legacy] : undefined) ?? null;
 }
 
 export function setCommentSubmitError(

@@ -39,9 +39,7 @@ export interface NavigateEvent {
   repo?: { host?: string; owner: string; name: string };
 }
 
-export type NavigateCallback = (
-  event: string | NavigateEvent,
-) => void;
+export type NavigateCallback = (event: string | NavigateEvent) => void;
 
 export interface WorkspaceCommandResult {
   ok: boolean;
@@ -54,12 +52,7 @@ export type WorkspaceCommandCallback = (
 ) => WorkspaceCommandResult | Promise<WorkspaceCommandResult>;
 
 export interface MiddlemanEvent {
-  type:
-    | "pr-selected"
-    | "issue-selected"
-    | "pr-state-changed"
-    | "sync-completed"
-    | "detail-loaded";
+  type: "pr-selected" | "issue-selected" | "pr-state-changed" | "sync-completed" | "detail-loaded";
   owner?: string;
   name?: string;
   number?: number;

@@ -15,8 +15,7 @@ await mkdir(dirname(outputFile), { recursive: true });
 
 const logFile = await open(outputFile, constants.O_CREAT | constants.O_TRUNC | constants.O_WRONLY, 0o666);
 await logFile.write(
-  `[${timestamp()}] bun run test:e2e\n` +
-    `argv: ${JSON.stringify(["playwright", ...playwrightArgs])}\n\n`,
+  `[${timestamp()}] bun run test:e2e\n` + `argv: ${JSON.stringify(["playwright", ...playwrightArgs])}\n\n`,
 );
 
 let status = 1;

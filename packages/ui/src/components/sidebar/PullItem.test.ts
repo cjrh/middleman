@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { PullRequest } from "../../api/types.js";
 import { HOST_STATE_KEY, STORES_KEY } from "../../context.js";
@@ -53,9 +53,27 @@ describe("PullItem CI cluster", () => {
 
   it("renders compact tokens for a mixed-state PR", () => {
     const checks = [
-      { status: "completed", conclusion: "failure", name: "f", url: "", app: "" },
-      { status: "completed", conclusion: "success", name: "p1", url: "", app: "" },
-      { status: "in_progress", conclusion: "", name: "pe", url: "", app: "" },
+      {
+        status: "completed",
+        conclusion: "failure",
+        name: "f",
+        url: "",
+        app: "",
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        name: "p1",
+        url: "",
+        app: "",
+      },
+      {
+        status: "in_progress",
+        conclusion: "",
+        name: "pe",
+        url: "",
+        app: "",
+      },
     ];
     renderItem(mkPR({ CIChecksJSON: JSON.stringify(checks) }));
     expect(document.querySelector("[data-testid='ci-token-failed']")).not.toBeNull();
@@ -64,7 +82,11 @@ describe("PullItem CI cluster", () => {
   });
 
   it("Pending token is static (no spin animation) in sidebar", () => {
-    renderItem(mkPR({ CIChecksJSON: JSON.stringify([{ status: "in_progress", conclusion: "" }]) }));
+    renderItem(
+      mkPR({
+        CIChecksJSON: JSON.stringify([{ status: "in_progress", conclusion: "" }]),
+      }),
+    );
     const pendingTok = document.querySelector("[data-testid='ci-token-pending']")!;
     expect(pendingTok.querySelector(".spin")).toBeNull();
   });
@@ -83,32 +105,68 @@ describe("PullItem CI cluster", () => {
     const sentinel = "supersecret_sentinel_xyz";
     renderItem(mkPR({ CIChecksJSON: `{"x":"${sentinel}",`, Title: "Sample PR" }));
     expect(document.querySelector("[data-testid='ci-token-unavailable']")).not.toBeNull();
-    const titleAttr = document.querySelector("[data-testid='ci-token-unavailable']")
-      ?.getAttribute("title") ?? "";
+    const titleAttr = document.querySelector("[data-testid='ci-token-unavailable']")?.getAttribute("title") ?? "";
     expect(titleAttr).not.toContain(sentinel);
     expect(titleAttr).toMatch(/CI unavailable:/i);
     const button = screen.getByRole("button", { name: /Sample PR/i });
-    const ciNameMatch = screen.queryByRole("button", { name: new RegExp(sentinel) });
+    const ciNameMatch = screen.queryByRole("button", {
+      name: new RegExp(sentinel),
+    });
     expect(ciNameMatch).toBeNull();
     expect(screen.getByRole("button", { name: /CI unavailable:/i })).toBe(button);
   });
 
   it("row button exposes 'CI unavailable:' through its accessible name for malformed CI", () => {
     renderItem(mkPR({ CIChecksJSON: "{not json", Title: "Sample PR" }));
-    const titleMatch = screen.getByRole("button", { name: /Sample PR/i });
-    const ciMatch = screen.getByRole("button", { name: /CI unavailable:/i });
+    const titleMatch = screen.getByRole("button", {
+      name: /Sample PR/i,
+    });
+    const ciMatch = screen.getByRole("button", {
+      name: /CI unavailable:/i,
+    });
     expect(ciMatch).toBe(titleMatch);
   });
 
   it("row button exposes the CI cluster summary through its accessible name for normal CI", () => {
     const checks = [
-      { status: "completed", conclusion: "failure", name: "f", url: "", app: "" },
-      { status: "completed", conclusion: "success", name: "p1", url: "", app: "" },
-      { status: "completed", conclusion: "success", name: "p2", url: "", app: "" },
-      { status: "in_progress", conclusion: "", name: "pe", url: "", app: "" },
+      {
+        status: "completed",
+        conclusion: "failure",
+        name: "f",
+        url: "",
+        app: "",
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        name: "p1",
+        url: "",
+        app: "",
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        name: "p2",
+        url: "",
+        app: "",
+      },
+      {
+        status: "in_progress",
+        conclusion: "",
+        name: "pe",
+        url: "",
+        app: "",
+      },
     ];
-    renderItem(mkPR({ CIChecksJSON: JSON.stringify(checks), Title: "Sample PR" }));
-    const titleMatch = screen.getByRole("button", { name: /Sample PR/i });
+    renderItem(
+      mkPR({
+        CIChecksJSON: JSON.stringify(checks),
+        Title: "Sample PR",
+      }),
+    );
+    const titleMatch = screen.getByRole("button", {
+      name: /Sample PR/i,
+    });
     expect(screen.getByRole("button", { name: /1 failed/i })).toBe(titleMatch);
     expect(screen.getByRole("button", { name: /1 pending/i })).toBe(titleMatch);
     expect(screen.getByRole("button", { name: /2 passed/i })).toBe(titleMatch);
@@ -121,16 +179,24 @@ describe("PullItem CI cluster", () => {
     renderItem(mkPR({ CIChecksJSON: "{not json", Number: 1 }));
     cleanup();
     renderItem(mkPR({ CIChecksJSON: "{not json", Number: 1 }));
-    expect(spy.mock.calls.filter(c =>
-      typeof c[0] === "string" && c[0].includes("Malformed"))
-    ).toHaveLength(1);
+    expect(spy.mock.calls.filter((c) => typeof c[0] === "string" && c[0].includes("Malformed"))).toHaveLength(1);
     spy.mockRestore();
   });
 
   it("renders a single Unknown token for an unknown-only payload (acceptance-matrix Unknown-only row)", () => {
-    renderItem(mkPR({ CIChecksJSON: JSON.stringify([
-      { status: "completed", conclusion: "mystery_state", name: "", url: "", app: "" },
-    ]) }));
+    renderItem(
+      mkPR({
+        CIChecksJSON: JSON.stringify([
+          {
+            status: "completed",
+            conclusion: "mystery_state",
+            name: "",
+            url: "",
+            app: "",
+          },
+        ]),
+      }),
+    );
     expect(document.querySelector("[data-testid='ci-token-unknown']")).not.toBeNull();
     expect(document.querySelector("[data-testid='ci-token-failed']")).toBeNull();
     expect(document.querySelector("[data-testid='ci-token-pending']")).toBeNull();
@@ -145,10 +211,12 @@ describe("PullItem kanban status", () => {
   });
 
   it("shows a workspace indicator when the PR has an attached workspace", () => {
-    renderItem(mkPR({
-      Title: "Cache widget details",
-      workspace: { id: "ws-pr-1", status: "ready" },
-    }));
+    renderItem(
+      mkPR({
+        Title: "Cache widget details",
+        workspace: { id: "ws-pr-1", status: "ready" },
+      }),
+    );
 
     expect(screen.getByLabelText("Workspace attached (ready)")).toBeTruthy();
   });
@@ -188,41 +256,47 @@ describe("PullItem kanban status", () => {
   });
 
   it("shows the kanban status for open PRs", () => {
-    renderItem(mkPR({
-      Title: "Cache widget details",
-      Author: "alice",
-      KanbanStatus: "reviewing",
-      LastActivityAt: "2026-05-01T12:00:00Z",
-      repo_owner: "acme",
-      repo_name: "widgets",
-    }));
+    renderItem(
+      mkPR({
+        Title: "Cache widget details",
+        Author: "alice",
+        KanbanStatus: "reviewing",
+        LastActivityAt: "2026-05-01T12:00:00Z",
+        repo_owner: "acme",
+        repo_name: "widgets",
+      }),
+    );
 
     expect(screen.getByText("Reviewing")).toBeTruthy();
   });
 
   it("hides the kanban status for closed and merged PRs", () => {
-    renderItem(mkPR({
-      Title: "Cache widget details",
-      Author: "alice",
-      State: "closed",
-      KanbanStatus: "reviewing",
-      LastActivityAt: "2026-05-01T12:00:00Z",
-      repo_owner: "acme",
-      repo_name: "widgets",
-    }));
+    renderItem(
+      mkPR({
+        Title: "Cache widget details",
+        Author: "alice",
+        State: "closed",
+        KanbanStatus: "reviewing",
+        LastActivityAt: "2026-05-01T12:00:00Z",
+        repo_owner: "acme",
+        repo_name: "widgets",
+      }),
+    );
 
     expect(screen.queryByText("Reviewing")).toBeNull();
     cleanup();
 
-    renderItem(mkPR({
-      Title: "Cache widget details",
-      Author: "alice",
-      State: "merged",
-      KanbanStatus: "awaiting_merge",
-      LastActivityAt: "2026-05-01T12:00:00Z",
-      repo_owner: "acme",
-      repo_name: "widgets",
-    }));
+    renderItem(
+      mkPR({
+        Title: "Cache widget details",
+        Author: "alice",
+        State: "merged",
+        KanbanStatus: "awaiting_merge",
+        LastActivityAt: "2026-05-01T12:00:00Z",
+        repo_owner: "acme",
+        repo_name: "widgets",
+      }),
+    );
 
     expect(screen.queryByText("Ready")).toBeNull();
   });

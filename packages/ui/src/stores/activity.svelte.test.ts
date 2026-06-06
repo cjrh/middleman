@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import type { ActivitySettings } from "../api/types.js";
 import { createActivityStore } from "./activity.svelte.js";
 
 const fakeClient = {
-  GET: async () => ({ data: { items: [], capped: false }, error: null }),
+  GET: async () => ({
+    data: { items: [], capped: false },
+    error: null,
+  }),
 } as unknown as Parameters<typeof createActivityStore>[0]["client"];
 
 function settings(collapse: boolean): ActivitySettings {

@@ -9,10 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
 //   group/project#11: open, ada, "GitLab read-only issue"
 
 async function waitForIssueList(page: Page): Promise<void> {
-  await page
-    .locator(".issue-item")
-    .first()
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".issue-item").first().waitFor({ state: "visible", timeout: 10_000 });
 }
 
 async function selectIssueState(page: Page, label: string): Promise<void> {
@@ -23,9 +20,7 @@ async function selectIssueState(page: Page, label: string): Promise<void> {
   }
 
   await page.getByRole("button", { name: "Filters" }).click();
-  await page.locator(".filter-dropdown .filter-item", { hasText: label })
-    .first()
-    .click();
+  await page.locator(".filter-dropdown .filter-item", { hasText: label }).first().click();
 }
 
 async function selectIssueGrouping(page: Page, label: string): Promise<void> {
@@ -36,9 +31,7 @@ async function selectIssueGrouping(page: Page, label: string): Promise<void> {
   }
 
   await page.getByRole("button", { name: "Filters" }).click();
-  await page.locator(".filter-dropdown .filter-item", { hasText: label })
-    .last()
-    .click();
+  await page.locator(".filter-dropdown .filter-item", { hasText: label }).last().click();
 }
 
 const longRepoName = "widgets-with-an-extremely-long-repository-name";
@@ -49,7 +42,7 @@ async function mockLongIssueRepoSlug(page: Page): Promise<void> {
     (url) => url.pathname.endsWith("/api/v1/issues"),
     async (route) => {
       const response = await route.fetch();
-      const issues = await response.json() as Array<{
+      const issues = (await response.json()) as Array<{
         repo?: { owner?: string; name?: string; repo_path?: string };
         repo_owner?: string;
         repo_name?: string;
@@ -108,12 +101,8 @@ test.describe("issue list view", () => {
     await expect(countBadge).toHaveText(/^5 issues$/);
   });
 
-  test("sidebar issue pills use the shared chip component", async ({
-    page,
-  }) => {
-    await expect(page.locator(".filter-bar .list-count-chip")).toHaveText(
-      /^5 issues$/,
-    );
+  test("sidebar issue pills use the shared chip component", async ({ page }) => {
+    await expect(page.locator(".filter-bar .list-count-chip")).toHaveText(/^5 issues$/);
 
     await mockLongIssueRepoSlug(page);
     await page.goto("/issues");
@@ -131,7 +120,9 @@ test.describe("issue list view", () => {
     await selectIssueState(page, "Closed");
 
     const countBadge = page.locator(".filter-bar .list-count-chip");
-    await expect(countBadge).toHaveText(/^1 issues?$/, { timeout: 5_000 });
+    await expect(countBadge).toHaveText(/^1 issues?$/, {
+      timeout: 5_000,
+    });
   });
 
   test("search filters by title", async ({ page }) => {
@@ -139,10 +130,9 @@ test.describe("issue list view", () => {
     await input.fill("Safari");
 
     // Wait for the filtered result to appear (replaces fixed sleep).
-    await expect(page.locator(".filter-bar .list-count-chip")).toHaveText(
-      /^1 issues?$/,
-      { timeout: 5_000 },
-    );
+    await expect(page.locator(".filter-bar .list-count-chip")).toHaveText(/^1 issues?$/, {
+      timeout: 5_000,
+    });
 
     const items = page.locator(".issue-item");
     const count = await items.count();
@@ -154,14 +144,8 @@ test.describe("issue list view", () => {
     }
   });
 
-  test("issue detail state chip preserves shared chip layout", async ({
-    page,
-  }) => {
-    await page
-      .locator(".issue-item")
-      .filter({ hasText: "Safari" })
-      .first()
-      .click();
+  test("issue detail state chip preserves shared chip layout", async ({ page }) => {
+    await page.locator(".issue-item").filter({ hasText: "Safari" }).first().click();
 
     const stateChip = page.locator(".issue-detail .issue-state-chip");
     await expect(stateChip).toBeVisible();
@@ -181,16 +165,10 @@ test.describe("issue list view", () => {
     expect(stateChipStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
   });
 
-  test("issue detail keeps the scrollbar on the pane edge", async ({
-    page,
-  }) => {
+  test("issue detail keeps the scrollbar on the pane edge", async ({ page }) => {
     // Open the Safari issue specifically. Matches widgets#10 on the
     // seeded fixture (max-width 800px centered layout).
-    await page
-      .locator(".issue-item")
-      .filter({ hasText: "Safari" })
-      .first()
-      .click();
+    await page.locator(".issue-item").filter({ hasText: "Safari" }).first().click();
 
     // IssueListView renders IssueDetail into .main-area, where
     // .issue-detail is the designated internal scroll container.
@@ -212,9 +190,7 @@ test.describe("issue list view", () => {
 
     // .issue-detail owns vertical scroll (overflow-y: auto in the
     // component style).
-    const overflowY = await issueDetail.evaluate(
-      (el) => getComputedStyle(el).overflowY,
-    );
+    const overflowY = await issueDetail.evaluate((el) => getComputedStyle(el).overflowY);
     expect(["auto", "scroll"]).toContain(overflowY);
 
     const before = await issueDetail.evaluate((el) => ({
@@ -244,15 +220,11 @@ test.describe("issue list view", () => {
     expect(detailBox).not.toBeNull();
     expect(headerBox).not.toBeNull();
     if (areaBox !== null && detailBox !== null && headerBox !== null) {
-      const scrollportWidth = await issueDetail.evaluate(
-        (el) => el.clientWidth,
-      );
+      const scrollportWidth = await issueDetail.evaluate((el) => el.clientWidth);
       const scrollportCenter = detailBox.x + scrollportWidth / 2;
       const headerCenter = headerBox.x + headerBox.width / 2;
       // Allow small slack for sub-pixel layout differences.
-      expect(
-        Math.abs(detailBox.x + detailBox.width - (areaBox.x + areaBox.width)),
-      ).toBeLessThan(2);
+      expect(Math.abs(detailBox.x + detailBox.width - (areaBox.x + areaBox.width))).toBeLessThan(2);
       expect(Math.abs(headerCenter - scrollportCenter)).toBeLessThan(2);
       expect(headerBox.width).toBeLessThanOrEqual(800);
     }

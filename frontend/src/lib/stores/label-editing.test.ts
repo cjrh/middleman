@@ -1,14 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createDetailStore } from "@middleman/ui/stores/detail";
 import { createIssuesStore } from "@middleman/ui/stores/issues";
 import type { MiddlemanClient } from "@middleman/ui";
 import type { Label } from "@middleman/ui/api/types";
 
-const routeRef = { provider: "github", platformHost: "github.com", repoPath: "octo/repo" };
-const otherRouteRef = { provider: "gitlab", platformHost: "gitlab.example", repoPath: "octo/repo" };
+const routeRef = {
+  provider: "github",
+  platformHost: "github.com",
+  repoPath: "octo/repo",
+};
+const otherRouteRef = {
+  provider: "gitlab",
+  platformHost: "gitlab.example",
+  repoPath: "octo/repo",
+};
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
     resolve = done;
@@ -17,7 +28,11 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 function label(name: string): Label {
-  return { name, color: name === "bug" ? "d73a4a" : "fbca04", is_default: false };
+  return {
+    name,
+    color: name === "bug" ? "d73a4a" : "fbca04",
+    is_default: false,
+  };
 }
 
 describe("label editing stores", () => {
@@ -27,7 +42,13 @@ describe("label editing stores", () => {
         data: {
           repo_owner: "octo",
           repo_name: "repo",
-          repo: { provider: "github", platform_host: "github.com", owner: "octo", name: "repo", repo_path: "octo/repo" },
+          repo: {
+            provider: "github",
+            platform_host: "github.com",
+            owner: "octo",
+            name: "repo",
+            repo_path: "octo/repo",
+          },
           merge_request: { Number: 1, labels: [label("bug")] },
           events: [],
         },
@@ -62,7 +83,10 @@ describe("label editing stores", () => {
             name: "repo",
             repo_path: "octo/repo",
           },
-          merge_request: { Number: 1, labels: [label(options.params?.path?.provider === "gitlab" ? "gitlab-label" : "bug")] },
+          merge_request: {
+            Number: 1,
+            labels: [label(options.params?.path?.provider === "gitlab" ? "gitlab-label" : "bug")],
+          },
           events: [],
         },
       })),
@@ -88,8 +112,18 @@ describe("label editing stores", () => {
         data: {
           repo_owner: "octo",
           repo_name: "repo",
-          repo: { provider: "github", platform_host: "github.com", owner: "octo", name: "repo", repo_path: "octo/repo" },
-          issue: { Number: 2, labels: [label("bug")], UpdatedAt: "2026-05-15T12:00:00Z" },
+          repo: {
+            provider: "github",
+            platform_host: "github.com",
+            owner: "octo",
+            name: "repo",
+            repo_path: "octo/repo",
+          },
+          issue: {
+            Number: 2,
+            labels: [label("bug")],
+            UpdatedAt: "2026-05-15T12:00:00Z",
+          },
           events: [],
         },
       })),

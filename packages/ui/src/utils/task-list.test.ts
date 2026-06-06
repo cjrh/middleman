@@ -1,9 +1,5 @@
-import { describe, expect, it } from "vitest";
-import {
-  listTaskItems,
-  moveTaskListItem,
-  toggleTaskListItem,
-} from "./task-list.js";
+import { describe, expect, it } from "vite-plus/test";
+import { listTaskItems, moveTaskListItem, toggleTaskListItem } from "./task-list.js";
 
 describe("listTaskItems", () => {
   it("returns an empty list for empty input", () => {
@@ -39,17 +35,8 @@ describe("listTaskItems", () => {
     // least as many backticks. Without this rule, the inner ``` would
     // prematurely close the block and the second `[ ] inside` would
     // wrongly count as a task, shifting indices for the real task.
-    const src = [
-      "````",
-      "```",
-      "- [ ] inside fenced block",
-      "```",
-      "````",
-      "- [ ] real task after fence",
-    ].join("\n");
-    expect(listTaskItems(src)).toEqual([
-      { index: 0, checked: false, line: 5 },
-    ]);
+    const src = ["````", "```", "- [ ] inside fenced block", "```", "````", "- [ ] real task after fence"].join("\n");
+    expect(listTaskItems(src)).toEqual([{ index: 0, checked: false, line: 5 }]);
   });
 
   it("does not treat 4-space-indented fence syntax as a real fence", () => {
@@ -58,15 +45,10 @@ describe("listTaskItems", () => {
     // the indented block must NOT open a fence — if it did, the real
     // task that follows would be hidden inside the bogus fenced
     // block and the index would drift.
-    const src = [
-      "    ```",
-      "    - [ ] indented code line",
-      "    ```",
-      "- [ ] real task after indented code",
-    ].join("\n");
-    expect(listTaskItems(src)).toEqual([
-      { index: 0, checked: false, line: 3 },
-    ]);
+    const src = ["    ```", "    - [ ] indented code line", "    ```", "- [ ] real task after indented code"].join(
+      "\n",
+    );
+    expect(listTaskItems(src)).toEqual([{ index: 0, checked: false, line: 3 }]);
   });
 
   it("does not close a backtick fence with a tilde fence", () => {
@@ -78,20 +60,11 @@ describe("listTaskItems", () => {
       "```",
       "- [ ] real task after fence",
     ].join("\n");
-    expect(listTaskItems(src)).toEqual([
-      { index: 0, checked: false, line: 5 },
-    ]);
+    expect(listTaskItems(src)).toEqual([{ index: 0, checked: false, line: 5 }]);
   });
 
   it("ignores task-shaped lines inside fenced code blocks", () => {
-    const src = [
-      "- [ ] real one",
-      "```",
-      "- [ ] not a task",
-      "- [x] also fenced",
-      "```",
-      "- [x] real two",
-    ].join("\n");
+    const src = ["- [ ] real one", "```", "- [ ] not a task", "- [x] also fenced", "```", "- [x] real two"].join("\n");
     expect(listTaskItems(src)).toEqual([
       { index: 0, checked: false, line: 0 },
       { index: 1, checked: true, line: 5 },
@@ -110,31 +83,20 @@ describe("listTaskItems", () => {
     // Top-level indented (4-space) code block. Marked treats this
     // as a code block, so the inner `- [ ]` is plain text, not a
     // task. listTaskItems must agree.
-    const src = [
-      "    - [ ] in indented code block",
-      "    - [x] still in code block",
-      "",
-      "- [ ] real task",
-    ].join("\n");
-    expect(listTaskItems(src)).toEqual([
-      { index: 0, checked: false, line: 3 },
-    ]);
+    const src = ["    - [ ] in indented code block", "    - [x] still in code block", "", "- [ ] real task"].join("\n");
+    expect(listTaskItems(src)).toEqual([{ index: 0, checked: false, line: 3 }]);
   });
 
   it("treats tab-indented task-shaped lines at top level as code", () => {
     const src = "\t- [ ] tab indented\n- [ ] real task";
-    expect(listTaskItems(src)).toEqual([
-      { index: 0, checked: false, line: 1 },
-    ]);
+    expect(listTaskItems(src)).toEqual([{ index: 0, checked: false, line: 1 }]);
   });
 
   it("rejects checkbox markers without a trailing space (matches marked)", () => {
     // Marked treats `- [ ]nospace` as plain text, not a task — the
     // source helper must agree or data-task-index would drift.
     const src = "- [ ]nospace\n- [ ] withspace";
-    expect(listTaskItems(src)).toEqual([
-      { index: 0, checked: false, line: 1 },
-    ]);
+    expect(listTaskItems(src)).toEqual([{ index: 0, checked: false, line: 1 }]);
   });
 
   it("keeps nested task items inside a list (not as code blocks)", () => {
@@ -171,98 +133,58 @@ describe("toggleTaskListItem", () => {
 
   it("toggles only the targeted item and leaves others intact", () => {
     const src = "- [ ] first\n- [ ] second\n- [x] third";
-    expect(toggleTaskListItem(src, 1)).toBe(
-      "- [ ] first\n- [x] second\n- [x] third",
-    );
+    expect(toggleTaskListItem(src, 1)).toBe("- [ ] first\n- [x] second\n- [x] third");
   });
 
   it("preserves line content after the checkbox", () => {
     const src = "- [ ] item with **bold** and `code`";
-    expect(toggleTaskListItem(src, 0)).toBe(
-      "- [x] item with **bold** and `code`",
-    );
+    expect(toggleTaskListItem(src, 0)).toBe("- [x] item with **bold** and `code`");
   });
 
   it("ignores task-shaped lines inside fenced code blocks when counting", () => {
-    const src = [
-      "- [ ] outer one",
-      "```",
-      "- [ ] fenced",
-      "```",
-      "- [ ] outer two",
-    ].join("\n");
+    const src = ["- [ ] outer one", "```", "- [ ] fenced", "```", "- [ ] outer two"].join("\n");
     const out = toggleTaskListItem(src, 1);
     // index 1 is "outer two", not the fenced line
-    expect(out).toBe(
-      [
-        "- [ ] outer one",
-        "```",
-        "- [ ] fenced",
-        "```",
-        "- [x] outer two",
-      ].join("\n"),
-    );
+    expect(out).toBe(["- [ ] outer one", "```", "- [ ] fenced", "```", "- [x] outer two"].join("\n"));
   });
 
   it("supports ordered-list task markers", () => {
-    expect(toggleTaskListItem("1. [ ] step one", 0)).toBe(
-      "1. [x] step one",
-    );
+    expect(toggleTaskListItem("1. [ ] step one", 0)).toBe("1. [x] step one");
   });
 
   it("supports ordered-list task markers using ')' (CommonMark)", () => {
     // marked accepts `1)` as an ordered-list marker, so the source
     // helpers must too — otherwise data-task-index would drift.
-    expect(toggleTaskListItem("1) [ ] step one", 0)).toBe(
-      "1) [x] step one",
-    );
+    expect(toggleTaskListItem("1) [ ] step one", 0)).toBe("1) [x] step one");
   });
 
   it("does not flip task-shaped lines inside indented code blocks", () => {
-    const src = [
-      "    - [ ] in indented code block",
-      "- [ ] real task",
-    ].join("\n");
+    const src = ["    - [ ] in indented code block", "- [ ] real task"].join("\n");
     // Index 0 is the real task on line 1, not the code-block line.
-    expect(toggleTaskListItem(src, 0)).toBe(
-      [
-        "    - [ ] in indented code block",
-        "- [x] real task",
-      ].join("\n"),
-    );
+    expect(toggleTaskListItem(src, 0)).toBe(["    - [ ] in indented code block", "- [x] real task"].join("\n"));
   });
 
   it("supports nested task items by document order", () => {
     const src = "- [ ] outer\n  - [ ] inner";
-    expect(toggleTaskListItem(src, 1)).toBe(
-      "- [ ] outer\n  - [x] inner",
-    );
+    expect(toggleTaskListItem(src, 1)).toBe("- [ ] outer\n  - [x] inner");
   });
 });
 
 describe("moveTaskListItem", () => {
   it("moves an item downward to a later position", () => {
     const src = "- [ ] A\n- [ ] B\n- [ ] C";
-    expect(moveTaskListItem(src, 0, 2)).toBe(
-      "- [ ] B\n- [ ] C\n- [ ] A",
-    );
+    expect(moveTaskListItem(src, 0, 2)).toBe("- [ ] B\n- [ ] C\n- [ ] A");
   });
 
   it("moves an item upward to an earlier position", () => {
     const src = "- [ ] A\n- [ ] B\n- [ ] C";
-    expect(moveTaskListItem(src, 2, 0)).toBe(
-      "- [ ] C\n- [ ] A\n- [ ] B",
-    );
+    expect(moveTaskListItem(src, 2, 0)).toBe("- [ ] C\n- [ ] A\n- [ ] B");
   });
 
   it("swaps two adjacent items", () => {
     const src = "- [ ] A\n- [ ] B\n- [ ] C";
-    expect(moveTaskListItem(src, 0, 1)).toBe(
-      "- [ ] B\n- [ ] A\n- [ ] C",
-    );
-    expect(moveTaskListItem(src, 1, 0)).toBe(
-      "- [ ] B\n- [ ] A\n- [ ] C",
-    );
+    expect(moveTaskListItem(src, 0, 1)).toBe("- [ ] B\n- [ ] A\n- [ ] C");
+    expect(moveTaskListItem(src, 1, 0)).toBe("- [ ] B\n- [ ] A\n- [ ] C");
   });
 
   it("returns source unchanged when from === to", () => {
@@ -279,88 +201,40 @@ describe("moveTaskListItem", () => {
 
   it("preserves checked state of the moved item", () => {
     const src = "- [ ] A\n- [x] B\n- [ ] C";
-    expect(moveTaskListItem(src, 1, 0)).toBe(
-      "- [x] B\n- [ ] A\n- [ ] C",
-    );
+    expect(moveTaskListItem(src, 1, 0)).toBe("- [x] B\n- [ ] A\n- [ ] C");
   });
 
   it("preserves non-task content between task items", () => {
     const src = "- [ ] A\nsome prose\n- [ ] B\n- [ ] C";
-    expect(moveTaskListItem(src, 0, 2)).toBe(
-      "some prose\n- [ ] B\n- [ ] C\n- [ ] A",
-    );
+    expect(moveTaskListItem(src, 0, 2)).toBe("some prose\n- [ ] B\n- [ ] C\n- [ ] A");
   });
 
   it("skips fenced task-shaped lines when counting", () => {
-    const src = [
-      "- [ ] real one",
-      "```",
-      "- [ ] fenced",
-      "```",
-      "- [ ] real two",
-      "- [ ] real three",
-    ].join("\n");
+    const src = ["- [ ] real one", "```", "- [ ] fenced", "```", "- [ ] real two", "- [ ] real three"].join("\n");
     expect(moveTaskListItem(src, 0, 2)).toBe(
-      [
-        "```",
-        "- [ ] fenced",
-        "```",
-        "- [ ] real two",
-        "- [ ] real three",
-        "- [ ] real one",
-      ].join("\n"),
+      ["```", "- [ ] fenced", "```", "- [ ] real two", "- [ ] real three", "- [ ] real one"].join("\n"),
     );
   });
 
   it("carries continuation lines along with the moved task", () => {
-    const src = [
-      "- [ ] first",
-      "- [ ] second",
-      "  continued text",
-      "  more continuation",
-      "- [ ] third",
-    ].join("\n");
+    const src = ["- [ ] first", "- [ ] second", "  continued text", "  more continuation", "- [ ] third"].join("\n");
     expect(moveTaskListItem(src, 1, 2)).toBe(
-      [
-        "- [ ] first",
-        "- [ ] third",
-        "- [ ] second",
-        "  continued text",
-        "  more continuation",
-      ].join("\n"),
+      ["- [ ] first", "- [ ] third", "- [ ] second", "  continued text", "  more continuation"].join("\n"),
     );
   });
 
   it("carries nested sub-task children along with the moved task", () => {
-    const src = [
-      "- [ ] outer first",
-      "  - [ ] inner a",
-      "  - [ ] inner b",
-      "- [ ] outer second",
-    ].join("\n");
+    const src = ["- [ ] outer first", "  - [ ] inner a", "  - [ ] inner b", "- [ ] outer second"].join("\n");
     // Move outer-first (index 0) to outer-second's slot (index 3).
     expect(moveTaskListItem(src, 0, 3)).toBe(
-      [
-        "- [ ] outer second",
-        "- [ ] outer first",
-        "  - [ ] inner a",
-        "  - [ ] inner b",
-      ].join("\n"),
+      ["- [ ] outer second", "- [ ] outer first", "  - [ ] inner a", "  - [ ] inner b"].join("\n"),
     );
   });
 
   it("does not see indented-code task-shaped lines as targets", () => {
-    const src = [
-      "    - [ ] in indented code block",
-      "- [ ] real first",
-      "- [ ] real second",
-    ].join("\n");
+    const src = ["    - [ ] in indented code block", "- [ ] real first", "- [ ] real second"].join("\n");
     expect(moveTaskListItem(src, 0, 1)).toBe(
-      [
-        "    - [ ] in indented code block",
-        "- [ ] real second",
-        "- [ ] real first",
-      ].join("\n"),
+      ["    - [ ] in indented code block", "- [ ] real second", "- [ ] real first"].join("\n"),
     );
   });
 
@@ -372,11 +246,7 @@ describe("moveTaskListItem", () => {
   });
 
   it("rejects cross-hierarchy moves between different indent levels", () => {
-    const src = [
-      "- [ ] outer",
-      "  - [ ] inner",
-      "- [ ] another outer",
-    ].join("\n");
+    const src = ["- [ ] outer", "  - [ ] inner", "- [ ] another outer"].join("\n");
     // inner (index 1, indent 2) onto outer (index 0, indent 0) —
     // different indents, refuse the move so we don't reparent it.
     expect(moveTaskListItem(src, 1, 0)).toBe(src);
@@ -388,20 +258,10 @@ describe("moveTaskListItem", () => {
     // Both nested tasks live at indent 2 — even though they sit
     // under different parents, the moved indentation matches so
     // the markdown structure stays well-formed.
-    const src = [
-      "- [ ] outer A",
-      "  - [ ] child A1",
-      "- [ ] outer B",
-      "  - [ ] child B1",
-    ].join("\n");
+    const src = ["- [ ] outer A", "  - [ ] child A1", "- [ ] outer B", "  - [ ] child B1"].join("\n");
     // child A1 (index 1) to child B1 (index 3) — same indent.
     expect(moveTaskListItem(src, 1, 3)).toBe(
-      [
-        "- [ ] outer A",
-        "- [ ] outer B",
-        "  - [ ] child B1",
-        "  - [ ] child A1",
-      ].join("\n"),
+      ["- [ ] outer A", "- [ ] outer B", "  - [ ] child B1", "  - [ ] child A1"].join("\n"),
     );
   });
 
@@ -409,44 +269,18 @@ describe("moveTaskListItem", () => {
     // Markdown allows a list item's body to span blank-separated
     // paragraphs as long as continuation stays indented. moveTask
     // must drag the whole multi-paragraph item together.
-    const src = [
-      "- [ ] first",
-      "",
-      "  paragraph two of first",
-      "- [ ] second",
-    ].join("\n");
+    const src = ["- [ ] first", "", "  paragraph two of first", "- [ ] second"].join("\n");
     expect(moveTaskListItem(src, 0, 1)).toBe(
-      [
-        "- [ ] second",
-        "- [ ] first",
-        "",
-        "  paragraph two of first",
-      ].join("\n"),
+      ["- [ ] second", "- [ ] first", "", "  paragraph two of first"].join("\n"),
     );
   });
 
   it("preserves blank lines and prose outside the moved block", () => {
-    const src = [
-      "Intro line",
-      "",
-      "- [ ] A",
-      "- [ ] B",
-      "  with continuation",
-      "",
-      "Trailing prose",
-    ].join("\n");
+    const src = ["Intro line", "", "- [ ] A", "- [ ] B", "  with continuation", "", "Trailing prose"].join("\n");
     // Move A (index 0) to B's slot (index 1). B carries its
     // continuation; A becomes a single-line block.
     expect(moveTaskListItem(src, 0, 1)).toBe(
-      [
-        "Intro line",
-        "",
-        "- [ ] B",
-        "  with continuation",
-        "- [ ] A",
-        "",
-        "Trailing prose",
-      ].join("\n"),
+      ["Intro line", "", "- [ ] B", "  with continuation", "- [ ] A", "", "Trailing prose"].join("\n"),
     );
   });
 });

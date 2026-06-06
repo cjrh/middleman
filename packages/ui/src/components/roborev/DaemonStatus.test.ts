@@ -1,12 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/svelte";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import DaemonStatus from "./DaemonStatus.svelte";
 
@@ -59,9 +52,7 @@ describe("DaemonStatus", () => {
   it("does not prepend another v when the daemon version already has one", () => {
     render(DaemonStatus);
 
-    expect(
-      screen.getByTitle("Daemon version").textContent,
-    ).toBe("v0.52.0");
+    expect(screen.getByTitle("Daemon version").textContent).toBe("v0.52.0");
   });
 
   it("prepends v when the daemon version is returned without one", () => {
@@ -69,8 +60,6 @@ describe("DaemonStatus", () => {
 
     render(DaemonStatus);
 
-    expect(
-      screen.getByTitle("Daemon version").textContent,
-    ).toBe("v0.52.0");
+    expect(screen.getByTitle("Daemon version").textContent).toBe("v0.52.0");
   });
 });

@@ -1,13 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import type { PREvent } from "../../api/types.js";
 import ReviewDecisionChip from "./ReviewDecisionChip.svelte";
 
-function reviewEvent(
-  author: string,
-  summary = "APPROVED",
-  createdAt = "2026-05-01T12:00:00Z",
-): PREvent {
+function reviewEvent(author: string, summary = "APPROVED", createdAt = "2026-05-01T12:00:00Z"): PREvent {
   return {
     ID: Math.floor(Math.random() * 1_000_000),
     MergeRequestID: 1,
@@ -39,7 +35,9 @@ describe("ReviewDecisionChip", () => {
       },
     });
 
-    const trigger = screen.getByRole("button", { name: "APPROVED (2)" });
+    const trigger = screen.getByRole("button", {
+      name: "APPROVED (2)",
+    });
     await fireEvent.click(trigger);
 
     const popup = document.querySelector(".approval-popup");

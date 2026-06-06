@@ -24,11 +24,7 @@ interface ImportMeta {
 interface WorkspaceHost {
   key: string;
   label: string;
-  connectionState:
-    | "connected"
-    | "connecting"
-    | "disconnected"
-    | "error";
+  connectionState: "connected" | "connecting" | "disconnected" | "error";
   transport?: "ssh" | "local";
   platform?: string;
   projects: WorkspaceProject[];
@@ -102,10 +98,7 @@ interface CommandResult {
 }
 
 interface WorkspaceCommandHandler {
-  (
-    command: string,
-    payload: Record<string, unknown>,
-  ): CommandResult | Promise<CommandResult>;
+  (command: string, payload: Record<string, unknown>): CommandResult | Promise<CommandResult>;
 }
 
 interface WorkspaceDetailContext {

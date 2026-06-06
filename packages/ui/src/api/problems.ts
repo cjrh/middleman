@@ -13,9 +13,9 @@ export type ProblemBody = components["schemas"]["ProblemError"];
 // the union without manual sync.
 export type ProblemCode = ProblemBody["code"];
 
-export const ProblemCodes = Object.fromEntries(
-  problemErrorCodeValues.map((code) => [code, code]),
-) as { readonly [K in ProblemCode]: K };
+export const ProblemCodes = Object.fromEntries(problemErrorCodeValues.map((code) => [code, code])) as {
+  readonly [K in ProblemCode]: K;
+};
 
 const problemCodeValues = new Set<string>(problemErrorCodeValues);
 
@@ -36,9 +36,7 @@ export function isProblem(value: unknown): value is ProblemBody {
 // readProblem decodes a fetch Response body as a problem when the
 // response is not OK and the content-type is application/problem+json.
 // Returns null for ok responses, non-problem bodies, or parse failures.
-export async function readProblem(
-  response: Response,
-): Promise<ProblemBody | null> {
+export async function readProblem(response: Response): Promise<ProblemBody | null> {
   if (response.ok) {
     return null;
   }

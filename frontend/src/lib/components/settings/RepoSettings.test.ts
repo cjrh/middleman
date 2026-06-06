@@ -1,11 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mockRefreshSyncStatus = vi.fn();
 
@@ -26,12 +20,7 @@ vi.mock("../../api/settings.js", () => ({
   bulkAddRepos: vi.fn(),
 }));
 
-import {
-  addRepo,
-  bulkAddRepos,
-  previewRepos,
-  refreshRepo,
-} from "../../api/settings.js";
+import { addRepo, bulkAddRepos, previewRepos, refreshRepo } from "../../api/settings.js";
 import RepoSettings from "./RepoSettings.svelte";
 
 const mockAddRepo = vi.mocked(addRepo);
@@ -67,11 +56,7 @@ describe("RepoSettings", () => {
       },
     });
 
-    expect(
-      screen.getByText(
-        (_, element) => element?.textContent === "roborev-dev/* (2)",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText((_, element) => element?.textContent === "roborev-dev/* (2)")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
   });
 
@@ -144,12 +129,12 @@ describe("RepoSettings", () => {
       },
     });
 
-    const trigger = screen.getByRole("button", { name: "Add repositories…" });
+    const trigger = screen.getByRole("button", {
+      name: "Add repositories…",
+    });
     await fireEvent.click(trigger);
 
-    expect(
-      screen.getByRole("dialog", { name: "Add repositories" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Add repositories" })).toBeTruthy();
     expect(screen.getByLabelText("Repository pattern")).toBeTruthy();
 
     await fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -164,9 +149,7 @@ describe("RepoSettings", () => {
       },
     });
 
-    const summary = screen.getByText(
-      "Advanced: add provider-scoped repo or tracking glob directly",
-    );
+    const summary = screen.getByText("Advanced: add provider-scoped repo or tracking glob directly");
     expect(summary).toBeTruthy();
     expect(summary.closest("details")?.hasAttribute("open")).toBe(false);
   });
@@ -237,7 +220,9 @@ describe("RepoSettings", () => {
     });
 
     const input = screen.getByPlaceholderText("provider/owner/name");
-    await fireEvent.input(input, { target: { value: "github/acme/widget" } });
+    await fireEvent.input(input, {
+      target: { value: "github/acme/widget" },
+    });
     await fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(mockAddRepo).toHaveBeenCalledWith("acme", "widget", {
       provider: "github",
@@ -313,17 +298,13 @@ describe("RepoSettings", () => {
       },
     });
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Add repositories…" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Add repositories…" }));
     await fireEvent.input(screen.getByLabelText("Repository pattern"), {
       target: { value: "acme/*" },
     });
     await fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     await screen.findByText("acme/api");
-    await fireEvent.click(
-      screen.getByRole("button", { name: "Add selected repositories" }),
-    );
+    await fireEvent.click(screen.getByRole("button", { name: "Add selected repositories" }));
 
     await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(importedRepos));
     expect(mockRefreshSyncStatus).toHaveBeenCalled();

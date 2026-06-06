@@ -88,16 +88,39 @@ async function mockActivity(page: Page, items: unknown[]): Promise<void> {
 }
 
 test.describe("threaded activity run collapse", () => {
-  test("collapses a run of three or more reviews from the same author", async ({
-    page,
-  }) => {
+  test("collapses a run of three or more reviews from the same author", async ({ page }) => {
     await mockSettings(page);
     await mockActivity(page, [
-      prEvent({ id: "r5", type: "review", author: "alice", createdAt: "2026-04-27T15:00:00Z" }),
-      prEvent({ id: "r4", type: "review", author: "alice", createdAt: "2026-04-27T14:00:00Z" }),
-      prEvent({ id: "r3", type: "review", author: "alice", createdAt: "2026-04-27T13:00:00Z" }),
-      prEvent({ id: "r2", type: "review", author: "alice", createdAt: "2026-04-27T12:00:00Z" }),
-      prEvent({ id: "r1", type: "review", author: "alice", createdAt: "2026-04-27T11:00:00Z" }),
+      prEvent({
+        id: "r5",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T15:00:00Z",
+      }),
+      prEvent({
+        id: "r4",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T14:00:00Z",
+      }),
+      prEvent({
+        id: "r3",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T13:00:00Z",
+      }),
+      prEvent({
+        id: "r2",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T12:00:00Z",
+      }),
+      prEvent({
+        id: "r1",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T11:00:00Z",
+      }),
     ]);
     await page.goto("/?view=threaded");
 
@@ -109,39 +132,79 @@ test.describe("threaded activity run collapse", () => {
     await expect(page.locator(".event-row:not(.collapsed-event)")).toHaveCount(0);
   });
 
-  test("collapses comments and reviews into separate runs by event type", async ({
-    page,
-  }) => {
+  test("collapses comments and reviews into separate runs by event type", async ({ page }) => {
     await mockSettings(page);
     await mockActivity(page, [
-      prEvent({ id: "c3", type: "comment", author: "alice", createdAt: "2026-04-27T16:00:00Z" }),
-      prEvent({ id: "c2", type: "comment", author: "alice", createdAt: "2026-04-27T15:00:00Z" }),
-      prEvent({ id: "c1", type: "comment", author: "alice", createdAt: "2026-04-27T14:00:00Z" }),
-      prEvent({ id: "r3", type: "review", author: "alice", createdAt: "2026-04-27T13:00:00Z" }),
-      prEvent({ id: "r2", type: "review", author: "alice", createdAt: "2026-04-27T12:00:00Z" }),
-      prEvent({ id: "r1", type: "review", author: "alice", createdAt: "2026-04-27T11:00:00Z" }),
+      prEvent({
+        id: "c3",
+        type: "comment",
+        author: "alice",
+        createdAt: "2026-04-27T16:00:00Z",
+      }),
+      prEvent({
+        id: "c2",
+        type: "comment",
+        author: "alice",
+        createdAt: "2026-04-27T15:00:00Z",
+      }),
+      prEvent({
+        id: "c1",
+        type: "comment",
+        author: "alice",
+        createdAt: "2026-04-27T14:00:00Z",
+      }),
+      prEvent({
+        id: "r3",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T13:00:00Z",
+      }),
+      prEvent({
+        id: "r2",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T12:00:00Z",
+      }),
+      prEvent({
+        id: "r1",
+        type: "review",
+        author: "alice",
+        createdAt: "2026-04-27T11:00:00Z",
+      }),
     ]);
     await page.goto("/?view=threaded");
 
     await expect(
-      page.locator(".event-row.collapsed-event", { hasText: "3 comments" }),
+      page.locator(".event-row.collapsed-event", {
+        hasText: "3 comments",
+      }),
     ).toHaveCount(1);
     await expect(
-      page.locator(".event-row.collapsed-event", { hasText: "3 reviews" }),
+      page.locator(".event-row.collapsed-event", {
+        hasText: "3 reviews",
+      }),
     ).toHaveCount(1);
   });
 
   test("leaves short runs of comments unrolled", async ({ page }) => {
     await mockSettings(page);
     await mockActivity(page, [
-      prEvent({ id: "c2", type: "comment", author: "alice", createdAt: "2026-04-27T13:00:00Z" }),
-      prEvent({ id: "c1", type: "comment", author: "alice", createdAt: "2026-04-27T12:00:00Z" }),
+      prEvent({
+        id: "c2",
+        type: "comment",
+        author: "alice",
+        createdAt: "2026-04-27T13:00:00Z",
+      }),
+      prEvent({
+        id: "c1",
+        type: "comment",
+        author: "alice",
+        createdAt: "2026-04-27T12:00:00Z",
+      }),
     ]);
     await page.goto("/?view=threaded");
 
     await expect(page.locator(".event-row.collapsed-event")).toHaveCount(0);
-    await expect(
-      page.locator(".event-row:not(.collapsed-event)"),
-    ).toHaveCount(2);
+    await expect(page.locator(".event-row:not(.collapsed-event)")).toHaveCount(2);
   });
 });

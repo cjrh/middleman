@@ -1,12 +1,8 @@
 import { setGlobalRepo } from "../stores/filter.svelte.js";
 
 // Bridge: repo filter (module-scope, not workspace-specific)
-window.__middleman_set_repo_filter = (
-  repo: { owner: string; name: string } | null,
-) => {
-  setGlobalRepo(
-    repo ? `${repo.owner}/${repo.name}` : undefined,
-  );
+window.__middleman_set_repo_filter = (repo: { owner: string; name: string } | null) => {
+  setGlobalRepo(repo ? `${repo.owner}/${repo.name}` : undefined);
 };
 
 export interface ActionHook {
@@ -32,9 +28,7 @@ export interface ProjectActionContext {
 export interface ProjectActionHook {
   id: string;
   label: string;
-  handler: (
-    context: ProjectActionContext,
-  ) => CommandResult | Promise<CommandResult>;
+  handler: (context: ProjectActionContext) => CommandResult | Promise<CommandResult>;
 }
 
 // Re-export ToolingStatus from the global ambient module so .svelte
@@ -83,26 +77,19 @@ export function isStatusBarHidden(): boolean {
   return readConfig()?.embed?.hideStatusBar === true;
 }
 
-export function getThemeMode():
-  "light" | "dark" | "system" | undefined {
+export function getThemeMode(): "light" | "dark" | "system" | undefined {
   return readConfig()?.theme?.mode;
 }
 
-export function getThemeColors():
-  NonNullable<NonNullable<MiddlemanConfig["theme"]>["colors"]>
-  | undefined {
+export function getThemeColors(): NonNullable<NonNullable<MiddlemanConfig["theme"]>["colors"]> | undefined {
   return readConfig()?.theme?.colors;
 }
 
-export function getThemeFonts():
-  NonNullable<NonNullable<MiddlemanConfig["theme"]>["fonts"]>
-  | undefined {
+export function getThemeFonts(): NonNullable<NonNullable<MiddlemanConfig["theme"]>["fonts"]> | undefined {
   return readConfig()?.theme?.fonts;
 }
 
-export function getThemeRadii():
-  NonNullable<NonNullable<MiddlemanConfig["theme"]>["radii"]>
-  | undefined {
+export function getThemeRadii(): NonNullable<NonNullable<MiddlemanConfig["theme"]>["radii"]> | undefined {
   return readConfig()?.theme?.radii;
 }
 
@@ -138,9 +125,7 @@ export function getProjectActions(): ProjectActionHook[] {
   return readConfig()?.actions?.project ?? [];
 }
 
-export function getProjectAction(
-  id: string,
-): ProjectActionHook | undefined {
+export function getProjectAction(id: string): ProjectActionHook | undefined {
   return getProjectActions().find((action) => action.id === id);
 }
 
@@ -148,20 +133,15 @@ export function getToolingStatus(): ToolingStatus | undefined {
   return readConfig()?.embed?.tooling;
 }
 
-export function getOnNavigate():
-  ((event: MiddlemanNavigateEvent) => void) | undefined {
+export function getOnNavigate(): ((event: MiddlemanNavigateEvent) => void) | undefined {
   return readConfig()?.onNavigate;
 }
 
-export function getOnRouteChange():
-  ((event: MiddlemanNavigateEvent) => void) | undefined {
+export function getOnRouteChange(): ((event: MiddlemanNavigateEvent) => void) | undefined {
   return readConfig()?.onRouteChange;
 }
 
-export function invokeAction(
-  action: ActionHook,
-  context: ActionContext,
-): void {
+export function invokeAction(action: ActionHook, context: ActionContext): void {
   try {
     const result = action.handler(context);
     Promise.resolve(result).catch((err: unknown) => {
@@ -183,21 +163,13 @@ export async function invokeProjectAction(
 ): Promise<CommandResult> {
   try {
     const result = await action.handler(context);
-    if (
-      result &&
-      typeof result === "object" &&
-      "ok" in result &&
-      typeof result.ok === "boolean"
-    ) {
+    if (result && typeof result === "object" && "ok" in result && typeof result.ok === "boolean") {
       return result;
     }
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      `Embedding project action "${action.id}" failed:`,
-      err,
-    );
+    console.error(`Embedding project action "${action.id}" failed:`, err);
     return { ok: false, message };
   }
 }
@@ -224,8 +196,7 @@ export function getEmbedActivePlatformHost(): string | null {
   return value;
 }
 
-export function getOnLayoutChanged():
-  MiddlemanConfig["onLayoutChanged"] | undefined {
+export function getOnLayoutChanged(): MiddlemanConfig["onLayoutChanged"] | undefined {
   return readConfig()?.onLayoutChanged;
 }
 
@@ -248,20 +219,15 @@ export function emitLayoutChanged(layout: {
   }, 150);
 }
 
-export function getWorkspaceData():
-  WorkspaceData | undefined {
+export function getWorkspaceData(): WorkspaceData | undefined {
   return readConfig()?.workspace;
 }
 
-export function getOnWorkspaceCommand():
-  WorkspaceCommandHandler | undefined {
+export function getOnWorkspaceCommand(): WorkspaceCommandHandler | undefined {
   return readConfig()?.onWorkspaceCommand;
 }
 
-export async function emitWorkspaceCommand(
-  command: string,
-  payload: Record<string, unknown>,
-): Promise<CommandResult> {
+export async function emitWorkspaceCommand(command: string, payload: Record<string, unknown>): Promise<CommandResult> {
   const handler = getOnWorkspaceCommand();
   if (!handler) {
     return { ok: true };
@@ -273,44 +239,30 @@ export async function emitWorkspaceCommand(
     }
     return { ok: true };
   } catch (e) {
-    const message =
-      e instanceof Error ? e.message : String(e);
-    console.error(
-      `[middleman] workspace command "${command}" failed:`,
-      e,
-    );
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`[middleman] workspace command "${command}" failed:`, e);
     return { ok: false, message };
   }
 }
 
 export function initWorkspaceBridge(): void {
-  window.__middleman_update_workspace = (
-    data: WorkspaceData,
-  ) => {
+  window.__middleman_update_workspace = (data: WorkspaceData) => {
     const config = window.__middleman_config;
     if (config) {
       config.workspace = data;
       window.__middleman_notify_config_changed?.();
     }
   };
-  window.__middleman_update_selection = (
-    selection: {
-      hostKey?: string | null;
-      worktreeKey?: string | null;
-    },
-  ) => {
+  window.__middleman_update_selection = (selection: { hostKey?: string | null; worktreeKey?: string | null }) => {
     const config = window.__middleman_config;
     if (!config?.workspace) return;
-    const changingHost =
-      "hostKey" in selection &&
-      selection.hostKey !== config.workspace.selectedHostKey;
+    const changingHost = "hostKey" in selection && selection.hostKey !== config.workspace.selectedHostKey;
     const updated = { ...config.workspace };
     if ("hostKey" in selection) {
       updated.selectedHostKey = selection.hostKey ?? null;
     }
     if ("worktreeKey" in selection) {
-      updated.selectedWorktreeKey =
-        selection.worktreeKey ?? null;
+      updated.selectedWorktreeKey = selection.worktreeKey ?? null;
     } else if (changingHost) {
       updated.selectedWorktreeKey = null;
     }
@@ -326,9 +278,7 @@ export function initWorkspaceBridge(): void {
   ) => {
     const config = window.__middleman_config;
     if (!config?.workspace) return;
-    const hostIdx = config.workspace.hosts.findIndex(
-      (h) => h.key === hostKey,
-    );
+    const hostIdx = config.workspace.hosts.findIndex((h) => h.key === hostKey);
     if (hostIdx < 0) return;
     const host = config.workspace.hosts[hostIdx]!;
     const updated = { ...host };

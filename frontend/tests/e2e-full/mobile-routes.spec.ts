@@ -11,16 +11,11 @@ async function expectPathname(page: Page, pathname: string): Promise<void> {
   await expect.poll(() => new URL(page.url()).pathname).toBe(pathname);
 }
 
-async function expectReadableFocusList(
-  page: Page,
-  itemSelector: string,
-): Promise<void> {
+async function expectReadableFocusList(page: Page, itemSelector: string): Promise<void> {
   await expect(page.locator(itemSelector).first()).toBeVisible();
 
   const metrics = await page.evaluate((selector) => {
-    const fontSize = (node: Element | null): number => node
-      ? Number.parseFloat(getComputedStyle(node).fontSize)
-      : 0;
+    const fontSize = (node: Element | null): number => (node ? Number.parseFloat(getComputedStyle(node).fontSize) : 0);
     const rect = (node: Element | null): DOMRect | null => node?.getBoundingClientRect() ?? null;
     const compactRect = (node: Element | null) => {
       const r = rect(node);
@@ -32,9 +27,8 @@ async function expectReadableFocusList(
     const search = document.querySelector(".focus-list .search-input");
     const stateButton = document.querySelector(".focus-list .state-btn");
     const focusList = document.querySelector(".focus-list");
-    const tokenValue = (node: Element | null, name: string): string => node
-      ? getComputedStyle(node).getPropertyValue(name).trim()
-      : "";
+    const tokenValue = (node: Element | null, name: string): string =>
+      node ? getComputedStyle(node).getPropertyValue(name).trim() : "";
 
     return {
       viewportWidth: window.innerWidth,
@@ -84,9 +78,8 @@ async function expectReadableDetail(page: Page): Promise<void> {
       const r = document.querySelector(selector)?.getBoundingClientRect();
       return r ? { left: r.left, right: r.right, height: r.height } : null;
     };
-    const tokenValue = (node: Element | null, name: string): string => node
-      ? getComputedStyle(node).getPropertyValue(name).trim()
-      : "";
+    const tokenValue = (node: Element | null, name: string): string =>
+      node ? getComputedStyle(node).getPropertyValue(name).trim() : "";
     const overflowingVisible = [...document.querySelectorAll(".focus-layout *")]
       .filter((el) => {
         const r = el.getBoundingClientRect();
@@ -188,9 +181,7 @@ test.describe("phone routes", () => {
       const cardRect = firstCard?.getBoundingClientRect();
       const buttonRect = firstButton?.getBoundingClientRect();
       const searchRect = search?.getBoundingClientRect();
-      const styleFor = (node: Element | null) => node
-        ? getComputedStyle(node)
-        : null;
+      const styleFor = (node: Element | null) => (node ? getComputedStyle(node) : null);
       const themeSample = document.createElement("div");
       themeSample.style.cssText = [
         "position:absolute",
@@ -227,14 +218,17 @@ test.describe("phone routes", () => {
         const r = node?.getBoundingClientRect();
         return r ? { left: r.left, right: r.right, height: r.height } : null;
       };
-      const fontSize = (node: Element | null): number => node
-        ? Number.parseFloat(getComputedStyle(node).fontSize)
-        : 0;
+      const fontSize = (node: Element | null): number =>
+        node ? Number.parseFloat(getComputedStyle(node).fontSize) : 0;
       return {
         viewportWidth: window.innerWidth,
         documentWidth: document.documentElement.scrollWidth,
-        mobileTypeToken: getComputedStyle(document.querySelector(".mobile-shell") ?? document.documentElement).getPropertyValue("--mobile-type-body").trim(),
-        titleTypeToken: getComputedStyle(document.querySelector(".mobile-shell") ?? document.documentElement).getPropertyValue("--mobile-type-title").trim(),
+        mobileTypeToken: getComputedStyle(document.querySelector(".mobile-shell") ?? document.documentElement)
+          .getPropertyValue("--mobile-type-body")
+          .trim(),
+        titleTypeToken: getComputedStyle(document.querySelector(".mobile-shell") ?? document.documentElement)
+          .getPropertyValue("--mobile-type-title")
+          .trim(),
         rootFontSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
         cardHeight: cardRect?.height ?? 0,
         touchTargetHeight: buttonRect?.height ?? 0,
@@ -302,11 +296,7 @@ test.describe("phone routes", () => {
     expect(metrics.typeSelectFontSize).toBeGreaterThanOrEqual(15);
     expect(metrics.rangeSelectFontSize).toBeGreaterThanOrEqual(15);
     expect(metrics.repoSelectFontSize).toBeGreaterThanOrEqual(15);
-    for (const bounds of [
-      metrics.typeSelectRect,
-      metrics.rangeSelectRect,
-      metrics.repoSelectRect,
-    ]) {
+    for (const bounds of [metrics.typeSelectRect, metrics.rangeSelectRect, metrics.repoSelectRect]) {
       expect(bounds?.left ?? 0).toBeGreaterThanOrEqual(0);
       expect(bounds?.right ?? 0).toBeLessThanOrEqual(metrics.viewportWidth);
     }
@@ -318,25 +308,21 @@ test.describe("phone routes", () => {
 
     await page.getByRole("combobox", { name: /Activity type/ }).click();
     await page.getByRole("option", { name: "PRs" }).click();
-    await expect(page.getByRole("combobox", { name: "Activity type: PRs" }))
-      .toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Activity type: PRs" })).toBeVisible();
     await expect(page).toHaveURL(/types=new_pr/);
 
     await page.getByRole("combobox", { name: /Time range/ }).click();
     await page.getByRole("option", { name: "24h" }).click();
-    await expect(page.getByRole("combobox", { name: "Time range: 24h" }))
-      .toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Time range: 24h" })).toBeVisible();
     await expect(page).toHaveURL(/range=24h/);
 
     const activityForRepo = page.waitForResponse((response) => {
       const url = response.url();
-      return url.includes("/api/v1/activity")
-        && url.includes("repo=github.com%2Facme%2Fwidgets");
+      return url.includes("/api/v1/activity") && url.includes("repo=github.com%2Facme%2Fwidgets");
     });
     await page.getByRole("combobox", { name: /Repository/ }).click();
     await page.getByRole("option", { name: "github.com/acme/widgets" }).click();
-    await expect(page.getByRole("combobox", { name: "Repository: acme/widgets" }))
-      .toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Repository: acme/widgets" })).toBeVisible();
     await activityForRepo;
   });
 
@@ -352,15 +338,19 @@ test.describe("phone routes", () => {
     await page.goto("/m?range=30d&view=threaded");
     await expect(page.locator(".mobile-activity-inbox")).toBeVisible();
 
-    const card = page.locator(".mobile-activity-card", {
-      has: page.locator(".mobile-activity-card__title", {
-        hasText: "Add widget caching layer",
-      }),
-    }).first();
+    const card = page
+      .locator(".mobile-activity-card", {
+        has: page.locator(".mobile-activity-card__title", {
+          hasText: "Add widget caching layer",
+        }),
+      })
+      .first();
     await expect(card).toBeVisible({ timeout: 10_000 });
 
     const repoLabel = card.locator(".mobile-activity-card__meta span").first();
-    const hideOrgToggle = page.getByRole("button", { name: "Hide org" });
+    const hideOrgToggle = page.getByRole("button", {
+      name: "Hide org",
+    });
     await expect(hideOrgToggle).toHaveAttribute("aria-pressed", "false");
     await expect(repoLabel).toHaveText("github.com/acme/widgets");
 
@@ -387,9 +377,7 @@ test.describe("phone routes", () => {
     await expect(page).toHaveURL(/\/focus\/(?:host\/[^/]+\/)?(?:pulls|issues)\//);
     await expect(page.locator(".focus-layout")).toBeVisible();
     await expect(
-      page.locator(
-        ".focus-layout .pull-detail .detail-title, .focus-layout .issue-detail .detail-title",
-      ),
+      page.locator(".focus-layout .pull-detail .detail-title, .focus-layout .issue-detail .detail-title"),
     ).toBeVisible();
     await expectReadableDetail(page);
     await expect(page.locator(".mobile-shell")).toHaveCount(0);
@@ -407,9 +395,7 @@ test.describe("phone routes", () => {
     await expect(page).toHaveURL(/\/focus\/(?:host\/[^/]+\/)?(?:pulls|issues)\//);
     await expect(page.locator(".focus-layout")).toBeVisible();
     await expect(
-      page.locator(
-        ".focus-layout .pull-detail .detail-title, .focus-layout .issue-detail .detail-title",
-      ),
+      page.locator(".focus-layout .pull-detail .detail-title, .focus-layout .issue-detail .detail-title"),
     ).toBeVisible();
     await expect(page.locator(".mobile-shell")).toHaveCount(0);
   });
@@ -418,7 +404,11 @@ test.describe("phone routes", () => {
     await page.goto("/focus/pulls/github/acme/widgets/1");
     await expect(page.locator(".focus-layout .pull-detail .detail-title")).toBeVisible();
 
-    await page.locator(".focus-layout .detail-tab", { hasText: "Files changed" }).click();
+    await page
+      .locator(".focus-layout .detail-tab", {
+        hasText: "Files changed",
+      })
+      .click();
 
     await expect(page).toHaveURL(/\/focus\/pulls\/github\/acme\/widgets\/1\/files$/);
     await expect(page.locator(".focus-layout .files-layout")).toBeVisible();
@@ -431,7 +421,11 @@ test.describe("phone routes", () => {
     await expectPathname(page, "/pulls/github/acme/widgets/1");
     await expect(page.locator(".focus-layout .pull-detail .detail-title")).toBeVisible();
 
-    await page.locator(".focus-layout .detail-tab", { hasText: "Files changed" }).click();
+    await page
+      .locator(".focus-layout .detail-tab", {
+        hasText: "Files changed",
+      })
+      .click();
 
     await expectPathname(page, "/pulls/github/acme/widgets/1/files");
     await expect(page.locator(".focus-layout .files-layout")).toBeVisible();
@@ -502,16 +496,16 @@ test.describe("high-density phone routes", () => {
       };
       const shell = document.querySelector(".mobile-shell");
       const inbox = document.querySelector(".mobile-activity-inbox");
-      const tokenValue = (node: Element | null, name: string): string => node
-        ? getComputedStyle(node).getPropertyValue(name).trim()
-        : "";
+      const tokenValue = (node: Element | null, name: string): string =>
+        node ? getComputedStyle(node).getPropertyValue(name).trim() : "";
       const filterControls = [
         ...document.querySelectorAll(".mobile-activity-filter-grid .select-dropdown-trigger, .mobile-filter-toggle"),
       ]
         .map((control) => control.getBoundingClientRect())
         .map((rect) => ({ left: rect.left, right: rect.right }));
       const search = document.querySelector(".search-input")?.getBoundingClientRect();
-      const firstOption = document.querySelector(".mobile-filter-dropdown .select-dropdown-option")
+      const firstOption = document
+        .querySelector(".mobile-filter-dropdown .select-dropdown-option")
         ?.getBoundingClientRect();
       return {
         dpr: window.devicePixelRatio,

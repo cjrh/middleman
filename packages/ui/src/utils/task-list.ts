@@ -50,11 +50,7 @@ function isIndentedCodeStart(line: string): boolean {
   return false;
 }
 
-type TaskLineVisitor = (
-  match: RegExpMatchArray,
-  lineIndex: number,
-  taskIndex: number,
-) => void;
+type TaskLineVisitor = (match: RegExpMatchArray, lineIndex: number, taskIndex: number) => void;
 
 // Walks `lines` and invokes `visitor` for every task-list line that
 // the markdown renderer would treat as such. Skips lines inside
@@ -79,11 +75,7 @@ function walkTaskLines(lines: string[], visitor: TaskLineVisitor): void {
     // matching close-fence line can end the block; inside a list, the
     // same indent continues the list item and may legitimately open a
     // fence as part of the item's content.
-    if (
-      openFence === null
-      && listIndent === null
-      && isIndentedCodeStart(line)
-    ) {
+    if (openFence === null && listIndent === null && isIndentedCodeStart(line)) {
       continue;
     }
     const fenceMatch = line.match(FENCE_LINE);
@@ -98,8 +90,7 @@ function walkTaskLines(lines: string[], visitor: TaskLineVisitor): void {
         openFence = null;
         // A fenced block at the same indent as the list bullet ends
         // the list — Markdown treats the fence as block-level content.
-        if (listIndent !== null
-          && leadingWhitespaceCount(line) <= listIndent) {
+        if (listIndent !== null && leadingWhitespaceCount(line) <= listIndent) {
           listIndent = null;
         }
         continue;
@@ -115,10 +106,7 @@ function walkTaskLines(lines: string[], visitor: TaskLineVisitor): void {
 
     // Dedent out of the list when a non-blank line sits at or below
     // the list bullet indent and isn't itself a bullet at that level.
-    if (
-      listIndent !== null &&
-      indent < listIndent
-    ) {
+    if (listIndent !== null && indent < listIndent) {
       listIndent = null;
     }
 
@@ -167,10 +155,7 @@ export function listTaskItems(source: string): TaskItem[] {
 // non-blank line is still indented past the bullet. The block ends
 // at the first non-blank line that sits at or below the bullet's
 // indentation.
-function findTaskBlockEnd(
-  lines: string[],
-  start: number,
-): number {
+function findTaskBlockEnd(lines: string[], start: number): number {
   const bulletIndent = leadingWhitespaceCount(lines[start]!);
   let end = start + 1;
   let pendingBlankRun = 0;
@@ -201,11 +186,7 @@ function findTaskBlockEnd(
 // moved item carries its continuation lines and nested sub-tasks
 // with it. If either index is out of range, or they're equal, the
 // source is returned unchanged.
-export function moveTaskListItem(
-  source: string,
-  fromIndex: number,
-  toIndex: number,
-): string {
+export function moveTaskListItem(source: string, fromIndex: number, toIndex: number): string {
   if (!source) return source;
   if (fromIndex === toIndex) return source;
   if (fromIndex < 0 || toIndex < 0) return source;
@@ -225,10 +206,7 @@ export function moveTaskListItem(
   // markdown structure — the moved block keeps its original indent
   // and would reparent or orphan itself. Only same-indent moves
   // (true siblings under the same parent list) are allowed.
-  if (
-    leadingWhitespaceCount(lines[fromStart]!) !==
-    leadingWhitespaceCount(lines[toStart]!)
-  ) {
+  if (leadingWhitespaceCount(lines[fromStart]!) !== leadingWhitespaceCount(lines[toStart]!)) {
     return source;
   }
   // Refuse no-ops: dragging a task onto something inside its own
@@ -236,10 +214,7 @@ export function moveTaskListItem(
   // pass through unchanged.
   if (toStart >= fromStart && toStart < fromEnd) return source;
   const moved = lines.slice(fromStart, fromEnd);
-  const without = [
-    ...lines.slice(0, fromStart),
-    ...lines.slice(fromEnd),
-  ];
+  const without = [...lines.slice(0, fromStart), ...lines.slice(fromEnd)];
   // Where to insert depends on direction: moving down lands the block
   // where the target block ended (minus the removed block's length);
   // moving up lands it where the target block started.
@@ -249,11 +224,7 @@ export function moveTaskListItem(
   } else {
     insertAt = toStart;
   }
-  return [
-    ...without.slice(0, insertAt),
-    ...moved,
-    ...without.slice(insertAt),
-  ].join("\n");
+  return [...without.slice(0, insertAt), ...moved, ...without.slice(insertAt)].join("\n");
 }
 
 // Returns a new source string with the Nth task-list checkbox toggled.

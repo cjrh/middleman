@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite-plus/test";
 
 import type { Repo } from "@middleman/ui/api/types";
 import { createSettingsStore } from "@middleman/ui/stores/settings";
@@ -143,17 +143,23 @@ describe("RepoTypeahead", () => {
     });
 
     await fireEvent.click(screen.getByRole("button", { name: /all repos/i }));
-    await fireEvent.mouseDown(screen.getByRole("option", { name: /github.com\/import-lab\/api/i }));
+    await fireEvent.mouseDown(
+      screen.getByRole("option", {
+        name: /github.com\/import-lab\/api/i,
+      }),
+    );
     expect(onchange).toHaveBeenLastCalledWith("github.com/import-lab/api");
 
     await view.rerender({
       selected: "github.com/import-lab/api",
       onchange,
     });
-    await fireEvent.mouseDown(screen.getByRole("option", { name: /github.com\/import-lab\/web/i }));
-    expect(onchange).toHaveBeenLastCalledWith(
-      "github.com/import-lab/api,github.com/import-lab/web",
+    await fireEvent.mouseDown(
+      screen.getByRole("option", {
+        name: /github.com\/import-lab\/web/i,
+      }),
     );
+    expect(onchange).toHaveBeenLastCalledWith("github.com/import-lab/api,github.com/import-lab/web");
   });
 
   it("selecting an owner row selects all repos beneath it", async () => {
@@ -187,9 +193,7 @@ describe("RepoTypeahead", () => {
       .querySelector("input[type='checkbox']") as HTMLInputElement;
     await fireEvent.mouseDown(ownerCheckbox);
 
-    expect(onchange).toHaveBeenLastCalledWith(
-      "github.com/import-lab/api,github.com/import-lab/web",
-    );
+    expect(onchange).toHaveBeenLastCalledWith("github.com/import-lab/api,github.com/import-lab/web");
   });
 
   it("filters to matching leaves while keeping their owner visible", async () => {
@@ -225,10 +229,14 @@ describe("RepoTypeahead", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole("option", { name: "github.com/import-lab/web" }),
+        screen.getByRole("option", {
+          name: "github.com/import-lab/web",
+        }),
       ).toBeTruthy();
       expect(
-        screen.queryByRole("option", { name: "github.com/import-lab/api" }),
+        screen.queryByRole("option", {
+          name: "github.com/import-lab/api",
+        }),
       ).toBeNull();
     });
   });
@@ -239,12 +247,22 @@ describe("RepoTypeahead", () => {
     // single-repo owner auto-flattens to one leaf and has no caret to toggle.
     settingsStore.setConfiguredRepos([
       {
-        provider: "github", platform_host: "github.com", owner: "import-lab",
-        name: "api", repo_path: "import-lab/api", is_glob: false, matched_repo_count: 1,
+        provider: "github",
+        platform_host: "github.com",
+        owner: "import-lab",
+        name: "api",
+        repo_path: "import-lab/api",
+        is_glob: false,
+        matched_repo_count: 1,
       },
       {
-        provider: "github", platform_host: "github.com", owner: "import-lab",
-        name: "web", repo_path: "import-lab/web", is_glob: false, matched_repo_count: 1,
+        provider: "github",
+        platform_host: "github.com",
+        owner: "import-lab",
+        name: "web",
+        repo_path: "import-lab/web",
+        is_glob: false,
+        matched_repo_count: 1,
       },
     ]);
     render(RepoTypeahead, { props: { selected: undefined, onchange } });
@@ -257,7 +275,11 @@ describe("RepoTypeahead", () => {
     await fireEvent.mouseDown(screen.getByRole("option", { name: "github.com/import-lab" }));
     // NOTE: owner row body mousedown should toggle EXPAND, not select. After collapse the leaves are gone.
     await waitFor(() => {
-      expect(screen.queryByRole("option", { name: "github.com/import-lab/api" })).toBeNull();
+      expect(
+        screen.queryByRole("option", {
+          name: "github.com/import-lab/api",
+        }),
+      ).toBeNull();
     });
     expect(onchange).not.toHaveBeenCalled();
   });
@@ -266,17 +288,29 @@ describe("RepoTypeahead", () => {
     const onchange = vi.fn();
     settingsStore.setConfiguredRepos([
       {
-        provider: "github", platform_host: "github.com", owner: "import-lab",
-        name: "api", repo_path: "import-lab/api", is_glob: false, matched_repo_count: 1,
+        provider: "github",
+        platform_host: "github.com",
+        owner: "import-lab",
+        name: "api",
+        repo_path: "import-lab/api",
+        is_glob: false,
+        matched_repo_count: 1,
       },
       {
-        provider: "github", platform_host: "github.com", owner: "import-lab",
-        name: "web", repo_path: "import-lab/web", is_glob: false, matched_repo_count: 1,
+        provider: "github",
+        platform_host: "github.com",
+        owner: "import-lab",
+        name: "web",
+        repo_path: "import-lab/web",
+        is_glob: false,
+        matched_repo_count: 1,
       },
     ]);
     render(RepoTypeahead, { props: { selected: undefined, onchange } });
     await fireEvent.click(screen.getByRole("button", { name: /all repos/i }));
-    const leaf = screen.getByRole("option", { name: "github.com/import-lab/api" });
+    const leaf = screen.getByRole("option", {
+      name: "github.com/import-lab/api",
+    });
     const checkbox = leaf.querySelector("input[type='checkbox']") as HTMLInputElement;
     await fireEvent.mouseDown(checkbox);
     expect(onchange).toHaveBeenLastCalledWith("github.com/import-lab/api");
@@ -322,7 +356,11 @@ describe("RepoTypeahead", () => {
       },
     });
 
-    await fireEvent.click(screen.getByRole("button", { name: /github.com\/roborev-dev\/middleman/i }));
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: /github.com\/roborev-dev\/middleman/i,
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /roborev-dev\/middleman/i })).toBeTruthy();
@@ -331,7 +369,11 @@ describe("RepoTypeahead", () => {
     settingsStore.setConfiguredRepos([]);
 
     await waitFor(() => {
-      expect(screen.queryByRole("option", { name: /roborev-dev\/middleman/i })).toBeNull();
+      expect(
+        screen.queryByRole("option", {
+          name: /roborev-dev\/middleman/i,
+        }),
+      ).toBeNull();
       expect(onchange).toHaveBeenCalledWith(undefined);
     });
   });
@@ -360,15 +402,15 @@ describe("RepoTypeahead", () => {
       },
     ]);
 
-    render(RepoTypeahead, { props: { selected: undefined, onchange: vi.fn() } });
+    render(RepoTypeahead, {
+      props: { selected: undefined, onchange: vi.fn() },
+    });
 
     await fireEvent.click(screen.getByRole("button", { name: /all repos/i }));
     const input = screen.getByPlaceholderText("Filter repos...");
 
     // leaves visible by default
-    expect(
-      screen.getByRole("option", { name: "github.com/import-lab/api" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("option", { name: "github.com/import-lab/api" })).toBeTruthy();
 
     // move highlight onto the owner row (index 1) and collapse it
     await fireEvent.keyDown(input, { key: "ArrowDown" });
@@ -376,14 +418,18 @@ describe("RepoTypeahead", () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByRole("option", { name: "github.com/import-lab/api" }),
+        screen.queryByRole("option", {
+          name: "github.com/import-lab/api",
+        }),
       ).toBeNull();
     });
 
     await fireEvent.keyDown(input, { key: "ArrowRight" });
     await waitFor(() => {
       expect(
-        screen.getByRole("option", { name: "github.com/import-lab/api" }),
+        screen.getByRole("option", {
+          name: "github.com/import-lab/api",
+        }),
       ).toBeTruthy();
     });
   });
@@ -413,7 +459,9 @@ describe("RepoTypeahead", () => {
       },
     ]);
 
-    render(RepoTypeahead, { props: { selected: undefined, onchange: vi.fn() } });
+    render(RepoTypeahead, {
+      props: { selected: undefined, onchange: vi.fn() },
+    });
 
     await fireEvent.click(screen.getByRole("button", { name: /all repos/i }));
     const input = screen.getByPlaceholderText("Filter repos...");
@@ -421,19 +469,21 @@ describe("RepoTypeahead", () => {
     // ArrowDown onto the owner row, then onto the first leaf (api).
     await fireEvent.keyDown(input, { key: "ArrowDown" });
     await fireEvent.keyDown(input, { key: "ArrowDown" });
-    const leaf = screen.getByRole("option", { name: "github.com/import-lab/api" });
+    const leaf = screen.getByRole("option", {
+      name: "github.com/import-lab/api",
+    });
     await waitFor(() => expect(leaf.classList.contains("highlighted")).toBe(true));
 
     // ArrowLeft on the leaf moves focus to its parent owner.
     await fireEvent.keyDown(input, { key: "ArrowLeft" });
     await waitFor(() => {
-      const owner = screen.getByRole("option", { name: "github.com/import-lab" });
+      const owner = screen.getByRole("option", {
+        name: "github.com/import-lab",
+      });
       expect(owner.classList.contains("highlighted")).toBe(true);
-      expect(
-        screen
-          .getByRole("option", { name: "github.com/import-lab/api" })
-          .classList.contains("highlighted"),
-      ).toBe(false);
+      expect(screen.getByRole("option", { name: "github.com/import-lab/api" }).classList.contains("highlighted")).toBe(
+        false,
+      );
     });
   });
 
@@ -469,8 +519,6 @@ describe("RepoTypeahead", () => {
     await fireEvent.keyDown(input, { key: "ArrowDown" });
     await fireEvent.keyDown(input, { key: " " });
 
-    expect(onchange).toHaveBeenLastCalledWith(
-      "github.com/import-lab/api,github.com/import-lab/web",
-    );
+    expect(onchange).toHaveBeenLastCalledWith("github.com/import-lab/api,github.com/import-lab/web");
   });
 });

@@ -33,11 +33,7 @@ export function parsePierreFileDiffWithContents(
   return processPatchWithContext(diffFileWithPatch(file), contents);
 }
 
-export function pierreFileContents(
-  name: string,
-  contents: string,
-  cacheIdentity: string,
-): FileContents {
+export function pierreFileContents(name: string, contents: string, cacheIdentity: string): FileContents {
   return {
     name,
     contents,
@@ -59,10 +55,12 @@ function processPatchWithContext(
 
   const safePatch = safePierrePatch(file);
   if (safePatch === file.patch) return parsePatchOnly(file);
-  return tryProcessPatch(safePatch, {
-    oldFile: fileContentsWithName(contents.oldFile, safePierreFileName(file, "old"), "safe-old"),
-    newFile: fileContentsWithName(contents.newFile, safePierreFileName(file, "new"), "safe-new"),
-  }) ?? parsePatchOnly({ ...file, patch: safePatch });
+  return (
+    tryProcessPatch(safePatch, {
+      oldFile: fileContentsWithName(contents.oldFile, safePierreFileName(file, "old"), "safe-old"),
+      newFile: fileContentsWithName(contents.newFile, safePierreFileName(file, "new"), "safe-new"),
+    }) ?? parsePatchOnly({ ...file, patch: safePatch })
+  );
 }
 
 function tryProcessPatch(
@@ -101,21 +99,24 @@ function safePierrePatch(file: DiffFile): string {
   const oldName = safePierreFileName(file, "old");
   const newName = safePierreFileName(file, "new");
   let inHeader = true;
-  return file.patch.split("\n").map((line) => {
-    if (line.startsWith("@@ ")) {
-      inHeader = false;
+  return file.patch
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("@@ ")) {
+        inHeader = false;
+        return line;
+      }
+      if (!inHeader) return line;
+      if (line.startsWith("diff --git ")) return `diff --git a/${oldName} b/${newName}`;
+      if (line === "--- /dev/null") return line;
+      if (line === "+++ /dev/null") return line;
+      if (line.startsWith("--- ")) return `--- a/${oldName}`;
+      if (line.startsWith("+++ ")) return `+++ b/${newName}`;
+      if (line.startsWith("rename from ")) return `rename from ${oldName}`;
+      if (line.startsWith("rename to ")) return `rename to ${newName}`;
       return line;
-    }
-    if (!inHeader) return line;
-    if (line.startsWith("diff --git ")) return `diff --git a/${oldName} b/${newName}`;
-    if (line === "--- /dev/null") return line;
-    if (line === "+++ /dev/null") return line;
-    if (line.startsWith("--- ")) return `--- a/${oldName}`;
-    if (line.startsWith("+++ ")) return `+++ b/${newName}`;
-    if (line.startsWith("rename from ")) return `rename from ${oldName}`;
-    if (line.startsWith("rename to ")) return `rename to ${newName}`;
-    return line;
-  }).join("\n");
+    })
+    .join("\n");
 }
 
 function synthesizePatch(file: DiffFile): string {
@@ -144,9 +145,7 @@ function patchLine(line: { type: "context" | "add" | "delete"; content: string }
 export function patchPath(path: string): string {
   if (path === "/dev/null" || !needsPatchPathQuote(path)) return path;
   return JSON.stringify(path)
-    .replace(/[\u007f-\u009f]/gu, (char) =>
-      `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
-    )
+    .replace(/[\u007f-\u009f]/gu, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
 }
@@ -177,10 +176,7 @@ function safePierreFileName(file: DiffFile, side: "old" | "new"): string {
 
 function canBuildSparsePatchContents(file: DiffFile): boolean {
   for (const hunk of file.hunks ?? []) {
-    if (
-      !lineRangeFits(hunk.old_start, hunk.old_count) ||
-      !lineRangeFits(hunk.new_start, hunk.new_count)
-    ) {
+    if (!lineRangeFits(hunk.old_start, hunk.old_count) || !lineRangeFits(hunk.new_start, hunk.new_count)) {
       return false;
     }
 
@@ -203,12 +199,13 @@ function lineRangeFits(start: number, count: number): boolean {
 }
 
 function lineNumberFits(lineNumber: number): boolean {
-  return Number.isSafeInteger(lineNumber) &&
-    lineNumber >= 1 &&
-    lineNumber <= maxSparseContextLine;
+  return Number.isSafeInteger(lineNumber) && lineNumber >= 1 && lineNumber <= maxSparseContextLine;
 }
 
-function sparsePatchContents(file: DiffFile): { oldFile: FileContents; newFile: FileContents } {
+function sparsePatchContents(file: DiffFile): {
+  oldFile: FileContents;
+  newFile: FileContents;
+} {
   const oldLines: string[] = [];
   const newLines: string[] = [];
 
@@ -236,11 +233,7 @@ function joinSparseLines(lines: string[]): string {
   return lines.map((line) => line ?? "").join("\n");
 }
 
-function fileContentsWithName(
-  file: FileContents,
-  name: string,
-  cacheIdentity: string,
-): FileContents {
+function fileContentsWithName(file: FileContents, name: string, cacheIdentity: string): FileContents {
   return {
     ...file,
     name,

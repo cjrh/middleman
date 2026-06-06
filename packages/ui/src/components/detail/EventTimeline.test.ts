@@ -1,20 +1,19 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { compile } from "svelte/compiler";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import componentSource from "./EventTimeline.svelte?raw";
 import EventTimeline from "./EventTimeline.svelte";
 import { STORES_KEY } from "../../context.js";
 import type { DiffResult, PREvent } from "../../api/types.js";
 import type { DiffStore } from "../../stores/diff.svelte.js";
 
-const compiledCss = compile(
-  componentSource,
-  { filename: "EventTimeline.svelte" },
-).css?.code ?? "";
+const compiledCss = compile(componentSource, { filename: "EventTimeline.svelte" }).css?.code ?? "";
 
 type GlobalWithResizeObserver = { ResizeObserver?: unknown };
 type GlobalWithCSSStyleSheet = {
-  CSSStyleSheet?: { prototype: CSSStyleSheet & { replaceSync?: (text: string) => void } };
+  CSSStyleSheet?: {
+    prototype: CSSStyleSheet & { replaceSync?: (text: string) => void };
+  };
 };
 let originalResizeObserver: unknown;
 let originalResizeObserverExisted = false;
@@ -30,11 +29,9 @@ beforeAll(() => {
   }
   (globalThis as GlobalWithResizeObserver).ResizeObserver = ResizeObserverStub;
 
-  originalReplaceSync = (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet
-    ?.prototype.replaceSync;
+  originalReplaceSync = (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype.replaceSync;
   if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
-    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync
-      ??= function replaceSync(): void {};
+    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync ??= function replaceSync(): void {};
   }
 });
 
@@ -46,8 +43,9 @@ afterAll(() => {
   }
   if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
     if (originalReplaceSync) {
-      (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync =
-        originalReplaceSync as (text: string) => void;
+      (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync = originalReplaceSync as (
+        text: string,
+      ) => void;
     } else {
       delete (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync;
     }
@@ -105,27 +103,49 @@ function makeDiffStore(overrides: Partial<DiffStore> = {}): DiffStore {
   const diff: DiffResult = {
     stale: false,
     whitespace_only_count: 0,
-    files: [{
-      path: "src/review.ts",
-      old_path: "src/review.ts",
-      status: "modified",
-      is_binary: false,
-      is_whitespace_only: false,
-      additions: 2,
-      deletions: 0,
-      hunks: [{
-        old_start: 9,
-        old_count: 1,
-        new_start: 9,
-        new_count: 3,
-        lines: [
-          { type: "context", old_num: 9, new_num: 9, content: "const client = setup();" },
-          { type: "add", new_num: 10, content: "client.enableReviews();" },
-          { type: "add", new_num: 11, content: "client.publishThreads();" },
-          { type: "context", old_num: 10, new_num: 12, content: "return client;" },
+    files: [
+      {
+        path: "src/review.ts",
+        old_path: "src/review.ts",
+        status: "modified",
+        is_binary: false,
+        is_whitespace_only: false,
+        additions: 2,
+        deletions: 0,
+        hunks: [
+          {
+            old_start: 9,
+            old_count: 1,
+            new_start: 9,
+            new_count: 3,
+            lines: [
+              {
+                type: "context",
+                old_num: 9,
+                new_num: 9,
+                content: "const client = setup();",
+              },
+              {
+                type: "add",
+                new_num: 10,
+                content: "client.enableReviews();",
+              },
+              {
+                type: "add",
+                new_num: 11,
+                content: "client.publishThreads();",
+              },
+              {
+                type: "context",
+                old_num: 10,
+                new_num: 12,
+                content: "return client;",
+              },
+            ],
+          },
         ],
-      }],
-    }],
+      },
+    ],
   };
 
   return {
@@ -139,10 +159,7 @@ function makeDiffStore(overrides: Partial<DiffStore> = {}): DiffStore {
   } as unknown as DiffStore;
 }
 
-function findCompiledStyleRule(
-  selector: string,
-  exclude: string[] = [],
-): CSSStyleDeclaration {
+function findCompiledStyleRule(selector: string, exclude: string[] = []): CSSStyleDeclaration {
   const style = document.createElement("style");
   style.textContent = compiledCss;
   document.head.appendChild(style);
@@ -152,8 +169,8 @@ function findCompiledStyleRule(
     if (!("selectorText" in rule) || !("style" in rule)) continue;
     const selectorText = String(rule.selectorText);
     if (
-      selectorParts.every((part) => selectorText.includes(part))
-      && exclude.every((part) => !selectorText.includes(part))
+      selectorParts.every((part) => selectorText.includes(part)) &&
+      exclude.every((part) => !selectorText.includes(part))
     ) {
       return rule.style as CSSStyleDeclaration;
     }
@@ -250,10 +267,7 @@ describe("EventTimeline", () => {
     expect(body!.classList.contains("event-card")).toBe(false);
 
     const cardStyle = findCompiledStyleRule(".event-card");
-    const bodyStyle = findCompiledStyleRule(".event-body", [
-      ".event-body-wrap",
-      ".markdown-body",
-    ]);
+    const bodyStyle = findCompiledStyleRule(".event-body", [".event-body-wrap", ".markdown-body"]);
 
     expect(cardStyle.getPropertyValue("background")).toBe("var(--bg-surface)");
     expect(cardStyle.getPropertyValue("border")).toBe("1px solid var(--border-muted)");
@@ -315,15 +329,9 @@ describe("EventTimeline", () => {
     expect(screen.getByRole("list", { name: "Threaded replies" })).toBeTruthy();
 
     const threadText = container.querySelector(".event-card")?.textContent ?? "";
-    expect(threadText.indexOf("Main threaded comment")).toBeLessThan(
-      threadText.indexOf("Newest threaded reply"),
-    );
-    expect(threadText.indexOf("Newest threaded reply")).toBeLessThan(
-      threadText.indexOf("Middle threaded reply"),
-    );
-    expect(threadText.indexOf("Middle threaded reply")).toBeLessThan(
-      threadText.indexOf("Oldest threaded reply"),
-    );
+    expect(threadText.indexOf("Main threaded comment")).toBeLessThan(threadText.indexOf("Newest threaded reply"));
+    expect(threadText.indexOf("Newest threaded reply")).toBeLessThan(threadText.indexOf("Middle threaded reply"));
+    expect(threadText.indexOf("Middle threaded reply")).toBeLessThan(threadText.indexOf("Oldest threaded reply"));
   });
 
   it("renders positioned discussion threads with the same root and reply ordering", async () => {
@@ -381,13 +389,16 @@ describe("EventTimeline", () => {
         number: 7,
       },
       context: new Map([
-        [STORES_KEY, {
-          diff: makeDiffStore(),
-          diffReviewDraft: {
-            setRouteContext: vi.fn(),
-            isSubmitting: () => false,
+        [
+          STORES_KEY,
+          {
+            diff: makeDiffStore(),
+            diffReviewDraft: {
+              setRouteContext: vi.fn(),
+              isSubmitting: () => false,
+            },
           },
-        }],
+        ],
       ]),
     });
 
@@ -396,9 +407,7 @@ describe("EventTimeline", () => {
     expect(container.querySelectorAll(".thread-reply")).toHaveLength(2);
 
     const threadText = container.querySelector(".event-card")?.textContent ?? "";
-    expect(threadText.indexOf("This needs a named helper")).toBeLessThan(
-      threadText.indexOf("Pushed an update"),
-    );
+    expect(threadText.indexOf("This needs a named helper")).toBeLessThan(threadText.indexOf("Pushed an update"));
     expect(threadText.indexOf("Pushed an update")).toBeLessThan(
       threadText.indexOf("The wrapper should stay close to the call site"),
     );
@@ -455,21 +464,16 @@ describe("EventTimeline", () => {
     });
 
     expect(screen.getByText("abcdef1")).toBeTruthy();
-    expect(
-      document.querySelector(".commit-body-details")?.textContent?.trim(),
-    ).toBe("feat: add timeline filters\n\nLong body");
+    expect(document.querySelector(".commit-body-details")?.textContent?.trim()).toBe(
+      "feat: add timeline filters\n\nLong body",
+    );
     expect(screen.getByText("4h ago")).toBeTruthy();
     expect(document.querySelector(".event--compact")).toBeTruthy();
     expect(document.querySelector(".commit-title")).toBeNull();
-    expect(
-      document.querySelector(".commit-body-details")?.classList.contains("event-body"),
-    ).toBe(true);
-    expect(
-      document
-        .querySelector(".event-header--compact")
-        ?.lastElementChild
-        ?.classList.contains("event-time"),
-    ).toBe(true);
+    expect(document.querySelector(".commit-body-details")?.classList.contains("event-body")).toBe(true);
+    expect(document.querySelector(".event-header--compact")?.lastElementChild?.classList.contains("event-time")).toBe(
+      true,
+    );
   });
 
   it("expands single-line commit messages when commit details are shown", () => {
@@ -489,9 +493,9 @@ describe("EventTimeline", () => {
     });
 
     expect(screen.getByText("abcdef1")).toBeTruthy();
-    expect(
-      document.querySelector(".commit-body-details")?.textContent?.trim(),
-    ).toBe("refactor: simplify worktree mapping application");
+    expect(document.querySelector(".commit-body-details")?.textContent?.trim()).toBe(
+      "refactor: simplify worktree mapping application",
+    );
     expect(document.querySelector(".commit-title")).toBeNull();
   });
 
@@ -516,12 +520,9 @@ describe("EventTimeline", () => {
     expect(screen.getByText("feat: add timeline filters")).toBeTruthy();
     expect(screen.getByText("4h ago")).toBeTruthy();
     expect(screen.queryByText("Long body")).toBeNull();
-    expect(
-      document
-        .querySelector(".event-header--compact")
-        ?.lastElementChild
-        ?.classList.contains("event-time"),
-    ).toBe(true);
+    expect(document.querySelector(".event-header--compact")?.lastElementChild?.classList.contains("event-time")).toBe(
+      true,
+    );
   });
 
   it("renders force pushes as boundaries between commit generations", () => {
@@ -574,18 +575,10 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("new C3 after rebase")).toBeLessThan(
-      text.indexOf("ccccccc -> fffffff"),
-    );
-    expect(text.indexOf("new C2 after rebase")).toBeLessThan(
-      text.indexOf("ccccccc -> fffffff"),
-    );
-    expect(text.indexOf("ccccccc -> fffffff")).toBeLessThan(
-      text.indexOf("old C3 before rebase"),
-    );
-    expect(text.indexOf("ccccccc -> fffffff")).toBeLessThan(
-      text.indexOf("old C2 before rebase"),
-    );
+    expect(text.indexOf("new C3 after rebase")).toBeLessThan(text.indexOf("ccccccc -> fffffff"));
+    expect(text.indexOf("new C2 after rebase")).toBeLessThan(text.indexOf("ccccccc -> fffffff"));
+    expect(text.indexOf("ccccccc -> fffffff")).toBeLessThan(text.indexOf("old C3 before rebase"));
+    expect(text.indexOf("ccccccc -> fffffff")).toBeLessThan(text.indexOf("old C2 before rebase"));
   });
 
   it("keeps later commits in chronological order after force-push generations", () => {
@@ -638,18 +631,10 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("follow-up after force push")).toBeLessThan(
-      text.indexOf("comment after force push"),
-    );
-    expect(text.indexOf("comment after force push")).toBeLessThan(
-      text.indexOf("new head after rebase"),
-    );
-    expect(text.indexOf("new head after rebase")).toBeLessThan(
-      text.indexOf("ccccccc -> fffffff"),
-    );
-    expect(text.indexOf("ccccccc -> fffffff")).toBeLessThan(
-      text.indexOf("old head before rebase"),
-    );
+    expect(text.indexOf("follow-up after force push")).toBeLessThan(text.indexOf("comment after force push"));
+    expect(text.indexOf("comment after force push")).toBeLessThan(text.indexOf("new head after rebase"));
+    expect(text.indexOf("new head after rebase")).toBeLessThan(text.indexOf("ccccccc -> fffffff"));
+    expect(text.indexOf("ccccccc -> fffffff")).toBeLessThan(text.indexOf("old head before rebase"));
   });
 
   it("keeps consecutive force pushes between their commit generations", () => {
@@ -705,18 +690,10 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("second generation head")).toBeLessThan(
-      text.indexOf("6666666 -> 9999999"),
-    );
-    expect(text.indexOf("6666666 -> 9999999")).toBeLessThan(
-      text.indexOf("first generation head"),
-    );
-    expect(text.indexOf("first generation head")).toBeLessThan(
-      text.indexOf("3333333 -> 6666666"),
-    );
-    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(
-      text.indexOf("original generation head"),
-    );
+    expect(text.indexOf("second generation head")).toBeLessThan(text.indexOf("6666666 -> 9999999"));
+    expect(text.indexOf("6666666 -> 9999999")).toBeLessThan(text.indexOf("first generation head"));
+    expect(text.indexOf("first generation head")).toBeLessThan(text.indexOf("3333333 -> 6666666"));
+    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(text.indexOf("original generation head"));
   });
 
   it("keeps consecutive same-timestamp force pushes between their commit generations", () => {
@@ -772,18 +749,10 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("same timestamp second generation head")).toBeLessThan(
-      text.indexOf("6666666 -> 9999999"),
-    );
-    expect(text.indexOf("6666666 -> 9999999")).toBeLessThan(
-      text.indexOf("same timestamp first generation head"),
-    );
-    expect(text.indexOf("same timestamp first generation head")).toBeLessThan(
-      text.indexOf("3333333 -> 6666666"),
-    );
-    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(
-      text.indexOf("same timestamp original generation head"),
-    );
+    expect(text.indexOf("same timestamp second generation head")).toBeLessThan(text.indexOf("6666666 -> 9999999"));
+    expect(text.indexOf("6666666 -> 9999999")).toBeLessThan(text.indexOf("same timestamp first generation head"));
+    expect(text.indexOf("same timestamp first generation head")).toBeLessThan(text.indexOf("3333333 -> 6666666"));
+    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(text.indexOf("same timestamp original generation head"));
   });
 
   it("preserves natural same-timestamp ordering for unrelated timeline events", () => {
@@ -846,18 +815,12 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("same timestamp natural second generation")).toBeLessThan(
-      text.indexOf("6666666 -> 9999999"),
-    );
-    expect(text.indexOf("6666666 -> 9999999")).toBeLessThan(
-      text.indexOf("same timestamp reviewer note"),
-    );
+    expect(text.indexOf("same timestamp natural second generation")).toBeLessThan(text.indexOf("6666666 -> 9999999"));
+    expect(text.indexOf("6666666 -> 9999999")).toBeLessThan(text.indexOf("same timestamp reviewer note"));
     expect(text.indexOf("same timestamp reviewer note")).toBeLessThan(
       text.indexOf("same timestamp natural first generation"),
     );
-    expect(text.indexOf("same timestamp natural first generation")).toBeLessThan(
-      text.indexOf("3333333 -> 6666666"),
-    );
+    expect(text.indexOf("same timestamp natural first generation")).toBeLessThan(text.indexOf("3333333 -> 6666666"));
   });
 
   it("keeps same-timestamp unrelated events outside force-push boundary buckets", () => {
@@ -905,9 +868,7 @@ describe("EventTimeline", () => {
     expect(text.indexOf("same timestamp generated commit below comment ID")).toBeLessThan(
       text.indexOf("3333333 -> 6666666"),
     );
-    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(
-      text.indexOf("same timestamp reviewer note between IDs"),
-    );
+    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(text.indexOf("same timestamp reviewer note between IDs"));
     expect(text.indexOf("same timestamp reviewer note between IDs")).toBeLessThan(
       text.indexOf("same timestamp original generation"),
     );
@@ -952,9 +913,7 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("visible new generation head")).toBeLessThan(
-      text.indexOf("visible old generation head"),
-    );
+    expect(text.indexOf("visible new generation head")).toBeLessThan(text.indexOf("visible old generation head"));
     expect(screen.queryByText("3333333 -> 6666666")).toBeNull();
   });
 
@@ -993,12 +952,8 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("fresh import new head")).toBeLessThan(
-      text.indexOf("3333333 -> 6666666"),
-    );
-    expect(text.indexOf("fresh import earlier current commit")).toBeLessThan(
-      text.indexOf("3333333 -> 6666666"),
-    );
+    expect(text.indexOf("fresh import new head")).toBeLessThan(text.indexOf("3333333 -> 6666666"));
+    expect(text.indexOf("fresh import earlier current commit")).toBeLessThan(text.indexOf("3333333 -> 6666666"));
   });
 
   it("orders fallback force-push boundaries after earlier anchored boundaries", () => {
@@ -1055,18 +1010,10 @@ describe("EventTimeline", () => {
     });
 
     const text = container.textContent ?? "";
-    expect(text.indexOf("fallback second generation head")).toBeLessThan(
-      text.indexOf("8888888 -> 9999999"),
-    );
-    expect(text.indexOf("8888888 -> 9999999")).toBeLessThan(
-      text.indexOf("anchored first generation head"),
-    );
-    expect(text.indexOf("anchored first generation head")).toBeLessThan(
-      text.indexOf("3333333 -> 6666666"),
-    );
-    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(
-      text.indexOf("anchored original generation head"),
-    );
+    expect(text.indexOf("fallback second generation head")).toBeLessThan(text.indexOf("8888888 -> 9999999"));
+    expect(text.indexOf("8888888 -> 9999999")).toBeLessThan(text.indexOf("anchored first generation head"));
+    expect(text.indexOf("anchored first generation head")).toBeLessThan(text.indexOf("3333333 -> 6666666"));
+    expect(text.indexOf("3333333 -> 6666666")).toBeLessThan(text.indexOf("anchored original generation head"));
   });
 
   it("renders system events as compact rows", () => {
@@ -1211,7 +1158,9 @@ describe("EventTimeline", () => {
       },
     });
 
-    const link = screen.getByRole("link", { name: "external reference" });
+    const link = screen.getByRole("link", {
+      name: "external reference",
+    });
     expect(link.getAttribute("href")).toBe("https://github.com/kenn-io/middleman/pull/377");
     expect(link.classList.contains("item-ref")).toBe(false);
     expect(link.getAttribute("target")).toBe("_blank");
@@ -1316,13 +1265,16 @@ describe("EventTimeline", () => {
         jumpToReviewThread,
       },
       context: new Map([
-        [STORES_KEY, {
-          diff,
-          diffReviewDraft: {
-            setRouteContext: vi.fn(),
-            isSubmitting: () => false,
+        [
+          STORES_KEY,
+          {
+            diff,
+            diffReviewDraft: {
+              setRouteContext: vi.fn(),
+              isSubmitting: () => false,
+            },
           },
-        }],
+        ],
       ]),
     });
 
@@ -1340,7 +1292,10 @@ describe("EventTimeline", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Jump to diff" }));
 
     expect(jumpToReviewThread).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "thread-1", path: "src/review.ts" }),
+      expect.objectContaining({
+        id: "thread-1",
+        path: "src/review.ts",
+      }),
     );
   });
 
@@ -1350,48 +1305,63 @@ describe("EventTimeline", () => {
       getDiff: () => ({
         stale: false,
         whitespace_only_count: 0,
-        files: [{
-          path,
-          old_path: path,
-          status: "modified",
-          is_binary: false,
-          is_whitespace_only: false,
-          additions: 1,
-          deletions: 0,
-          hunks: [{
-            old_start: 9,
-            old_count: 1,
-            new_start: 9,
-            new_count: 2,
-            lines: [
-              { type: "context", old_num: 9, new_num: 9, content: "const client = setup();" },
-              { type: "add", new_num: 10, content: "client.publishThreads();" },
+        files: [
+          {
+            path,
+            old_path: path,
+            status: "modified",
+            is_binary: false,
+            is_whitespace_only: false,
+            additions: 1,
+            deletions: 0,
+            hunks: [
+              {
+                old_start: 9,
+                old_count: 1,
+                new_start: 9,
+                new_count: 2,
+                lines: [
+                  {
+                    type: "context",
+                    old_num: 9,
+                    new_num: 9,
+                    content: "const client = setup();",
+                  },
+                  {
+                    type: "add",
+                    new_num: 10,
+                    content: "client.publishThreads();",
+                  },
+                ],
+              },
             ],
-          }],
-        }],
+          },
+        ],
       }),
     });
 
     render(EventTimeline, {
       props: {
-        events: [makeReviewThreadEvent({
-          diff_thread: {
-            id: "thread-1",
-            path,
-            side: "right",
-            start_side: "right",
-            start_line: 10,
-            line: 10,
-            new_line: 10,
-            line_type: "add",
-            body: "Please keep this setup explicit.",
-            author_login: "alice",
-            resolved: false,
-            can_resolve: true,
-            created_at: "2024-06-01T12:00:00Z",
-            updated_at: "2024-06-01T12:00:00Z",
-          },
-        })],
+        events: [
+          makeReviewThreadEvent({
+            diff_thread: {
+              id: "thread-1",
+              path,
+              side: "right",
+              start_side: "right",
+              start_line: 10,
+              line: 10,
+              new_line: 10,
+              line_type: "add",
+              body: "Please keep this setup explicit.",
+              author_login: "alice",
+              resolved: false,
+              can_resolve: true,
+              created_at: "2024-06-01T12:00:00Z",
+              updated_at: "2024-06-01T12:00:00Z",
+            },
+          }),
+        ],
         provider: "github",
         platformHost: "github.com",
         repoOwner: "acme",
@@ -1400,13 +1370,16 @@ describe("EventTimeline", () => {
         number: 7,
       },
       context: new Map([
-        [STORES_KEY, {
-          diff,
-          diffReviewDraft: {
-            setRouteContext: vi.fn(),
-            isSubmitting: () => false,
+        [
+          STORES_KEY,
+          {
+            diff,
+            diffReviewDraft: {
+              setRouteContext: vi.fn(),
+              isSubmitting: () => false,
+            },
           },
-        }],
+        ],
       ]),
     });
 
@@ -1426,17 +1399,20 @@ describe("EventTimeline", () => {
         canReplyToThreads: true,
       },
       context: new Map([
-        [STORES_KEY, {
-          detail: {
-            replyToDiscussion: vi.fn().mockResolvedValue(true),
-            getDetailError: vi.fn(),
+        [
+          STORES_KEY,
+          {
+            detail: {
+              replyToDiscussion: vi.fn().mockResolvedValue(true),
+              getDetailError: vi.fn(),
+            },
+            diff: makeDiffStore(),
+            diffReviewDraft: {
+              setRouteContext: vi.fn(),
+              isSubmitting: () => false,
+            },
           },
-          diff: makeDiffStore(),
-          diffReviewDraft: {
-            setRouteContext: vi.fn(),
-            isSubmitting: () => false,
-          },
-        }],
+        ],
       ]),
     });
 
@@ -1468,11 +1444,13 @@ describe("EventTimeline", () => {
   it("does not expose replies when a timeline item lacks a local review thread", () => {
     render(EventTimeline, {
       props: {
-        events: [makeEvent({
-          EventType: "review_comment",
-          Body: "Provider thread without local diff metadata",
-          ThreadID: "PRRT_provider_thread",
-        })],
+        events: [
+          makeEvent({
+            EventType: "review_comment",
+            Body: "Provider thread without local diff metadata",
+            ThreadID: "PRRT_provider_thread",
+          }),
+        ],
         provider: "github",
         platformHost: "github.com",
         repoOwner: "acme",
@@ -1482,17 +1460,20 @@ describe("EventTimeline", () => {
         canReplyToThreads: true,
       },
       context: new Map([
-        [STORES_KEY, {
-          detail: {
-            replyToDiscussion: vi.fn().mockResolvedValue(true),
-            getDetailError: vi.fn(),
+        [
+          STORES_KEY,
+          {
+            detail: {
+              replyToDiscussion: vi.fn().mockResolvedValue(true),
+              getDetailError: vi.fn(),
+            },
+            diff: makeDiffStore(),
+            diffReviewDraft: {
+              setRouteContext: vi.fn(),
+              isSubmitting: () => false,
+            },
           },
-          diff: makeDiffStore(),
-          diffReviewDraft: {
-            setRouteContext: vi.fn(),
-            isSubmitting: () => false,
-          },
-        }],
+        ],
       ]),
     });
 
@@ -1519,13 +1500,16 @@ describe("EventTimeline", () => {
         number: 7,
       },
       context: new Map([
-        [STORES_KEY, {
-          diff,
-          diffReviewDraft: {
-            setRouteContext: vi.fn(),
-            isSubmitting: () => false,
+        [
+          STORES_KEY,
+          {
+            diff,
+            diffReviewDraft: {
+              setRouteContext: vi.fn(),
+              isSubmitting: () => false,
+            },
           },
-        }],
+        ],
       ]),
     });
 

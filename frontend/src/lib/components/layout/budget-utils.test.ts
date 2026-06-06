@@ -1,11 +1,5 @@
-import { describe, expect, it } from "vitest";
-import {
-  budgetColor,
-  worstCaseRatio,
-  aggregateBudget,
-  formatCompact,
-  type HostBudgetEntry,
-} from "./budget-utils";
+import { describe, expect, it } from "vite-plus/test";
+import { budgetColor, worstCaseRatio, aggregateBudget, formatCompact, type HostBudgetEntry } from "./budget-utils";
 
 describe("budgetColor", () => {
   it("returns green when above 20%", () => {
@@ -43,9 +37,7 @@ describe("worstCaseRatio", () => {
   });
 
   it("returns -1 when all hosts unknown", () => {
-    const entries: HostBudgetEntry[] = [
-      { remaining: -1, limit: -1, known: false },
-    ];
+    const entries: HostBudgetEntry[] = [{ remaining: -1, limit: -1, known: false }];
     expect(worstCaseRatio(entries)).toBe(-1);
   });
 
@@ -88,9 +80,7 @@ describe("aggregateBudget", () => {
   });
 
   it("returns hasAny false when all disabled", () => {
-    const result = aggregateBudget([
-      { budget_limit: 0, budget_spent: 0 },
-    ]);
+    const result = aggregateBudget([{ budget_limit: 0, budget_spent: 0 }]);
     expect(result).toEqual({ spent: 0, limit: 0, hasAny: false });
   });
 });

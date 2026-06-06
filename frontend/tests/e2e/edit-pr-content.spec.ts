@@ -27,9 +27,7 @@ test("edit title: cancel with Escape", async ({ page }) => {
   await input.fill("should not persist");
   await input.press("Escape");
 
-  await expect(page.locator(".detail-title")).toContainText(
-    "Add browser regression coverage",
-  );
+  await expect(page.locator(".detail-title")).toContainText("Add browser regression coverage");
 });
 
 test("edit title: save disabled when blank", async ({ page }) => {
@@ -60,9 +58,7 @@ test("edit body: cancel preserves original", async ({ page }) => {
   await page.locator(".body-edit-textarea").fill("discarded");
   await page.locator(".body-edit .title-edit-cancel").click();
 
-  await expect(page.locator(".markdown-body")).toContainText(
-    "Adds Playwright smoke tests",
-  );
+  await expect(page.locator(".markdown-body")).toContainText("Adds Playwright smoke tests");
 });
 
 test("markdown tables keep compact columns readable", async ({ page }) => {
@@ -121,20 +117,13 @@ test("markdown tables keep compact columns readable", async ({ page }) => {
 
   await page.goto("/pulls/github/acme/widgets/42");
 
-  const taskHeader = page
-    .locator(".markdown-body th")
-    .filter({ hasText: "Task" });
-  const commitCell = page
-    .locator(".markdown-body td")
-    .filter({ hasText: "b2af4711" });
+  const taskHeader = page.locator(".markdown-body th").filter({ hasText: "Task" });
+  const commitCell = page.locator(".markdown-body td").filter({ hasText: "b2af4711" });
   await expect(taskHeader).toBeVisible();
   await expect(commitCell).toBeVisible();
   await expect(taskHeader).toHaveCSS("white-space", "nowrap");
   await expect(commitCell).toHaveCSS("white-space", "nowrap");
-  await expect(page.locator(".markdown-body table")).toHaveCSS(
-    "border-collapse",
-    "collapse",
-  );
+  await expect(page.locator(".markdown-body table")).toHaveCSS("border-collapse", "collapse");
 });
 
 test("add description to empty-body PR shows add-description-btn", async ({ page }) => {

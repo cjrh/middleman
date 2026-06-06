@@ -121,11 +121,7 @@ function pullDetail(
   };
 }
 
-function pullListItem(
-  capabilities = baseCapabilities,
-  provider = "github",
-  platformHost = "github.com",
-) {
+function pullListItem(capabilities = baseCapabilities, provider = "github", platformHost = "github.com") {
   return {
     ID: 1,
     RepoID: 1,
@@ -187,8 +183,18 @@ const diffResponse = {
           new_count: 2,
           section: "",
           lines: [
-            { type: "context", old_num: 1, new_num: 1, content: "const a = 1;" },
-            { type: "add", old_num: null, new_num: 2, content: "const b = 2;" },
+            {
+              type: "context",
+              old_num: 1,
+              new_num: 1,
+              content: "const a = 1;",
+            },
+            {
+              type: "add",
+              old_num: null,
+              new_num: 2,
+              content: "const b = 2;",
+            },
           ],
         },
       ],
@@ -215,7 +221,12 @@ const multiHunkDiffResponse = {
           new_count: 1,
           section: "",
           lines: [
-            { type: "add", old_num: null, new_num: 1, content: "const first = 1;" },
+            {
+              type: "add",
+              old_num: null,
+              new_num: 1,
+              content: "const first = 1;",
+            },
           ],
         },
         {
@@ -225,7 +236,12 @@ const multiHunkDiffResponse = {
           new_count: 1,
           section: "",
           lines: [
-            { type: "add", old_num: null, new_num: 20, content: "const second = 2;" },
+            {
+              type: "add",
+              old_num: null,
+              new_num: 20,
+              content: "const second = 2;",
+            },
           ],
         },
       ],
@@ -256,13 +272,15 @@ const longLineDiffResponse = {
               type: "context",
               old_num: 1140,
               new_num: 1140,
-              content: "func (c *liveClient) CreateReviewWithComments(ctx context.Context, owner, repo string, number int, event string, body string) (*gh.PullRequestReview, error) {",
+              content:
+                "func (c *liveClient) CreateReviewWithComments(ctx context.Context, owner, repo string, number int, event string, body string) (*gh.PullRequestReview, error) {",
             },
             {
               type: "add",
               old_num: null,
               new_num: 1141,
-              content: "\treturn c.CreateReviewWithComments(ctx, owner, repo, number, event, body, comments, pullRequestReviewOptions, requestOptions, validationOptions)",
+              content:
+                "\treturn c.CreateReviewWithComments(ctx, owner, repo, number, event, body, comments, pullRequestReviewOptions, requestOptions, validationOptions)",
             },
           ],
         },
@@ -282,22 +300,29 @@ function scrollingDiffResponse() {
       additions: 40,
       deletions: 0,
       is_binary: false,
-      hunks: [{
-        old_start: 1,
-        old_count: 1,
-        new_start: 1,
-        new_count: 41,
-        section: "",
-        lines: [
-          { type: "context", old_num: 1, new_num: 1, content: `const file${fileIndex} = true;` },
-          ...Array.from({ length: 40 }, (_, lineIndex) => ({
-            type: "add",
-            old_num: null,
-            new_num: lineIndex + 2,
-            content: `const value${fileIndex}_${lineIndex} = ${lineIndex};`,
-          })),
-        ],
-      }],
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 1,
+          new_start: 1,
+          new_count: 41,
+          section: "",
+          lines: [
+            {
+              type: "context",
+              old_num: 1,
+              new_num: 1,
+              content: `const file${fileIndex} = true;`,
+            },
+            ...Array.from({ length: 40 }, (_, lineIndex) => ({
+              type: "add",
+              old_num: null,
+              new_num: lineIndex + 2,
+              content: `const value${fileIndex}_${lineIndex} = ${lineIndex};`,
+            })),
+          ],
+        },
+      ],
     })),
   };
 }
@@ -319,9 +344,7 @@ async function mockInlineReviewAPI(
   onCreateDraft?: (body: { body: string; range: Record<string, unknown> }) => void,
   options: MockInlineReviewOptions = {},
 ): Promise<void> {
-  let draftComments: Array<Record<string, unknown>> = [
-    ...(options.initialDraftComments ?? []),
-  ];
+  let draftComments: Array<Record<string, unknown>> = [...(options.initialDraftComments ?? [])];
   let detailRequestCount = 0;
   let reviewThreadResolved = false;
   const path = `/api/v1/pulls/${provider}/acme/widgets/42`;
@@ -338,18 +361,14 @@ async function mockInlineReviewAPI(
     if (options.detailBody !== undefined) {
       detail.merge_request.Body = options.detailBody;
     }
-    const fetchedAt = options.detailFetchedAtSequence?.[
-      Math.min(detailRequestCount, options.detailFetchedAtSequence.length - 1)
-    ];
+    const fetchedAt =
+      options.detailFetchedAtSequence?.[Math.min(detailRequestCount, options.detailFetchedAtSequence.length - 1)];
     detailRequestCount += 1;
     if (fetchedAt !== undefined) {
       detail.detail_fetched_at = fetchedAt;
       detail.merge_request.DetailFetchedAt = fetchedAt;
     }
-    await fulfillJson(
-      route,
-      detail,
-    );
+    await fulfillJson(route, detail);
   });
   await page.route(`**${path}/files`, async (route) => {
     await fulfillJson(route, filesResponse);
@@ -376,26 +395,30 @@ async function mockInlineReviewAPI(
       range: Record<string, unknown>;
     };
     onCreateDraft?.(body);
-    draftComments = [{
-      id: "1",
-      body: body.body,
-      path: body.range.path,
-      side: body.range.side,
-      line: body.range.line,
-      new_line: body.range.new_line,
-      old_line: body.range.old_line,
-      start_line: body.range.start_line,
-      start_side: body.range.start_side,
-      line_type: body.range.line_type,
-      diff_head_sha: body.range.diff_head_sha,
-      created_at: "2026-03-30T14:01:00Z",
-      updated_at: "2026-03-30T14:01:00Z",
-    }];
+    draftComments = [
+      {
+        id: "1",
+        body: body.body,
+        path: body.range.path,
+        side: body.range.side,
+        line: body.range.line,
+        new_line: body.range.new_line,
+        old_line: body.range.old_line,
+        start_line: body.range.start_line,
+        start_side: body.range.start_side,
+        line_type: body.range.line_type,
+        diff_head_sha: body.range.diff_head_sha,
+        created_at: "2026-03-30T14:01:00Z",
+        updated_at: "2026-03-30T14:01:00Z",
+      },
+    ];
     await fulfillJson(route, draftComments[0], 201);
   });
   await page.route(`**${path}/review-draft/publish`, async (route) => {
     draftComments = options.remainingDraftComments ?? [];
-    await fulfillJson(route, { status: options.publishStatus ?? "published" });
+    await fulfillJson(route, {
+      status: options.publishStatus ?? "published",
+    });
   });
   await page.route(`**${path}/review-threads/1/resolve`, async (route) => {
     reviewThreadResolved = true;
@@ -404,13 +427,16 @@ async function mockInlineReviewAPI(
 }
 
 async function firstDiffGutterRight(page: Page): Promise<number> {
-  return page.locator(".pierre-diff").first().evaluate((host) => {
-    const gutter = host.shadowRoot?.querySelector("[data-gutter]");
-    if (!(gutter instanceof HTMLElement)) {
-      throw new Error("diff gutter not found");
-    }
-    return gutter.getBoundingClientRect().right;
-  });
+  return page
+    .locator(".pierre-diff")
+    .first()
+    .evaluate((host) => {
+      const gutter = host.shadowRoot?.querySelector("[data-gutter]");
+      if (!(gutter instanceof HTMLElement)) {
+        throw new Error("diff gutter not found");
+      }
+      return gutter.getBoundingClientRect().right;
+    });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -439,15 +465,9 @@ test("keeps the draft review footer readable for long comments", async ({ page }
     "so i'd recommend we use huma for this similar to what we do in middleman,",
     "that generally means we can generate a nice typed client which makes more of the frontend safer",
   ].join(" ");
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "github",
-    "github.com",
-    diffResponse,
-    undefined,
-    {
-      initialDraftComments: [{
+  await mockInlineReviewAPI(page, baseCapabilities, "github", "github.com", diffResponse, undefined, {
+    initialDraftComments: [
+      {
         id: "draft-1",
         body: longDraftBody,
         path: "internal/server/server.go",
@@ -458,9 +478,9 @@ test("keeps the draft review footer readable for long comments", async ({ page }
         diff_head_sha: "diff-head",
         created_at: "2026-03-30T14:01:00Z",
         updated_at: "2026-03-30T14:01:00Z",
-      }],
-    },
-  );
+      },
+    ],
+  });
 
   await page.goto("/pulls/github/acme/widgets/42/files");
   await expect(page.getByText("1 draft comment")).toBeVisible();
@@ -470,12 +490,12 @@ test("keeps the draft review footer readable for long comments", async ({ page }
   await expect(draftBody).toContainText("so i'd recommend");
   await expect(page.getByRole("button", { name: "Show full comment" })).toBeVisible();
 
-  await expect.poll(
-    async () => draftList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-  ).toBe(true);
-  await expect.poll(
-    async () => draftBody.evaluate((element) => getComputedStyle(element).whiteSpace),
-  ).not.toBe("nowrap");
+  await expect
+    .poll(async () => draftList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
+    .toBe(true);
+  await expect
+    .poll(async () => draftBody.evaluate((element) => getComputedStyle(element).whiteSpace))
+    .not.toBe("nowrap");
   const bodyBox = await draftBody.boundingBox();
   expect(bodyBox).not.toBeNull();
   expect(bodyBox!.height).toBeGreaterThan(24);
@@ -492,13 +512,7 @@ test("keeps inline composer inside the visible diff pane on long lines", async (
   await page.addInitScript(() => {
     localStorage.setItem("diff-word-wrap", "true");
   });
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "github",
-    "github.com",
-    longLineDiffResponse,
-  );
+  await mockInlineReviewAPI(page, baseCapabilities, "github", "github.com", longLineDiffResponse);
 
   await page.goto("/pulls/github/acme/widgets/42/files");
   await page.getByRole("button", { name: "Comment on new line 1141" }).click();
@@ -514,9 +528,7 @@ test("keeps inline composer inside the visible diff pane on long lines", async (
   const gutterRight = await firstDiffGutterRight(page);
   const contentWidth = scrollBox!.x + scrollBox!.width - gutterRight;
   expect(composerBox!.x).toBeGreaterThanOrEqual(gutterRight - 1);
-  expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(
-    scrollBox!.x + scrollBox!.width + 1,
-  );
+  expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width + 1);
   expect(composerBox!.width).toBeGreaterThan(contentWidth * 0.85);
   const leftEdgeHitsTextarea = await composer.locator("textarea").evaluate((textarea) => {
     const rect = textarea.getBoundingClientRect();
@@ -526,13 +538,15 @@ test("keeps inline composer inside the visible diff pane on long lines", async (
   expect(leftEdgeHitsTextarea).toBe(true);
   const textarea = composer.locator("textarea");
   const initialTextareaHeight = await textarea.evaluate((element) => element.clientHeight);
-  await textarea.fill([
-    "This comment has enough lines to grow.",
-    "It should expand the editor instead of adding an internal scrollbar.",
-    "That keeps the review text readable while the diff pane scrolls.",
-    "One more line makes the regression obvious.",
-    "And another line verifies the textarea keeps up.",
-  ].join("\n"));
+  await textarea.fill(
+    [
+      "This comment has enough lines to grow.",
+      "It should expand the editor instead of adding an internal scrollbar.",
+      "That keeps the review text readable while the diff pane scrolls.",
+      "One more line makes the regression obvious.",
+      "And another line verifies the textarea keeps up.",
+    ].join("\n"),
+  );
   const textareaMetrics = await textarea.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
@@ -568,9 +582,7 @@ test("shows saved draft comments inline and jumps from the tray", async ({ page 
   const gutterRight = await firstDiffGutterRight(page);
   const contentWidth = scrollBox!.x + scrollBox!.width - gutterRight;
   expect(inlineBox!.x).toBeGreaterThanOrEqual(gutterRight - 1);
-  expect(inlineBox!.x + inlineBox!.width).toBeLessThanOrEqual(
-    scrollBox!.x + scrollBox!.width + 1,
-  );
+  expect(inlineBox!.x + inlineBox!.width).toBeLessThanOrEqual(scrollBox!.x + scrollBox!.width + 1);
   expect(inlineBox!.width).toBeGreaterThan(contentWidth * 0.85);
 
   await page.getByRole("button", { name: "src/main.ts:1-2" }).click();
@@ -578,16 +590,10 @@ test("shows saved draft comments inline and jumps from the tray", async ({ page 
 });
 
 test("keeps remaining GitLab draft state visible after a partial publish", async ({ page }) => {
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "gitlab",
-    "gitlab.com",
-    diffResponse,
-    undefined,
-    {
-      publishStatus: "partially_published",
-      remainingDraftComments: [{
+  await mockInlineReviewAPI(page, baseCapabilities, "gitlab", "gitlab.com", diffResponse, undefined, {
+    publishStatus: "partially_published",
+    remainingDraftComments: [
+      {
         id: "remaining-1",
         body: "Still needs follow-up.",
         path: "src/main.ts",
@@ -598,9 +604,9 @@ test("keeps remaining GitLab draft state visible after a partial publish", async
         diff_head_sha: "diff-head",
         created_at: "2026-03-30T14:02:00Z",
         updated_at: "2026-03-30T14:02:00Z",
-      }],
-    },
-  );
+      },
+    ],
+  });
 
   await page.goto("/pulls/gitlab/acme/widgets/42/files");
   await page.getByRole("button", { name: "Comment on new line 2" }).click();
@@ -654,8 +660,7 @@ test("keeps published inline review context loaded after switching back from fil
   await mockInlineReviewAPI(page);
 
   await page.goto("/pulls/github/acme/widgets/42/files");
-  await expect(page.getByRole("button", { name: /Files changed/ }))
-    .toHaveClass(/detail-tab--active/);
+  await expect(page.getByRole("button", { name: /Files changed/ })).toHaveClass(/detail-tab--active/);
 
   await page.getByRole("button", { name: "Conversation" }).click();
   await expect(page).toHaveURL(/\/pulls\/github\/acme\/widgets\/42$/);
@@ -663,36 +668,25 @@ test("keeps published inline review context loaded after switching back from fil
   await expect(page.getByText("Loading diff")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Files changed" }).click();
-  await expect(page.getByRole("button", { name: /Files changed/ }))
-    .toHaveClass(/detail-tab--active/);
+  await expect(page.getByRole("button", { name: /Files changed/ })).toHaveClass(/detail-tab--active/);
 });
 
 test("preserves PR detail scroll positions while switching tabs", async ({ page }) => {
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "github",
-    "github.com",
-    scrollingDiffResponse(),
-    undefined,
-    {
-      detailBody: Array.from({ length: 120 }, (_, index) =>
-        `Conversation filler line ${index}`,
-      ).join("\n\n"),
-    },
-  );
+  await mockInlineReviewAPI(page, baseCapabilities, "github", "github.com", scrollingDiffResponse(), undefined, {
+    detailBody: Array.from({ length: 120 }, (_, index) => `Conversation filler line ${index}`).join("\n\n"),
+  });
 
   await page.goto("/pulls/github/acme/widgets/42");
-  await page.addStyleTag({ content: ".pull-detail { min-height: 1800px; }" });
+  await page.addStyleTag({
+    content: ".pull-detail { min-height: 1800px; }",
+  });
   const conversationScroller = page.locator(".pull-detail");
   await expect(conversationScroller).toBeVisible();
   await conversationScroller.evaluate((element) => {
     element.scrollTop = 420;
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
-  await expect.poll(
-    async () => conversationScroller.evaluate((element) => element.scrollTop),
-  ).toBeGreaterThan(350);
+  await expect.poll(async () => conversationScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(350);
 
   await page.getByRole("button", { name: /Files changed/ }).click();
   const diffArea = page.locator(".diff-area");
@@ -703,14 +697,10 @@ test("preserves PR detail scroll positions while switching tabs", async ({ page 
   });
 
   await page.getByRole("button", { name: "Conversation" }).click();
-  await expect.poll(
-    async () => conversationScroller.evaluate((element) => element.scrollTop),
-  ).toBeGreaterThan(350);
+  await expect.poll(async () => conversationScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(350);
 
   await page.getByRole("button", { name: /Files changed/ }).click();
-  await expect.poll(
-    async () => diffArea.evaluate((element) => element.scrollTop),
-  ).toBeGreaterThan(480);
+  await expect.poll(async () => diffArea.evaluate((element) => element.scrollTop)).toBeGreaterThan(480);
 });
 
 test("preserves PR detail scroll position after pushed refresh events", async ({ page }) => {
@@ -740,7 +730,9 @@ test("preserves PR detail scroll position after pushed refresh events", async ({
       close(): void {}
 
       emit(type: string, payload: unknown): void {
-        const event = new MessageEvent(type, { data: JSON.stringify(payload) });
+        const event = new MessageEvent(type, {
+          data: JSON.stringify(payload),
+        });
         for (const listener of this.listeners.get(type) ?? []) {
           listener(event);
         }
@@ -773,39 +765,26 @@ test("preserves PR detail scroll position after pushed refresh events", async ({
       }
     };
   });
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "github",
-    "github.com",
-    scrollingDiffResponse(),
-    undefined,
-    {
-      detailBody: Array.from({ length: 120 }, (_, index) =>
-        `Conversation filler line ${index}`,
-      ).join("\n\n"),
-      detailFetchedAtSequence: [
-        "2026-03-30T14:00:00Z",
-        "2026-03-30T14:05:00Z",
-      ],
-    },
-  );
+  await mockInlineReviewAPI(page, baseCapabilities, "github", "github.com", scrollingDiffResponse(), undefined, {
+    detailBody: Array.from({ length: 120 }, (_, index) => `Conversation filler line ${index}`).join("\n\n"),
+    detailFetchedAtSequence: ["2026-03-30T14:00:00Z", "2026-03-30T14:05:00Z"],
+  });
 
   await page.goto("/pulls/github/acme/widgets/42");
-  await page.addStyleTag({ content: ".pull-detail { min-height: 1800px; }" });
+  await page.addStyleTag({
+    content: ".pull-detail { min-height: 1800px; }",
+  });
   const conversationScroller = page.locator(".pull-detail");
   await expect(conversationScroller).toBeVisible();
   await conversationScroller.evaluate((element) => {
     element.scrollTop = 420;
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
-  await expect.poll(
-    async () => conversationScroller.evaluate((element) => element.scrollTop),
-  ).toBeGreaterThan(350);
+  await expect.poll(async () => conversationScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(350);
 
-  const refreshResponse = page.waitForResponse((response) =>
-    response.url().endsWith("/api/v1/pulls/github/acme/widgets/42") &&
-    response.request().method() === "GET"
+  const refreshResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/pulls/github/acme/widgets/42") && response.request().method() === "GET",
   );
   await page.evaluate(() => {
     (
@@ -816,21 +795,13 @@ test("preserves PR detail scroll position after pushed refresh events", async ({
   });
   await refreshResponse;
 
-  await expect.poll(
-    async () => conversationScroller.evaluate((element) => element.scrollTop),
-  ).toBeGreaterThan(350);
+  await expect.poll(async () => conversationScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(350);
 });
 
 test("opens the sticky draft review action menu upward", async ({ page }) => {
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "github",
-    "github.com",
-    scrollingDiffResponse(),
-    undefined,
-    {
-      initialDraftComments: [{
+  await mockInlineReviewAPI(page, baseCapabilities, "github", "github.com", scrollingDiffResponse(), undefined, {
+    initialDraftComments: [
+      {
         id: "draft-1",
         body: "foo",
         path: "src/file-12.ts",
@@ -841,18 +812,16 @@ test("opens the sticky draft review action menu upward", async ({ page }) => {
         diff_head_sha: "diff-head",
         created_at: "2026-03-30T14:01:00Z",
         updated_at: "2026-03-30T14:01:00Z",
-      }],
-    },
-  );
+      },
+    ],
+  });
 
   await page.goto("/pulls/github/acme/widgets/42/files");
   await expect(page.getByText("1 draft comment")).toBeVisible();
   await page.getByRole("combobox", { name: "Review action: Comment" }).click();
 
-  const triggerBox = await page.locator(".review-action-select .select-dropdown-trigger")
-    .boundingBox();
-  const listBox = await page.locator(".review-action-select .select-dropdown-list")
-    .boundingBox();
+  const triggerBox = await page.locator(".review-action-select .select-dropdown-trigger").boundingBox();
+  const listBox = await page.locator(".review-action-select .select-dropdown-list").boundingBox();
 
   expect(triggerBox).not.toBeNull();
   expect(listBox).not.toBeNull();
@@ -871,14 +840,9 @@ test("enables inline review on public Forgejo and Gitea files routes", async ({ 
 
 test("does not create multiline draft ranges across separate PR diff hunks", async ({ page }) => {
   let createdRange: Record<string, unknown> | undefined;
-  await mockInlineReviewAPI(
-    page,
-    baseCapabilities,
-    "github",
-    "github.com",
-    multiHunkDiffResponse,
-    (body) => { createdRange = body.range; },
-  );
+  await mockInlineReviewAPI(page, baseCapabilities, "github", "github.com", multiHunkDiffResponse, (body) => {
+    createdRange = body.range;
+  });
 
   await page.goto("/pulls/github/acme/widgets/42/files");
   await page.getByRole("button", { name: "Comment on new line 1" }).click();

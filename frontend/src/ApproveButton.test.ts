@@ -1,11 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mockPost = vi.hoisted(() => vi.fn());
 const mockLoadDetail = vi.hoisted(() => vi.fn());
@@ -54,9 +48,7 @@ describe("ApproveButton tooltips", () => {
     renderApproveButton();
 
     const trigger = screen.getByRole("button", { name: /approve/i });
-    expect(trigger.getAttribute("title")).toBe(
-      "Open the approval form to submit a code review on this pull request",
-    );
+    expect(trigger.getAttribute("title")).toBe("Open the approval form to submit a code review on this pull request");
   });
 
   it("expanded submit button carries the actual submit-review tooltip", async () => {
@@ -64,12 +56,8 @@ describe("ApproveButton tooltips", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: /approve/i }));
 
-    const submit = screen.getByTitle(
-      "Submit an approving code review on this pull request",
-    );
-    expect(submit.getAttribute("title")).toBe(
-      "Submit an approving code review on this pull request",
-    );
+    const submit = screen.getByTitle("Submit an approving code review on this pull request");
+    expect(submit.getAttribute("title")).toBe("Submit an approving code review on this pull request");
   });
 
   it("keeps the approval trigger stable while opening the approval popover", async () => {
@@ -79,9 +67,7 @@ describe("ApproveButton tooltips", () => {
     await fireEvent.click(trigger);
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(
-      screen.getByRole("dialog", { name: "Approve pull request" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Approve pull request" })).toBeTruthy();
 
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole("textbox"));
@@ -93,9 +79,7 @@ describe("ApproveButton tooltips", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: /^approve$/i }));
 
-    expect(
-      screen.getByPlaceholderText("Leave an optional comment…"),
-    ).toBeTruthy();
+    expect(screen.getByPlaceholderText("Leave an optional comment…")).toBeTruthy();
     expect(screen.queryByPlaceholderText(/\\u2026/)).toBeNull();
   });
 
@@ -107,16 +91,16 @@ describe("ApproveButton tooltips", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(
-      screen.queryByRole("dialog", { name: "Approve pull request" }),
-    ).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Approve pull request" })).toBeNull();
   });
 
   it("keeps the approval popover open and trigger disabled while submitting", async () => {
     let resolvePost: (value: { data: { status: string } }) => void = () => {};
-    mockPost.mockReturnValue(new Promise((resolve) => {
-      resolvePost = resolve;
-    }));
+    mockPost.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePost = resolve;
+      }),
+    );
     renderApproveButton();
 
     const trigger = screen.getByRole("button", { name: /^approve$/i });
@@ -124,28 +108,20 @@ describe("ApproveButton tooltips", () => {
     await fireEvent.input(screen.getByRole("textbox"), {
       target: { value: "lgtm" },
     });
-    await fireEvent.click(screen.getByTitle(
-      "Submit an approving code review on this pull request",
-    ));
+    await fireEvent.click(screen.getByTitle("Submit an approving code review on this pull request"));
 
     await waitFor(() => {
       expect(trigger.hasAttribute("disabled")).toBe(true);
     });
-    expect(
-      screen.getByRole("dialog", { name: "Approve pull request" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Approve pull request" })).toBeTruthy();
 
     await fireEvent.click(trigger);
-    expect(
-      screen.getByRole("dialog", { name: "Approve pull request" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Approve pull request" })).toBeTruthy();
 
     resolvePost({ data: { status: "approved" } });
 
     await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Approve pull request" }),
-      ).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Approve pull request" })).toBeNull();
     });
   });
 
@@ -160,9 +136,7 @@ describe("ApproveButton tooltips", () => {
     await rerender({ owner: "acme", name: "widget", number: 2 });
 
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: /approve/i }).getAttribute("title"),
-    ).toBe(
+    expect(screen.getByRole("button", { name: /approve/i }).getAttribute("title")).toBe(
       "Open the approval form to submit a code review on this pull request",
     );
   });

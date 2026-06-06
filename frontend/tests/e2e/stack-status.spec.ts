@@ -30,7 +30,7 @@ function repoRef() {
 
 const checks = [
   {
-    name: "frontend / svelte-check",
+    name: "frontend / vp check",
     status: "completed",
     conclusion: "failure",
     app: "GitHub Actions",
@@ -98,9 +98,10 @@ function prForNumber(number: number, members = stackMembers) {
     Number: number,
     URL: `https://github.com/acme/widgets/pull/${number}`,
     Title: member ? member.title : pr.Title,
-    HeadBranch: member?.base_branch === "main"
-      ? "feat/base-schema"
-      : member?.base_branch.replace("feat/", "feat/child-") ?? pr.HeadBranch,
+    HeadBranch:
+      member?.base_branch === "main"
+        ? "feat/base-schema"
+        : (member?.base_branch.replace("feat/", "feat/child-") ?? pr.HeadBranch),
     CIStatus: member?.ci_status ?? pr.CIStatus,
     ReviewDecision: member?.review_decision ?? pr.ReviewDecision,
     MergeableState: member?.mergeable_state ?? pr.MergeableState,
@@ -221,9 +222,7 @@ async function mockStackedPR(
       return;
     }
 
-    const detailMatch = pathname.match(
-      /^\/api\/v1\/pulls\/github\/acme\/widgets\/(\d+)$/,
-    );
+    const detailMatch = pathname.match(/^\/api\/v1\/pulls\/github\/acme\/widgets\/(\d+)$/);
     if (method === "GET" && detailMatch) {
       const number = Number(detailMatch[1]!);
       const currentStackMembers = options.stackMembers?.() ?? stackMembers;
@@ -264,9 +263,7 @@ async function mockStackedPR(
       return;
     }
 
-    const stackMatch = pathname.match(
-      /^\/api\/v1\/pulls\/github\/acme\/widgets\/(\d+)\/stack$/,
-    );
+    const stackMatch = pathname.match(/^\/api\/v1\/pulls\/github\/acme\/widgets\/(\d+)\/stack$/);
     if (method === "GET" && stackMatch) {
       const number = Number(stackMatch[1]!);
       const currentStackMembers = options.stackMembers?.() ?? stackMembers;
@@ -304,15 +301,17 @@ async function mockStackedPR(
 
     if (method === "GET" && pathname === "/api/v1/settings") {
       await fulfillJson(route, {
-        repos: [{
-          provider: "github",
-          platform_host: "github.com",
-          owner: "acme",
-          name: "widgets",
-          repo_path: "acme/widgets",
-          is_glob: false,
-          matched_repo_count: 1,
-        }],
+        repos: [
+          {
+            provider: "github",
+            platform_host: "github.com",
+            owner: "acme",
+            name: "widgets",
+            repo_path: "acme/widgets",
+            is_glob: false,
+            matched_repo_count: 1,
+          },
+        ],
         activity: {
           view_mode: "threaded",
           time_range: "7d",
@@ -367,21 +366,28 @@ async function mockStackedPR(
 }
 
 async function emitPRDetailRefreshed(page: Page, number: number): Promise<void> {
-  await page.evaluate((ref) => {
-    const eventSources = (window as unknown as {
-      __middlemanEventSources?: EventTarget[];
-    }).__middlemanEventSources;
-    eventSources?.[0]?.dispatchEvent(new MessageEvent("pr_detail_refreshed", {
-      data: JSON.stringify(ref),
-    }));
-  }, {
-    provider: "github",
-    platform_host: "github.com",
-    repo_path: "acme/widgets",
-    owner: "acme",
-    name: "widgets",
-    number,
-  });
+  await page.evaluate(
+    (ref) => {
+      const eventSources = (
+        window as unknown as {
+          __middlemanEventSources?: EventTarget[];
+        }
+      ).__middlemanEventSources;
+      eventSources?.[0]?.dispatchEvent(
+        new MessageEvent("pr_detail_refreshed", {
+          data: JSON.stringify(ref),
+        }),
+      );
+    },
+    {
+      provider: "github",
+      platform_host: "github.com",
+      repo_path: "acme/widgets",
+      owner: "acme",
+      name: "widgets",
+      number,
+    },
+  );
 }
 
 async function installMockEventSource(page: Page): Promise<void> {
@@ -407,13 +413,17 @@ async function installMockEventSource(page: Page): Promise<void> {
       }
     }
 
-    (window as unknown as {
-      EventSource: typeof EventSource;
-      __middlemanEventSources: EventTarget[];
-    }).EventSource = MockEventSource as unknown as typeof EventSource;
-    (window as unknown as {
-      __middlemanEventSources: EventTarget[];
-    }).__middlemanEventSources = eventSources;
+    (
+      window as unknown as {
+        EventSource: typeof EventSource;
+        __middlemanEventSources: EventTarget[];
+      }
+    ).EventSource = MockEventSource as unknown as typeof EventSource;
+    (
+      window as unknown as {
+        __middlemanEventSources: EventTarget[];
+      }
+    ).__middlemanEventSources = eventSources;
   });
 }
 
@@ -440,11 +450,11 @@ test("stack status shares the PR detail expandable slot with CI", async ({ page 
   await page.goto("/pulls/github/acme/widgets/102");
 
   await page.getByTestId("ci-chip").click();
-  await expect(page.getByText("frontend / svelte-check")).toBeVisible();
+  await expect(page.getByText("frontend / vp check")).toBeVisible();
 
   await page.getByTestId("stack-chip").click();
 
-  await expect(page.getByText("frontend / svelte-check")).toBeHidden();
+  await expect(page.getByText("frontend / vp check")).toBeHidden();
   await expect(page.getByText("7 PRs · current 2/7 · downstack CI failure")).toBeVisible();
   await expect(page.getByText("blocked by #101")).toBeVisible();
 
@@ -481,8 +491,16 @@ test("stack status shares the PR detail expandable slot with CI", async ({ page 
 test("stack status surfaces inherited downstack merge conflicts", async ({ page }) => {
   await mockStackedPR(page, {
     stackMembers: () => [
-      { ...stackMembers[0]!, ci_status: "success", mergeable_state: "dirty" },
-      { ...stackMembers[1]!, ci_status: "success", mergeable_state: "dirty" },
+      {
+        ...stackMembers[0]!,
+        ci_status: "success",
+        mergeable_state: "dirty",
+      },
+      {
+        ...stackMembers[1]!,
+        ci_status: "success",
+        mergeable_state: "dirty",
+      },
       ...stackMembers.slice(2),
     ],
   });
@@ -490,9 +508,11 @@ test("stack status surfaces inherited downstack merge conflicts", async ({ page 
   await page.goto("/pulls/github/acme/widgets/102");
 
   await expect(page.getByText("This branch has conflicts")).toBeVisible();
-  await expect(page.getByRole("button", {
-    name: /Stacked: 2\/7, 1 downstack merge conflict/i,
-  })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Stacked: 2\/7, 1 downstack merge conflict/i,
+    }),
+  ).toBeVisible();
 
   await page.getByTestId("stack-chip").click();
   await expect(page.getByText("7 PRs · current 2/7 · downstack conflict")).toBeVisible();
@@ -507,9 +527,11 @@ test("stack status follows refreshed detail stack data", async ({ page }) => {
   });
 
   await page.goto("/pulls/github/acme/widgets/102");
-  await expect(page.getByRole("button", {
-    name: /Stacked: 2\/7, 1 downstack CI failure/i,
-  })).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Stacked: 2\/7, 1 downstack CI failure/i,
+    }),
+  ).toBeVisible();
 
   currentStackMembers = [
     { ...stackMembers[0]!, ci_status: "success" },
@@ -562,9 +584,7 @@ test("stack member navigation preserves focus routes", async ({ page }) => {
 test("stack member navigation updates the activity drawer selection", async ({ page }) => {
   await mockStackedPR(page);
 
-  await page.goto(
-    "/?selected=pr:102&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets",
-  );
+  await page.goto("/?selected=pr:102&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets");
   await page.locator(".activity-detail").getByTestId("stack-chip").click();
   await page.getByRole("button", { name: "#101 base schema" }).click();
 
@@ -600,9 +620,7 @@ test("stack rail spans wrapped CI badges at narrow widths", async ({ page }) => 
   const containerQueryEvidence = await page.evaluate(() => {
     function collectRules(ruleList: CSSRuleList): string[] {
       return Array.from(ruleList).flatMap((rule) => {
-        const nested = "cssRules" in rule
-          ? collectRules((rule as CSSGroupingRule).cssRules)
-          : [];
+        const nested = "cssRules" in rule ? collectRules((rule as CSSGroupingRule).cssRules) : [];
         return [rule.cssText, ...nested];
       });
     }
@@ -614,14 +632,11 @@ test("stack rail spans wrapped CI badges at narrow widths", async ({ page }) => 
       }
     });
     return {
-      hasExpectedContainerRule: rules.some((rule) =>
-        rule.includes("@container pull-detail")
-          && rule.includes("max-width: 440px")
-          && rule.includes(".stack-row")
+      hasExpectedContainerRule: rules.some(
+        (rule) =>
+          rule.includes("@container pull-detail") && rule.includes("max-width: 440px") && rule.includes(".stack-row"),
       ),
-      hasMalformedRule: rules.some((rule) =>
-        rule.includes("@frontend/src/lib/stores/container.svelte.ts")
-      ),
+      hasMalformedRule: rules.some((rule) => rule.includes("@frontend/src/lib/stores/container.svelte.ts")),
     };
   });
   expect(containerQueryEvidence).toEqual({

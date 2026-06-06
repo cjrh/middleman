@@ -2,12 +2,7 @@ import type { CICheck } from "../api/types.js";
 
 export type CIBucket = "failed" | "pending" | "passed" | "skipped" | "unknown";
 
-const ACTIVE_STATUSES = new Set([
-  "in_progress",
-  "queued",
-  "pending",
-  "waiting",
-]);
+const ACTIVE_STATUSES = new Set(["in_progress", "queued", "pending", "waiting"]);
 
 const FAILED_CONCLUSIONS = new Set([
   "failure",
@@ -96,7 +91,10 @@ export function parseCIChecks(json: string): ParsedCIChecks {
     };
   }
   if (!Array.isArray(parsed)) {
-    return { checks: [], error: new Error("CIChecksJSON: payload is not an array") };
+    return {
+      checks: [],
+      error: new Error("CIChecksJSON: payload is not an array"),
+    };
   }
   const checks: CICheck[] = [];
   for (const elem of parsed) {

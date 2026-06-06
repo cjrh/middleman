@@ -43,10 +43,7 @@ function normalizeTimestamp(value: unknown): string {
   return Number.isNaN(Date.parse(value)) ? EPOCH : value;
 }
 
-function isValidRoutedItemRef(
-  kind: "pr" | "issue",
-  value: unknown,
-): value is RoutedItemRef {
+function isValidRoutedItemRef(kind: "pr" | "issue", value: unknown): value is RoutedItemRef {
   if (typeof value !== "object" || value === null) return false;
   const r = value as Record<string, unknown>;
   if (r.itemType !== kind) return false;
@@ -114,7 +111,11 @@ export function writeRecent(kind: "pr" | "issue", ref: RoutedItemRef): void {
   const state = readRecents();
   const key = dedupeKey(kind, ref);
   const filtered = state.items.filter((item) => dedupeKey(item.kind, item.ref) !== key);
-  filtered.unshift({ kind, ref, lastSelectedAt: new Date().toISOString() });
+  filtered.unshift({
+    kind,
+    ref,
+    lastSelectedAt: new Date().toISOString(),
+  });
   if (filtered.length > MAX_ITEMS) filtered.length = MAX_ITEMS;
   safeSet({ version: 1, items: filtered });
 }

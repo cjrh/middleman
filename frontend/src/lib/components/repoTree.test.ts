@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildRepoTree,
@@ -10,11 +10,7 @@ import {
   type VisibleRow,
 } from "./repoTree.js";
 
-function opt(
-  platformHost: string,
-  repoPath: string,
-  provider = "github",
-): RepoTreeOption {
+function opt(platformHost: string, repoPath: string, provider = "github"): RepoTreeOption {
   const segments = repoPath.split("/");
   return {
     value: `${platformHost}/${repoPath}`,
@@ -49,9 +45,7 @@ describe("buildRepoTree", () => {
   });
 
   it("keeps GitLab nested groups as one slashed owner node", () => {
-    const tree = buildRepoTree([
-      opt("gitlab.com", "platform/frontend/web-ui", "gitlab"),
-    ]);
+    const tree = buildRepoTree([opt("gitlab.com", "platform/frontend/web-ui", "gitlab")]);
 
     const host = tree[0]!;
     expect(host.children).toHaveLength(1);
@@ -63,18 +57,12 @@ describe("buildRepoTree", () => {
   });
 
   it("separates hosts and sorts them by label", () => {
-    const tree = buildRepoTree([
-      opt("gitlab.com", "g/x", "gitlab"),
-      opt("github.com", "a/y"),
-    ]);
+    const tree = buildRepoTree([opt("gitlab.com", "g/x", "gitlab"), opt("github.com", "a/y")]);
     expect(tree.map((h) => h.label)).toEqual(["github.com", "gitlab.com"]);
   });
 
   it("uses the first option's provider when a host's providers disagree", () => {
-    const tree = buildRepoTree([
-      opt("ghe.example.com", "a/x", "github"),
-      opt("ghe.example.com", "b/y", "gitlab"),
-    ]);
+    const tree = buildRepoTree([opt("ghe.example.com", "a/x", "github"), opt("ghe.example.com", "b/y", "gitlab")]);
     expect(tree[0]!.provider).toBe("github");
   });
 
@@ -91,10 +79,7 @@ function labelsAtDepth(rows: VisibleRow[]): Array<[string, number]> {
 
 describe("visibleRows", () => {
   it("omits the host node when there is only one host", () => {
-    const tree = buildRepoTree([
-      opt("github.com", "acme/api"),
-      opt("github.com", "acme/web"),
-    ]);
+    const tree = buildRepoTree([opt("github.com", "acme/api"), opt("github.com", "acme/web")]);
     const rows = visibleRows(tree, { isCollapsed: neverCollapsed });
     // owner at depth 0 (host omitted), two leaves at depth 1
     expect(labelsAtDepth(rows)).toEqual([
@@ -148,10 +133,7 @@ describe("visibleRows", () => {
   });
 
   it("hides children of a collapsed node", () => {
-    const tree = buildRepoTree([
-      opt("github.com", "acme/api"),
-      opt("github.com", "acme/web"),
-    ]);
+    const tree = buildRepoTree([opt("github.com", "acme/api"), opt("github.com", "acme/web")]);
     const collapsed = (id: string) => id === "github.com/acme";
     const rows = visibleRows(tree, { isCollapsed: collapsed });
     expect(labelsAtDepth(rows)).toEqual([["acme", 0]]);
@@ -184,7 +166,10 @@ describe("visibleRows", () => {
       opt("github.com", "acme/web"),
       opt("github.com", "acme/infra"),
     ]);
-    const rows = visibleRows(tree, { isCollapsed: () => false, query: "api" });
+    const rows = visibleRows(tree, {
+      isCollapsed: () => false,
+      query: "api",
+    });
     const acme = rows.find((r) => r.node.label === "acme");
     expect(acme).toBeTruthy();
     expect(acme!.hasChildren).toBe(true);
@@ -204,7 +189,10 @@ describe("visibleRows", () => {
       opt("github.com", "acme/web"),
       opt("github.com", "acme/infra"),
     ]);
-    const rows = visibleRows(tree, { isCollapsed: () => false, query: "api" });
+    const rows = visibleRows(tree, {
+      isCollapsed: () => false,
+      query: "api",
+    });
     const acme = rows.find((r) => r.node.label === "acme")!;
     // selection logic sees all three repos, not just the matching "api"
     expect(collectLeafValues(acme.node).sort()).toEqual([
@@ -214,9 +202,7 @@ describe("visibleRows", () => {
     ]);
     // with only "api" selected, the owner is partial (not "checked"), proving
     // tri-state reflects hidden siblings too
-    expect(nodeSelectionState(acme.node, new Set(["github.com/acme/api"]))).toBe(
-      "partial",
-    );
+    expect(nodeSelectionState(acme.node, new Set(["github.com/acme/api"]))).toBe("partial");
     // toggling the owner cascades to the entire subtree, including hidden repos
     expect(toggleSubtree(acme.node, ["github.com/acme/api"]).sort()).toEqual([
       "github.com/acme/api",
@@ -229,10 +215,7 @@ describe("visibleRows", () => {
     // team-a and team-b each have one repo named "api". Flattened to leaves,
     // bare "api" rows would be indistinguishable; the displayLabel disambiguates
     // while the underlying node/value stays the leaf for selection.
-    const tree = buildRepoTree([
-      opt("github.com", "team-a/api"),
-      opt("github.com", "team-b/api"),
-    ]);
+    const tree = buildRepoTree([opt("github.com", "team-a/api"), opt("github.com", "team-b/api")]);
     const rows = visibleRows(tree, { isCollapsed: () => false });
     const labels = rows.map((r) => r.displayLabel ?? r.node.label);
     expect(labels).toContain("team-a/api");
@@ -250,7 +233,10 @@ describe("visibleRows", () => {
       opt("github.com", "acme/web"),
       opt("github.com", "solo/onlyrepo"),
     ]);
-    const rows = visibleRows(tree, { isCollapsed: () => false, query: "only" });
+    const rows = visibleRows(tree, {
+      isCollapsed: () => false,
+      query: "only",
+    });
     expect(rows.some((r) => r.node.label === "solo")).toBe(false);
     const leaf = rows.find((r) => r.node.label === "onlyrepo");
     expect(leaf?.hasChildren).toBe(false);
@@ -273,11 +259,11 @@ describe("visibleRows", () => {
   });
 
   it("drops an entire host when a filter matches nothing under it", () => {
-    const tree = buildRepoTree([
-      opt("github.com", "acme/web"),
-      opt("gitlab.com", "g/api", "gitlab"),
-    ]);
-    const rows = visibleRows(tree, { isCollapsed: () => false, query: "web" });
+    const tree = buildRepoTree([opt("github.com", "acme/web"), opt("gitlab.com", "g/api", "gitlab")]);
+    const rows = visibleRows(tree, {
+      isCollapsed: () => false,
+      query: "web",
+    });
     // only github.com/acme/web matches; gitlab.com host is dropped entirely,
     // and with one host remaining it auto-flattens (host row omitted)
     expect(rows.some((r) => r.node.label === "gitlab.com")).toBe(false);
@@ -285,12 +271,12 @@ describe("visibleRows", () => {
   });
 
   it("treats a whitespace-only query as no filter", () => {
-    const tree = buildRepoTree([
-      opt("github.com", "acme/api"),
-      opt("github.com", "acme/web"),
-    ]);
+    const tree = buildRepoTree([opt("github.com", "acme/api"), opt("github.com", "acme/web")]);
     const collapsed = (id: string) => id === "github.com/acme";
-    const rows = visibleRows(tree, { isCollapsed: collapsed, query: "   " });
+    const rows = visibleRows(tree, {
+      isCollapsed: collapsed,
+      query: "   ",
+    });
     // whitespace trims to empty -> not filtering -> collapse is honored, leaves hidden
     expect(rows.some((r) => r.node.label === "api")).toBe(false);
     expect(rows.find((r) => r.node.label === "acme")?.expanded).toBe(false);
@@ -311,25 +297,14 @@ describe("selection helpers", () => {
       "github.com/acme/infra",
       "github.com/acme/web",
     ]);
-    expect(collectLeafValues(acme.children[0]!)).toEqual([
-      "github.com/acme/api",
-    ]);
+    expect(collectLeafValues(acme.children[0]!)).toEqual(["github.com/acme/api"]);
   });
 
   it("computes tri-state from the active set", () => {
     expect(nodeSelectionState(acme, new Set())).toBe("unchecked");
+    expect(nodeSelectionState(acme, new Set(["github.com/acme/api"]))).toBe("partial");
     expect(
-      nodeSelectionState(acme, new Set(["github.com/acme/api"])),
-    ).toBe("partial");
-    expect(
-      nodeSelectionState(
-        acme,
-        new Set([
-          "github.com/acme/api",
-          "github.com/acme/web",
-          "github.com/acme/infra",
-        ]),
-      ),
+      nodeSelectionState(acme, new Set(["github.com/acme/api", "github.com/acme/web", "github.com/acme/infra"])),
     ).toBe("checked");
   });
 
@@ -342,17 +317,14 @@ describe("selection helpers", () => {
   });
 
   it("removes all subtree leaves when fully checked", () => {
-    const all = [
-      "github.com/acme/api",
-      "github.com/acme/web",
-      "github.com/acme/infra",
-    ];
+    const all = ["github.com/acme/api", "github.com/acme/web", "github.com/acme/infra"];
     expect(toggleSubtree(acme, all)).toEqual([]);
   });
 
   it("toggles a single leaf without touching siblings", () => {
-    expect(
-      toggleSubtree(acme.children[0]!, ["github.com/acme/web"]).sort(),
-    ).toEqual(["github.com/acme/api", "github.com/acme/web"]);
+    expect(toggleSubtree(acme.children[0]!, ["github.com/acme/web"]).sort()).toEqual([
+      "github.com/acme/api",
+      "github.com/acme/web",
+    ]);
   });
 });

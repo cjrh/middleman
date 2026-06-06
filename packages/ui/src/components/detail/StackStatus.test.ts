@@ -1,10 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  API_CLIENT_KEY,
-  NAVIGATE_KEY,
-  STORES_KEY,
-} from "../../context.js";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { API_CLIENT_KEY, NAVIGATE_KEY, STORES_KEY } from "../../context.js";
 import StackStatus from "./StackStatus.svelte";
 
 interface StackMember {
@@ -29,9 +25,7 @@ interface StackContext {
   members: StackMember[];
 }
 
-function member(
-  overrides: Partial<StackMember> & Pick<StackMember, "number" | "position">,
-): StackMember {
+function member(overrides: Partial<StackMember> & Pick<StackMember, "number" | "position">): StackMember {
   return {
     number: overrides.number,
     title: `PR ${overrides.number}`,
@@ -100,19 +94,18 @@ describe("StackStatus", () => {
   it("replaces cached stack data with the latest detail stack", async () => {
     const rendered = renderStackStatus(stack());
 
-    expect(screen.getByRole("button", {
-      name: /Stacked: 2\/3, 1 downstack CI failure/i,
-    })).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: /Stacked: 2\/3, 1 downstack CI failure/i,
+      }),
+    ).toBeTruthy();
 
     await rendered.rerender({
       ...baseProps,
       initialStack: stack({
         size: 2,
         health: "healthy",
-        members: [
-          member({ number: 1, position: 1 }),
-          member({ number: 2, position: 2 }),
-        ],
+        members: [member({ number: 1, position: 1 }), member({ number: 2, position: 2 })],
       }),
     });
 
@@ -135,17 +128,21 @@ describe("StackStatus", () => {
   });
 
   it("surfaces downstack merge conflicts on the chip and stack row", () => {
-    renderStackStatus(stack({
-      members: [
-        member({ number: 1, position: 1, mergeable_state: "dirty" }),
-        member({ number: 2, position: 2, mergeable_state: "dirty" }),
-        member({ number: 3, position: 3 }),
-      ],
-    }));
+    renderStackStatus(
+      stack({
+        members: [
+          member({ number: 1, position: 1, mergeable_state: "dirty" }),
+          member({ number: 2, position: 2, mergeable_state: "dirty" }),
+          member({ number: 3, position: 3 }),
+        ],
+      }),
+    );
 
-    expect(screen.getByRole("button", {
-      name: /Stacked: 2\/3, 1 downstack merge conflict/i,
-    })).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: /Stacked: 2\/3, 1 downstack merge conflict/i,
+      }),
+    ).toBeTruthy();
     expect(screen.getAllByText("× Conflicts")).toHaveLength(2);
     expect(screen.getByText(/3 PRs . current 2\/3 . downstack conflict/)).toBeTruthy();
   });

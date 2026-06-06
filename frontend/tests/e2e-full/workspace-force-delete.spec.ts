@@ -1,16 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  expect,
-  request as playwrightRequest,
-  test,
-  type APIRequestContext,
-} from "@playwright/test";
-import {
-  startIsolatedWorkspaceE2EServer,
-  type IsolatedE2EServer,
-} from "./support/e2eServer";
+import { expect, request as playwrightRequest, test, type APIRequestContext } from "@playwright/test";
+import { startIsolatedWorkspaceE2EServer, type IsolatedE2EServer } from "./support/e2eServer";
 
 type WorkspaceStatusResponse = {
   id: string;
@@ -29,10 +21,7 @@ function hasCommand(command: string, args: string[] = ["--version"]): boolean {
   }
 }
 
-async function waitForWorkspaceReady(
-  api: APIRequestContext,
-  workspaceId: string,
-): Promise<WorkspaceStatusResponse> {
+async function waitForWorkspaceReady(api: APIRequestContext, workspaceId: string): Promise<WorkspaceStatusResponse> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const response = await api.get(`/api/v1/workspaces/${workspaceId}`);
     expect(response.ok()).toBe(true);
@@ -54,9 +43,7 @@ test.describe("workspace force-delete", () => {
     timeout: lockedWorkspaceTestTimeoutMs,
   });
 
-  test("dirty workspace triggers the 409 prompt and force delete cleans up via the real API", async ({
-    page,
-  }) => {
+  test("dirty workspace triggers the 409 prompt and force delete cleans up via the real API", async ({ page }) => {
     test.skip(
       !hasCommand("git") || !hasCommand("tmux", ["-V"]),
       "git and tmux are required for the real workspace flow",
@@ -72,31 +59,21 @@ test.describe("workspace force-delete", () => {
 
       // Seeded issue 13 has no other coverage and gives us an isolated
       // workspace with a fresh worktree we can dirty.
-      const createResponse = await api.post(
-        "/api/v1/issues/github/acme/widgets/13/workspace",
-        { data: {} },
-      );
+      const createResponse = await api.post("/api/v1/issues/github/acme/widgets/13/workspace", {
+        data: {},
+      });
       expect(createResponse.status()).toBe(202);
-      const created =
-        (await createResponse.json()) as WorkspaceStatusResponse;
+      const created = (await createResponse.json()) as WorkspaceStatusResponse;
       const ready = await waitForWorkspaceReady(api, created.id);
       expect(ready.worktree_path).toBeTruthy();
 
       // Drop an uncommitted file so the first DELETE hits the dirty
       // preflight on the workspace manager and returns 409.
-      await writeFile(
-        join(ready.worktree_path!, "demo-dirty.txt"),
-        "uncommitted\n",
-      );
+      await writeFile(join(ready.worktree_path!, "demo-dirty.txt"), "uncommitted\n");
 
-      await page.goto(
-        `${isolatedServer.info.base_url}/terminal/${created.id}`,
-      );
+      await page.goto(`${isolatedServer.info.base_url}/terminal/${created.id}`);
 
-      await page
-        .locator(".header-bar")
-        .getByRole("button", { name: "Delete" })
-        .click();
+      await page.locator(".header-bar").getByRole("button", { name: "Delete" }).click();
 
       const dialog = page.getByRole("dialog", {
         name: "Force delete workspace?",
@@ -106,9 +83,7 @@ test.describe("workspace force-delete", () => {
       // reached the UI catches the whole detail-pass-through chain.
       await expect(dialog).toContainText("demo-dirty.txt");
 
-      await dialog
-        .getByRole("button", { name: "Force delete" })
-        .click();
+      await dialog.getByRole("button", { name: "Force delete" }).click();
 
       await expect(page).toHaveURL(/\/workspaces$/);
 

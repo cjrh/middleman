@@ -16,15 +16,14 @@ export function openLabelPickerFor(detail: OpenLabelPickerDetail): void {
   window.dispatchEvent(new CustomEvent(OPEN_LABEL_PICKER_EVENT, { detail }));
 }
 
-export function labelPickerCommandMatches(
-  expected: OpenLabelPickerDetail,
-  actual: OpenLabelPickerDetail,
-): boolean {
-  return expected.itemType === actual.itemType
-    && expected.provider === actual.provider
-    && (expected.platformHost ?? "") === (actual.platformHost ?? "")
-    && expected.owner === actual.owner
-    && expected.name === actual.name
-    && expected.repoPath === actual.repoPath
-    && expected.number === actual.number;
+export function labelPickerCommandMatches(expected: OpenLabelPickerDetail, actual: OpenLabelPickerDetail): boolean {
+  return (
+    expected.itemType === actual.itemType &&
+    expected.provider === actual.provider &&
+    (expected.platformHost ?? "") === (actual.platformHost ?? "") &&
+    expected.owner === actual.owner &&
+    expected.name === actual.name &&
+    expected.repoPath === actual.repoPath &&
+    expected.number === actual.number
+  );
 }

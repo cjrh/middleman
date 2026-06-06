@@ -1,6 +1,6 @@
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 import type { ComponentProps } from "svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mockFit = vi.fn();
 const mockOpen = vi.fn();
@@ -57,10 +57,12 @@ vi.mock("@middleman/ui", () => ({
 
 vi.mock("ghostty-web", () => ({
   init: (...args: []) => mockInit(...args),
-  FitAddon: vi.fn().mockImplementation(() => ({
-    fit: mockFit,
-  })),
-  Terminal: vi.fn().mockImplementation((options) => {
+  FitAddon: vi.fn().mockImplementation(function () {
+    return {
+      fit: mockFit,
+    };
+  }),
+  Terminal: vi.fn().mockImplementation(function (options) {
     terminalCtor(options);
     return {
       cols: 80,
@@ -93,9 +95,7 @@ describe("GhosttyTerminalPane", () => {
     mockOnData.mockReset();
     mockPaste.mockReset();
     mockPaste.mockImplementation((text: string) => {
-      const dataHandler = mockOnData.mock.calls[0]?.[0] as
-        | ((data: string) => void)
-        | undefined;
+      const dataHandler = mockOnData.mock.calls[0]?.[0] as ((data: string) => void) | undefined;
       dataHandler?.(`\x1b[200~${text}\x1b[201~`);
     });
     mockDispose.mockReset();
@@ -124,9 +124,7 @@ describe("GhosttyTerminalPane", () => {
     vi.unstubAllGlobals();
   });
 
-  async function renderStarted(
-    props: Partial<ComponentProps<typeof GhosttyTerminalPane>> = {},
-  ) {
+  async function renderStarted(props: Partial<ComponentProps<typeof GhosttyTerminalPane>> = {}) {
     const result = render(GhosttyTerminalPane, { props });
     await waitFor(() => expect(terminalCtor).toHaveBeenCalled());
     return result;
@@ -183,76 +181,61 @@ describe("GhosttyTerminalPane", () => {
 
   it("connects to an explicit websocket path", async () => {
     await renderStarted({
-      websocketPath:
-        "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
     });
 
     expect(sockets).toHaveLength(1);
     const url = new URL(socketAt(0).url);
     expect(url.origin).toBe("ws://127.0.0.1:8091");
-    expect(url.pathname).toBe(
-      "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
-    );
+    expect(url.pathname).toBe("/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal");
     expect(url.searchParams.get("cols")).toBe("80");
     expect(url.searchParams.get("rows")).toBe("24");
   });
 
   it("keeps /ws paths on the current dev origin for Vite proxying", async () => {
     await renderStarted({
-      websocketPath:
-        "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
     });
 
     expect(sockets).toHaveLength(1);
     const url = new URL(socketAt(0).url);
     expect(url.origin).toBe("ws://localhost:3000");
-    expect(url.pathname).toBe(
-      "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
-    );
+    expect(url.pathname).toBe("/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal");
   });
 
   it("does not duplicate the base path for explicit websocket paths", async () => {
     window.__BASE_PATH__ = "/middleman/";
 
     await renderStarted({
-      websocketPath:
-        "/middleman/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/middleman/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
     });
 
     expect(sockets).toHaveLength(1);
     const url = new URL(socketAt(0).url);
     expect(url.origin).toBe("ws://localhost:3000");
-    expect(url.pathname).toBe(
-      "/middleman/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
-    );
+    expect(url.pathname).toBe("/middleman/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal");
   });
 
   it("refreshes the terminal when a hidden pane becomes active", async () => {
     const { rerender } = await renderStarted({
-      websocketPath:
-        "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
       active: false,
     });
 
     expect(socketAt(0).sent).toEqual([]);
 
     await rerender({
-      websocketPath:
-        "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/ws/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
       active: true,
     });
 
     expect(mockFit).toHaveBeenCalled();
-    expect(socketAt(0).sent).toContain(
-      JSON.stringify({ type: "refresh", cols: 80, rows: 24 }),
-    );
+    expect(socketAt(0).sent).toContain(JSON.stringify({ type: "refresh", cols: 80, rows: 24 }));
   });
 
   it("filters tiny tmux mouse drags before sending terminal input", async () => {
     await renderStarted({ workspaceId: "ws-123" });
-    const dataHandler = mockOnData.mock.calls[0]?.[0] as
-      | ((data: string) => void)
-      | undefined;
+    const dataHandler = mockOnData.mock.calls[0]?.[0] as ((data: string) => void) | undefined;
     expect(dataHandler).toBeDefined();
 
     socketAt(0).sent = [];
@@ -263,9 +246,7 @@ describe("GhosttyTerminalPane", () => {
 
   it("sends terminal byte payloads as raw WebSocket bytes", async () => {
     await renderStarted({ workspaceId: "ws-123" });
-    const dataHandler = mockOnData.mock.calls[0]?.[0] as
-      | ((data: Uint8Array) => void)
-      | undefined;
+    const dataHandler = mockOnData.mock.calls[0]?.[0] as ((data: Uint8Array) => void) | undefined;
     expect(dataHandler).toBeDefined();
 
     socketAt(0).sent = [];
@@ -273,16 +254,12 @@ describe("GhosttyTerminalPane", () => {
 
     const sent = socketAt(0).sent[0];
     expect(sent).toBeInstanceOf(ArrayBuffer);
-    expect(Array.from(new Uint8Array(sent as ArrayBuffer))).toEqual([
-      0, 0xff, 0x1b,
-    ]);
+    expect(Array.from(new Uint8Array(sent as ArrayBuffer))).toEqual([0, 0xff, 0x1b]);
   });
 
   it("sends terminal ArrayBuffer payloads as raw WebSocket bytes", async () => {
     await renderStarted({ workspaceId: "ws-123" });
-    const dataHandler = mockOnData.mock.calls[0]?.[0] as
-      | ((data: ArrayBuffer) => void)
-      | undefined;
+    const dataHandler = mockOnData.mock.calls[0]?.[0] as ((data: ArrayBuffer) => void) | undefined;
     expect(dataHandler).toBeDefined();
 
     socketAt(0).sent = [];
@@ -290,13 +267,13 @@ describe("GhosttyTerminalPane", () => {
 
     const sent = socketAt(0).sent[0];
     expect(sent).toBeInstanceOf(ArrayBuffer);
-    expect(Array.from(new Uint8Array(sent as ArrayBuffer))).toEqual([
-      0x80, 0x81,
-    ]);
+    expect(Array.from(new Uint8Array(sent as ArrayBuffer))).toEqual([0x80, 0x81]);
   });
 
   it("sends browser multiline paste through ghostty bracketed paste handling", async () => {
-    const { container } = await renderStarted({ workspaceId: "ws-123" });
+    const { container } = await renderStarted({
+      workspaceId: "ws-123",
+    });
 
     socketAt(0).sent = [];
     const terminalContainer = container.querySelector(".terminal-container");
@@ -310,11 +287,7 @@ describe("GhosttyTerminalPane", () => {
     }) as ClipboardEvent;
     Object.defineProperty(event, "clipboardData", {
       value: {
-        getData: vi.fn((type: string) =>
-          type === "text/plain"
-            ? "first\x1b[201~\nsecond\nthird"
-            : "",
-        ),
+        getData: vi.fn((type: string) => (type === "text/plain" ? "first\x1b[201~\nsecond\nthird" : "")),
       },
     });
 
@@ -323,13 +296,13 @@ describe("GhosttyTerminalPane", () => {
     expect(defaultAllowed).toBe(false);
     expect(laterPasteListener).not.toHaveBeenCalled();
     expect(mockPaste).toHaveBeenCalledWith("first[201~\nsecond\nthird");
-    expect(sentText(socketAt(0), 0)).toBe(
-      "\x1b[200~first[201~\nsecond\nthird\x1b[201~",
-    );
+    expect(sentText(socketAt(0), 0)).toBe("\x1b[200~first[201~\nsecond\nthird\x1b[201~");
   });
 
   it("leaves single-line browser paste for ghostty default handling", async () => {
-    const { container } = await renderStarted({ workspaceId: "ws-123" });
+    const { container } = await renderStarted({
+      workspaceId: "ws-123",
+    });
 
     socketAt(0).sent = [];
     const terminalContainer = container.querySelector(".terminal-container");
@@ -343,9 +316,7 @@ describe("GhosttyTerminalPane", () => {
     }) as ClipboardEvent;
     Object.defineProperty(event, "clipboardData", {
       value: {
-        getData: vi.fn((type: string) =>
-          type === "text/plain" ? "single line" : "",
-        ),
+        getData: vi.fn((type: string) => (type === "text/plain" ? "single line" : "")),
       },
     });
 
@@ -359,38 +330,31 @@ describe("GhosttyTerminalPane", () => {
 
   it("does not open a websocket when initialStatus is exited", async () => {
     await renderStarted({
-      websocketPath:
-        "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
       reconnectOnExit: false,
       initialStatus: "exited",
     });
 
     expect(sockets).toHaveLength(0);
-    expect(terminalWrite).toHaveBeenCalledWith(
-      expect.stringContaining("[Process exited]"),
-    );
+    expect(terminalWrite).toHaveBeenCalledWith(expect.stringContaining("[Process exited]"));
   });
 
   it("does not open a websocket when initialStatus is error", async () => {
     await renderStarted({
-      websocketPath:
-        "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
       reconnectOnExit: false,
       initialStatus: "error",
     });
 
     expect(sockets).toHaveLength(0);
-    expect(terminalWrite).toHaveBeenCalledWith(
-      expect.stringContaining("[Session unavailable]"),
-    );
+    expect(terminalWrite).toHaveBeenCalledWith(expect.stringContaining("[Session unavailable]"));
   });
 
   it("does not restart sessions when reconnectOnExit is false", async () => {
     const onExit = vi.fn();
 
     await renderStarted({
-      websocketPath:
-        "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
+      websocketPath: "/api/v1/workspaces/ws-123/runtime/sessions/ws-123%3Ahelper/terminal",
       reconnectOnExit: false,
       onExit,
     });
@@ -407,9 +371,7 @@ describe("GhosttyTerminalPane", () => {
     vi.advanceTimersByTime(30000);
 
     expect(sockets).toHaveLength(1);
-    expect(terminalWrite).toHaveBeenCalledWith(
-      expect.stringContaining("[Process exited]"),
-    );
+    expect(terminalWrite).toHaveBeenCalledWith(expect.stringContaining("[Process exited]"));
     expect(onExit).toHaveBeenCalledWith(0);
 
     vi.useRealTimers();

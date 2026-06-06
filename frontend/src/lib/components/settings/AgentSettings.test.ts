@@ -1,17 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/svelte";
-import {
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 const { mockUpdateSettings } = vi.hoisted(() => ({
   mockUpdateSettings: vi.fn(),
@@ -47,12 +35,14 @@ describe("AgentSettings", () => {
 
   it("persists built-in agent binary and argument overrides", async () => {
     mockUpdateSettings.mockResolvedValue({
-      agents: [{
-        key: "codex",
-        label: "Codex",
-        command: ["/opt/codex", "--full-auto"],
-        enabled: true,
-      }],
+      agents: [
+        {
+          key: "codex",
+          label: "Codex",
+          command: ["/opt/codex", "--full-auto"],
+          enabled: true,
+        },
+      ],
     });
     const onUpdate = vi.fn();
 
@@ -74,30 +64,36 @@ describe("AgentSettings", () => {
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
-        agents: [{
-          key: "codex",
-          label: "Codex",
-          command: ["/opt/codex", "--full-auto"],
-          enabled: true,
-        }],
+        agents: [
+          {
+            key: "codex",
+            label: "Codex",
+            command: ["/opt/codex", "--full-auto"],
+            enabled: true,
+          },
+        ],
       });
     });
-    expect(onUpdate).toHaveBeenCalledWith([{
-      key: "codex",
-      label: "Codex",
-      command: ["/opt/codex", "--full-auto"],
-      enabled: true,
-    }]);
+    expect(onUpdate).toHaveBeenCalledWith([
+      {
+        key: "codex",
+        label: "Codex",
+        command: ["/opt/codex", "--full-auto"],
+        enabled: true,
+      },
+    ]);
   });
 
   it("preserves quoted empty arguments when saving", async () => {
     mockUpdateSettings.mockResolvedValue({
-      agents: [{
-        key: "codex",
-        label: "Codex",
-        command: ["codex", ""],
-        enabled: true,
-      }],
+      agents: [
+        {
+          key: "codex",
+          label: "Codex",
+          command: ["codex", ""],
+          enabled: true,
+        },
+      ],
     });
     const onUpdate = vi.fn();
 
@@ -110,18 +106,20 @@ describe("AgentSettings", () => {
 
     await expandAgent("Codex");
     await fireEvent.input(screen.getByLabelText("Codex arguments"), {
-      target: { value: "\"\"" },
+      target: { value: '""' },
     });
     await fireEvent.click(screen.getByRole("button", { name: "Save workspace agents" }));
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
-        agents: [{
-          key: "codex",
-          label: "Codex",
-          command: ["codex", ""],
-          enabled: true,
-        }],
+        agents: [
+          {
+            key: "codex",
+            label: "Codex",
+            command: ["codex", ""],
+            enabled: true,
+          },
+        ],
       });
     });
   });
@@ -131,12 +129,14 @@ describe("AgentSettings", () => {
 
     render(AgentSettings, {
       props: {
-        agents: [{
-          key: "codex",
-          label: "Codex",
-          command: ["codex"],
-          enabled: true,
-        }],
+        agents: [
+          {
+            key: "codex",
+            label: "Codex",
+            command: ["codex"],
+            enabled: true,
+          },
+        ],
         onUpdate,
       },
     });
@@ -144,8 +144,11 @@ describe("AgentSettings", () => {
     expect(screen.getByLabelText("Codex")).toBeTruthy();
     expect(screen.queryByLabelText("Codex binary")).toBeNull();
     expect(
-      (screen.getByRole("button", { name: "Save workspace agents" }) as HTMLButtonElement)
-        .disabled,
+      (
+        screen.getByRole("button", {
+          name: "Save workspace agents",
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
   });
 
@@ -170,12 +173,14 @@ describe("AgentSettings", () => {
 
     render(AgentSettings, {
       props: {
-        agents: [{
-          key: "codex",
-          label: "Codex",
-          command: ["codex"],
-          enabled: true,
-        }],
+        agents: [
+          {
+            key: "codex",
+            label: "Codex",
+            command: ["codex"],
+            enabled: true,
+          },
+        ],
         onUpdate,
       },
     });
@@ -227,12 +232,14 @@ describe("AgentSettings", () => {
 
     render(AgentSettings, {
       props: {
-        agents: [{
-          key: "codex",
-          label: "Codex",
-          command: [],
-          enabled: false,
-        }],
+        agents: [
+          {
+            key: "codex",
+            label: "Codex",
+            command: [],
+            enabled: false,
+          },
+        ],
         onUpdate,
       },
     });
@@ -265,12 +272,14 @@ describe("AgentSettings", () => {
 
   it("adds custom agents to the saved settings", async () => {
     mockUpdateSettings.mockResolvedValue({
-      agents: [{
-        key: "review",
-        label: "Review Agent",
-        command: ["review-agent", "--strict"],
-        enabled: true,
-      }],
+      agents: [
+        {
+          key: "review",
+          label: "Review Agent",
+          command: ["review-agent", "--strict"],
+          enabled: true,
+        },
+      ],
     });
     const onUpdate = vi.fn();
 
@@ -298,19 +307,23 @@ describe("AgentSettings", () => {
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith({
-        agents: [{
-          key: "review",
-          label: "Review Agent",
-          command: ["review-agent", "--strict"],
-          enabled: true,
-        }],
+        agents: [
+          {
+            key: "review",
+            label: "Review Agent",
+            command: ["review-agent", "--strict"],
+            enabled: true,
+          },
+        ],
       });
     });
-    expect(onUpdate).toHaveBeenCalledWith([{
-      key: "review",
-      label: "Review Agent",
-      command: ["review-agent", "--strict"],
-      enabled: true,
-    }]);
+    expect(onUpdate).toHaveBeenCalledWith([
+      {
+        key: "review",
+        label: "Review Agent",
+        command: ["review-agent", "--strict"],
+        enabled: true,
+      },
+    ]);
   });
 });

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 // jsdom does not ship IntersectionObserver; install a stub that reports the
 // observed element as visible immediately so the viewport-gated render effect
@@ -7,7 +7,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 // the suite so it does not leak into sibling test files.
 type GlobalWithIO = { IntersectionObserver?: unknown };
 type GlobalWithResizeObserver = { ResizeObserver?: unknown };
-type GlobalWithCSSStyleSheet = { CSSStyleSheet?: { prototype: CSSStyleSheet & { replaceSync?: (text: string) => void } } };
+type GlobalWithCSSStyleSheet = {
+  CSSStyleSheet?: {
+    prototype: CSSStyleSheet & { replaceSync?: (text: string) => void };
+  };
+};
 let originalIntersectionObserver: unknown;
 let originalIntersectionObserverExisted = false;
 let originalResizeObserver: unknown;
@@ -41,7 +45,9 @@ beforeAll(() => {
     }
     unobserve(): void {}
     disconnect(): void {}
-    takeRecords(): IntersectionObserverEntry[] { return []; }
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
   }
   (globalThis as GlobalWithIO).IntersectionObserver = IntersectionObserverStub;
 
@@ -54,11 +60,9 @@ beforeAll(() => {
   }
   (globalThis as GlobalWithResizeObserver).ResizeObserver = ResizeObserverStub;
 
-  originalReplaceSync = (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet
-    ?.prototype.replaceSync;
+  originalReplaceSync = (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype.replaceSync;
   if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
-    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync
-      ??= function replaceSync(): void {};
+    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync ??= function replaceSync(): void {};
   }
 });
 
@@ -75,8 +79,9 @@ afterAll(() => {
   }
   if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
     if (originalReplaceSync) {
-      (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync =
-        originalReplaceSync as (text: string) => void;
+      (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync = originalReplaceSync as (
+        text: string,
+      ) => void;
     } else {
       delete (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync;
     }
@@ -86,10 +91,7 @@ afterAll(() => {
 import DiffFile from "./DiffFile.svelte";
 import type { DiffFile as DiffFileType, FilePreview } from "../../api/types.js";
 import { STORES_KEY } from "../../context.js";
-import type {
-  DiffReviewDraftComment,
-  DiffReviewLineRange,
-} from "../../stores/diff-review-draft.svelte.js";
+import type { DiffReviewDraftComment, DiffReviewLineRange } from "../../stores/diff-review-draft.svelte.js";
 import { createDiffStore } from "../../stores/diff.svelte.js";
 import type { ReviewThread } from "./review-thread-context.js";
 
@@ -110,17 +112,24 @@ function makeFile(overrides: Partial<DiffFileType> = {}): DiffFileType {
 -old line
 +new line
 `,
-    hunks: [{
-      old_start: 1,
-      old_count: 3,
-      new_start: 1,
-      new_count: 5,
-      lines: [
-        { type: "context", content: "line 1", old_num: 1, new_num: 1 },
-        { type: "delete", content: "old line", old_num: 2 },
-        { type: "add", content: "new line", new_num: 2 },
-      ],
-    }],
+    hunks: [
+      {
+        old_start: 1,
+        old_count: 3,
+        new_start: 1,
+        new_count: 5,
+        lines: [
+          {
+            type: "context",
+            content: "line 1",
+            old_num: 1,
+            new_num: 1,
+          },
+          { type: "delete", content: "old line", old_num: 2 },
+          { type: "add", content: "new line", new_num: 2 },
+        ],
+      },
+    ],
     ...overrides,
   };
 }
@@ -214,16 +223,18 @@ function renderDiffFile(
         reviewThreads: options.reviewThreads,
       }),
     },
-    context: new Map([[
-      STORES_KEY,
-      {
-        diff,
-        diffReviewDraft,
-        detail: {
-          replyToDiscussion: options.replyToDiscussion ?? (() => Promise.resolve(true)),
+    context: new Map([
+      [
+        STORES_KEY,
+        {
+          diff,
+          diffReviewDraft,
+          detail: {
+            replyToDiscussion: options.replyToDiscussion ?? (() => Promise.resolve(true)),
+          },
         },
-      },
-    ]]),
+      ],
+    ]),
   });
   return { ...result, diff };
 }
@@ -262,12 +273,8 @@ describe("DiffFile", () => {
 
     await waitFor(() => {
       const root = document.querySelector(".pierre-diff")?.shadowRoot;
-      expect(
-        root?.querySelector('[data-diff-path="src/foo.ts"][data-diff-old-line="2"]'),
-      ).toBeTruthy();
-      expect(
-        root?.querySelector('[data-diff-path="src/foo.ts"][data-diff-new-line="2"]'),
-      ).toBeTruthy();
+      expect(root?.querySelector('[data-diff-path="src/foo.ts"][data-diff-old-line="2"]')).toBeTruthy();
+      expect(root?.querySelector('[data-diff-path="src/foo.ts"][data-diff-new-line="2"]')).toBeTruthy();
     });
   });
 
@@ -280,7 +287,9 @@ describe("DiffFile", () => {
       observe(): void {}
       unobserve(): void {}
       disconnect(): void {}
-      takeRecords(): IntersectionObserverEntry[] { return []; }
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
     }
     (globalThis as GlobalWithIO).IntersectionObserver = PendingIntersectionObserverStub;
 
@@ -295,12 +304,14 @@ describe("DiffFile", () => {
   });
 
   it("renders an empty textual diff state without staying stuck loading", async () => {
-    renderDiffFile(makeFile({
-      additions: 0,
-      deletions: 0,
-      patch: "",
-      hunks: [],
-    }));
+    renderDiffFile(
+      makeFile({
+        additions: 0,
+        deletions: 0,
+        patch: "",
+        hunks: [],
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.queryByRole("status")).toBeNull();
@@ -309,12 +320,14 @@ describe("DiffFile", () => {
   });
 
   it("treats nullable hunk payloads as hunkless diffs", async () => {
-    renderDiffFile(makeFile({
-      additions: 0,
-      deletions: 0,
-      patch: "",
-      hunks: null as unknown as DiffFileType["hunks"],
-    }));
+    renderDiffFile(
+      makeFile({
+        additions: 0,
+        deletions: 0,
+        patch: "",
+        hunks: null as unknown as DiffFileType["hunks"],
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.queryByRole("status")).toBeNull();
@@ -368,12 +381,17 @@ describe("DiffFile", () => {
     options: { shiftKey?: boolean } = {},
   ): Promise<void> {
     const button = await findLineCommentButton(line, side);
-    button.dispatchEvent(new MouseEvent("pointerdown", {
-      bubbles: true,
+    button.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        shiftKey: options.shiftKey,
+      }),
+    );
+    await fireEvent.mouseDown(button, {
       button: 0,
       shiftKey: options.shiftKey,
-    }));
-    await fireEvent.mouseDown(button, { button: 0, shiftKey: options.shiftKey });
+    });
     await fireEvent.pointerUp(button, {
       pointerId: 1,
       pointerType: "mouse",
@@ -382,25 +400,18 @@ describe("DiffFile", () => {
     await fireEvent.click(button, { shiftKey: options.shiftKey });
   }
 
-  async function keyboardActivateLineCommentButton(
-    line: number,
-    side: "left" | "right",
-  ): Promise<void> {
+  async function keyboardActivateLineCommentButton(line: number, side: "left" | "right"): Promise<void> {
     const button = await findLineCommentButton(line, side);
     button.focus();
     await fireEvent.click(button);
   }
 
-  async function findLineCommentButton(
-    line: number,
-    side: "left" | "right",
-  ): Promise<HTMLButtonElement> {
+  async function findLineCommentButton(line: number, side: "left" | "right"): Promise<HTMLButtonElement> {
     const sideLabel = side === "left" ? "old" : "new";
     return await waitFor(() => {
       const element = document
         .querySelector(".pierre-diff")
-        ?.shadowRoot
-        ?.querySelector<HTMLButtonElement>(
+        ?.shadowRoot?.querySelector<HTMLButtonElement>(
           `[data-middleman-line-comment-button][aria-label="Comment on ${sideLabel} line ${line}"]`,
         );
       expect(element).toBeTruthy();
@@ -409,19 +420,14 @@ describe("DiffFile", () => {
   }
 
   function selectedPierreLines(): NodeListOf<Element> | undefined {
-    return document
-      .querySelector(".pierre-diff")
-      ?.shadowRoot
-      ?.querySelectorAll("[data-selected-line]");
+    return document.querySelector(".pierre-diff")?.shadowRoot?.querySelectorAll("[data-selected-line]");
   }
 
   function expandedContextLineTexts(): string[] {
     return Array.from(
       document
         .querySelector(".pierre-diff")
-        ?.shadowRoot
-        ?.querySelectorAll<HTMLElement>("[data-content] [data-line-type='context-expanded']")
-        ?? [],
+        ?.shadowRoot?.querySelectorAll<HTMLElement>("[data-content] [data-line-type='context-expanded']") ?? [],
     ).map((line) => line.textContent?.trim() ?? "");
   }
 
@@ -529,10 +535,11 @@ describe("DiffFile", () => {
   });
 
   it("does not create multiline review ranges across separate hunks", async () => {
-    renderDiffFile(makeFile({
-      additions: 2,
-      deletions: 0,
-      patch: `diff --git a/src/foo.ts b/src/foo.ts
+    renderDiffFile(
+      makeFile({
+        additions: 2,
+        deletions: 0,
+        patch: `diff --git a/src/foo.ts b/src/foo.ts
 --- a/src/foo.ts
 +++ b/src/foo.ts
 @@ -1,0 +1,1 @@
@@ -540,31 +547,29 @@ describe("DiffFile", () => {
 @@ -20,0 +20,1 @@
 +second hunk
 `,
-      hunks: [
-        {
-          old_start: 1,
-          old_count: 1,
-          new_start: 1,
-          new_count: 1,
-          lines: [
-            { type: "add", content: "first hunk", new_num: 1 },
-          ],
-        },
-        {
-          old_start: 20,
-          old_count: 1,
-          new_start: 20,
-          new_count: 1,
-          lines: [
-            { type: "add", content: "second hunk", new_num: 20 },
-          ],
-        },
-      ],
-    }), {
-      reviewEnabled: true,
-      diffHeadSHA: "diff-head",
-      nativeMultilineRanges: true,
-    });
+        hunks: [
+          {
+            old_start: 1,
+            old_count: 1,
+            new_start: 1,
+            new_count: 1,
+            lines: [{ type: "add", content: "first hunk", new_num: 1 }],
+          },
+          {
+            old_start: 20,
+            old_count: 1,
+            new_start: 20,
+            new_count: 1,
+            lines: [{ type: "add", content: "second hunk", new_num: 20 }],
+          },
+        ],
+      }),
+      {
+        reviewEnabled: true,
+        diffHeadSHA: "diff-head",
+        nativeMultilineRanges: true,
+      },
+    );
 
     await selectPierreLine(1, "right");
     await selectPierreLine(20, "right", { shiftKey: true });
@@ -579,20 +584,22 @@ describe("DiffFile", () => {
     renderDiffFile(makeFile(), {
       reviewEnabled: true,
       diffHeadSHA: "diff-head",
-      draftComments: [{
-        id: "draft-1",
-        body: "Follow up here",
-        path: "src/foo.ts",
-        side: "right",
-        start_side: "right",
-        start_line: 1,
-        line: 2,
-        new_line: 2,
-        line_type: "add",
-        diff_head_sha: "diff-head",
-        created_at: "2026-03-30T14:01:00Z",
-        updated_at: "2026-03-30T14:01:00Z",
-      }],
+      draftComments: [
+        {
+          id: "draft-1",
+          body: "Follow up here",
+          path: "src/foo.ts",
+          side: "right",
+          start_side: "right",
+          start_line: 1,
+          line: 2,
+          new_line: 2,
+          line_type: "add",
+          diff_head_sha: "diff-head",
+          created_at: "2026-03-30T14:01:00Z",
+          updated_at: "2026-03-30T14:01:00Z",
+        },
+      ],
     });
 
     await waitFor(() => {
@@ -605,26 +612,27 @@ describe("DiffFile", () => {
     renderDiffFile(makeFile(), {
       reviewEnabled: true,
       diffHeadSHA: "diff-head",
-      draftComments: [{
-        id: "draft-existing",
-        body: "Existing draft on this line",
-        path: "src/foo.ts",
-        side: "right",
-        line: 2,
-        new_line: 2,
-        line_type: "add",
-        diff_head_sha: "diff-head",
-        created_at: "2026-03-30T14:01:00Z",
-        updated_at: "2026-03-30T14:01:00Z",
-      }],
+      draftComments: [
+        {
+          id: "draft-existing",
+          body: "Existing draft on this line",
+          path: "src/foo.ts",
+          side: "right",
+          line: 2,
+          new_line: 2,
+          line_type: "add",
+          diff_head_sha: "diff-head",
+          created_at: "2026-03-30T14:01:00Z",
+          updated_at: "2026-03-30T14:01:00Z",
+        },
+      ],
     });
 
     await waitFor(() => {
       expect(screen.getByText("Existing draft on this line")).toBeTruthy();
       const selectedDraftLine = document
         .querySelector(".pierre-diff")
-        ?.shadowRoot
-        ?.querySelector('[data-selected-line][data-diff-new-line="2"]');
+        ?.shadowRoot?.querySelector('[data-selected-line][data-diff-new-line="2"]');
       expect(selectedDraftLine).toBeTruthy();
     });
 
@@ -646,7 +654,8 @@ describe("DiffFile", () => {
     await waitFor(() => {
       expect(screen.getByText("Published review note")).toBeTruthy();
     });
-    const host = document.querySelector("[data-review-thread-id='thread-1']")
+    const host = document
+      .querySelector("[data-review-thread-id='thread-1']")
       ?.closest("[slot='annotation-additions-2']");
     expect(host).toBeTruthy();
   });
@@ -665,17 +674,13 @@ describe("DiffFile", () => {
     const textarea = screen.getByPlaceholderText("Reply to thread");
     expect(textarea).toBe(document.activeElement);
 
-    await fireEvent.input(textarea, { target: { value: "Follow-up reply" } });
+    await fireEvent.input(textarea, {
+      target: { value: "Follow-up reply" },
+    });
     await fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 
     await waitFor(() => {
-      expect(replyToDiscussion).toHaveBeenCalledWith(
-        expect.any(String),
-        "n",
-        1,
-        "thread-1",
-        "Follow-up reply",
-      );
+      expect(replyToDiscussion).toHaveBeenCalledWith(expect.any(String), "n", 1, "thread-1", "Follow-up reply");
     });
   });
 
@@ -683,9 +688,11 @@ describe("DiffFile", () => {
     renderDiffFile(makeFile(), {
       reviewEnabled: true,
       diffHeadSHA: "current-head",
-      reviewThreads: [makeReviewThread({
-        diff_head_sha: "stale-head",
-      })],
+      reviewThreads: [
+        makeReviewThread({
+          diff_head_sha: "stale-head",
+        }),
+      ],
     });
 
     await waitFor(() => {
@@ -698,43 +705,60 @@ describe("DiffFile", () => {
   });
 
   it("does not match added-file threads only because old paths are empty", () => {
-    renderDiffFile(makeFile({
-      path: "src/new.ts",
-      old_path: "",
-      status: "added",
-    }), {
-      reviewEnabled: true,
-      reviewThreads: [makeReviewThread({
-        id: "thread-other-added-file",
-        path: "src/other-new.ts",
+    renderDiffFile(
+      makeFile({
+        path: "src/new.ts",
         old_path: "",
-        body: "Wrong added file note",
-      })],
-    });
+        status: "added",
+      }),
+      {
+        reviewEnabled: true,
+        reviewThreads: [
+          makeReviewThread({
+            id: "thread-other-added-file",
+            path: "src/other-new.ts",
+            old_path: "",
+            body: "Wrong added file note",
+          }),
+        ],
+      },
+    );
 
     expect(screen.queryByText("Wrong added file note")).toBeNull();
   });
 
   it("renders unmatched review threads at the file header", () => {
-    renderDiffFile(makeFile({
-      hunks: [{
-        old_start: 60,
-        old_count: 1,
-        new_start: 60,
-        new_count: 1,
-        lines: [
-          { type: "context", content: "visible context", old_num: 60, new_num: 60 },
+    renderDiffFile(
+      makeFile({
+        hunks: [
+          {
+            old_start: 60,
+            old_count: 1,
+            new_start: 60,
+            new_count: 1,
+            lines: [
+              {
+                type: "context",
+                content: "visible context",
+                old_num: 60,
+                new_num: 60,
+              },
+            ],
+          },
         ],
-      }],
-    }), {
-      reviewThreads: [makeReviewThread({
-        id: "thread-file",
-        line: 1,
-        new_line: 1,
-        line_type: "file",
-        body: "File-level note",
-      })],
-    });
+      }),
+      {
+        reviewThreads: [
+          makeReviewThread({
+            id: "thread-file",
+            line: 1,
+            new_line: 1,
+            line_type: "file",
+            body: "File-level note",
+          }),
+        ],
+      },
+    );
 
     expect(screen.getByText("File-level note")).toBeTruthy();
     expect(screen.getByText("File")).toBeTruthy();
@@ -828,10 +852,20 @@ describe("DiffFile", () => {
           new_start: 1,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 1", old_num: 1, new_num: 1 },
+            {
+              type: "context",
+              content: "shared 1",
+              old_num: 1,
+              new_num: 1,
+            },
             { type: "delete", content: "old early", old_num: 2 },
             { type: "add", content: "new early", new_num: 2 },
-            { type: "context", content: "shared 3", old_num: 3, new_num: 3 },
+            {
+              type: "context",
+              content: "shared 3",
+              old_num: 3,
+              new_num: 3,
+            },
           ],
         },
         {
@@ -840,16 +874,27 @@ describe("DiffFile", () => {
           new_start: 77,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 77", old_num: 77, new_num: 77 },
+            {
+              type: "context",
+              content: "shared 77",
+              old_num: 77,
+              new_num: 77,
+            },
             { type: "delete", content: "old late", old_num: 78 },
             { type: "add", content: "new late", new_num: 78 },
-            { type: "context", content: "shared 79", old_num: 79, new_num: 79 },
+            {
+              type: "context",
+              content: "shared 79",
+              old_num: 79,
+              new_num: 79,
+            },
           ],
         },
       ],
     });
     const { diff } = renderDiffFile(file);
-    const loadFilePreview = vi.spyOn(diff, "loadFilePreview")
+    const loadFilePreview = vi
+      .spyOn(diff, "loadFilePreview")
       .mockImplementation(async (_owner, _name, _number, path, side) => {
         return textPreview(path, side === "old" ? oldText.join("\n") : newText.join("\n"));
       });
@@ -857,8 +902,7 @@ describe("DiffFile", () => {
     const expandButton = await waitFor(() => {
       const button = document
         .querySelector(".pierre-diff")
-        ?.shadowRoot
-        ?.querySelector<HTMLElement>("[data-expand-button]");
+        ?.shadowRoot?.querySelector<HTMLElement>("[data-expand-button]");
       expect(button).toBeTruthy();
       return button!;
     });
@@ -874,20 +918,8 @@ describe("DiffFile", () => {
       expect(expandedLines.every((line) => line.length > 0)).toBe(true);
       expect(expandedLines.some((line) => line.includes("shared 10"))).toBe(true);
     });
-    expect(loadFilePreview).toHaveBeenCalledWith(
-      expect.any(String),
-      "n",
-      1,
-      "src/context.ts",
-      "old",
-    );
-    expect(loadFilePreview).toHaveBeenCalledWith(
-      expect.any(String),
-      "n",
-      1,
-      "src/context.ts",
-      "new",
-    );
+    expect(loadFilePreview).toHaveBeenCalledWith(expect.any(String), "n", 1, "src/context.ts", "old");
+    expect(loadFilePreview).toHaveBeenCalledWith(expect.any(String), "n", 1, "src/context.ts", "new");
   });
 
   it("continues expanding context after full file text is loaded", async () => {
@@ -922,10 +954,20 @@ describe("DiffFile", () => {
           new_start: 1,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 1", old_num: 1, new_num: 1 },
+            {
+              type: "context",
+              content: "shared 1",
+              old_num: 1,
+              new_num: 1,
+            },
             { type: "delete", content: "old early", old_num: 2 },
             { type: "add", content: "new early", new_num: 2 },
-            { type: "context", content: "shared 3", old_num: 3, new_num: 3 },
+            {
+              type: "context",
+              content: "shared 3",
+              old_num: 3,
+              new_num: 3,
+            },
           ],
         },
         {
@@ -934,16 +976,27 @@ describe("DiffFile", () => {
           new_start: 77,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 77", old_num: 77, new_num: 77 },
+            {
+              type: "context",
+              content: "shared 77",
+              old_num: 77,
+              new_num: 77,
+            },
             { type: "delete", content: "old late", old_num: 78 },
             { type: "add", content: "new late", new_num: 78 },
-            { type: "context", content: "shared 79", old_num: 79, new_num: 79 },
+            {
+              type: "context",
+              content: "shared 79",
+              old_num: 79,
+              new_num: 79,
+            },
           ],
         },
       ],
     });
     const { diff } = renderDiffFile(file);
-    const loadFilePreview = vi.spyOn(diff, "loadFilePreview")
+    const loadFilePreview = vi
+      .spyOn(diff, "loadFilePreview")
       .mockImplementation(async (_owner, _name, _number, path, side) => {
         return textPreview(path, side === "old" ? oldText.join("\n") : newText.join("\n"));
       });
@@ -951,8 +1004,7 @@ describe("DiffFile", () => {
     const firstExpandButton = await waitFor(() => {
       const button = document
         .querySelector(".pierre-diff")
-        ?.shadowRoot
-        ?.querySelector<HTMLElement>("[data-expand-button]");
+        ?.shadowRoot?.querySelector<HTMLElement>("[data-expand-button]");
       expect(button).toBeTruthy();
       return button!;
     });
@@ -970,10 +1022,7 @@ describe("DiffFile", () => {
 
     const nextExpandButton = await waitFor(() => {
       const buttons = Array.from(
-        document
-          .querySelector(".pierre-diff")
-          ?.shadowRoot
-          ?.querySelectorAll<HTMLElement>("[data-expand-button]") ?? [],
+        document.querySelector(".pierre-diff")?.shadowRoot?.querySelectorAll<HTMLElement>("[data-expand-button]") ?? [],
       );
       const button = buttons.find((candidate) => candidate !== firstExpandButton);
       expect(button).toBeTruthy();
@@ -1016,10 +1065,20 @@ describe("DiffFile", () => {
           new_start: 1,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 1", old_num: 1, new_num: 1 },
+            {
+              type: "context",
+              content: "shared 1",
+              old_num: 1,
+              new_num: 1,
+            },
             { type: "delete", content: "old early", old_num: 2 },
             { type: "add", content: "new early", new_num: 2 },
-            { type: "context", content: "shared 3", old_num: 3, new_num: 3 },
+            {
+              type: "context",
+              content: "shared 3",
+              old_num: 3,
+              new_num: 3,
+            },
           ],
         },
         {
@@ -1028,15 +1087,27 @@ describe("DiffFile", () => {
           new_start: 77,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 77", old_num: 77, new_num: 77 },
+            {
+              type: "context",
+              content: "shared 77",
+              old_num: 77,
+              new_num: 77,
+            },
             { type: "delete", content: "old late", old_num: 78 },
             { type: "add", content: "new late", new_num: 78 },
-            { type: "context", content: "shared 79", old_num: 79, new_num: 79 },
+            {
+              type: "context",
+              content: "shared 79",
+              old_num: 79,
+              new_num: 79,
+            },
           ],
         },
       ],
     });
-    const { diff } = renderDiffFile(file, { contextExpansionEnabled: false });
+    const { diff } = renderDiffFile(file, {
+      contextExpansionEnabled: false,
+    });
     const loadFilePreview = vi.spyOn(diff, "loadFilePreview");
 
     await waitFor(() => {
@@ -1072,10 +1143,20 @@ describe("DiffFile", () => {
           new_start: 1,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 1", old_num: 1, new_num: 1 },
+            {
+              type: "context",
+              content: "shared 1",
+              old_num: 1,
+              new_num: 1,
+            },
             { type: "delete", content: "old early", old_num: 2 },
             { type: "add", content: "new early", new_num: 2 },
-            { type: "context", content: "shared 3", old_num: 3, new_num: 3 },
+            {
+              type: "context",
+              content: "shared 3",
+              old_num: 3,
+              new_num: 3,
+            },
           ],
         },
         {
@@ -1084,10 +1165,20 @@ describe("DiffFile", () => {
           new_start: 17,
           new_count: 3,
           lines: [
-            { type: "context", content: "shared 17", old_num: 17, new_num: 17 },
+            {
+              type: "context",
+              content: "shared 17",
+              old_num: 17,
+              new_num: 17,
+            },
             { type: "delete", content: "old late", old_num: 18 },
             { type: "add", content: "new late", new_num: 18 },
-            { type: "context", content: "shared 19", old_num: 19, new_num: 19 },
+            {
+              type: "context",
+              content: "shared 19",
+              old_num: 19,
+              new_num: 19,
+            },
           ],
         },
       ],

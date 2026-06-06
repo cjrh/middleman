@@ -12,7 +12,9 @@ test.describe("comment editor autocomplete", () => {
     await editor.click();
     await page.keyboard.type("@a");
 
-    await expect(page.locator(".comment-editor-option").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".comment-editor-option").first()).toBeVisible({
+      timeout: 10_000,
+    });
 
     await editor.dispatchEvent("compositionstart");
 
@@ -67,9 +69,9 @@ test.describe("comment editor autocomplete", () => {
     // commits against an out-of-date range and leaves the trigger chars
     // behind. Waiting for the filtered option ensures currentProps has been
     // swapped to the latest update before we commit.
-    await expect(
-      page.locator(".comment-editor-option").filter({ hasText: "@alice" }),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".comment-editor-option").filter({ hasText: "@alice" })).toBeVisible({
+      timeout: 10_000,
+    });
     await editor.press("Enter");
 
     await expect(editor).toContainText("hello @alice world");
@@ -86,11 +88,13 @@ test.describe("comment editor autocomplete", () => {
     await editor.click();
     await expect(editor).toHaveClass(/ProseMirror-focused/);
     await editor.evaluate((node) => {
-      node.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "2",
-        bubbles: true,
-        cancelable: true,
-      }));
+      node.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "2",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     });
 
     await expect(page).not.toHaveURL(/\/pulls\/board$/);
@@ -100,7 +104,9 @@ test.describe("comment editor autocomplete", () => {
   test("PR comment editor accepts @ mention and submits end-to-end", async ({ page }) => {
     await page.goto("/pulls/github/acme/widgets/5");
     await page.locator(".pull-detail").waitFor({ state: "visible", timeout: 10_000 });
-    await expect(page.getByText("Detail not yet loaded")).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByText("Detail not yet loaded")).toHaveCount(0, {
+      timeout: 10_000,
+    });
 
     const detail = page.locator(".pull-detail");
     const shell = detail.locator(".comment-editor-shell").first();
@@ -111,9 +117,7 @@ test.describe("comment editor autocomplete", () => {
     await editor.click();
     await page.keyboard.type("<script>alert('x')</script> @a");
 
-    const aliceOption = page
-      .locator(".comment-editor-option")
-      .filter({ hasText: "@alice" });
+    const aliceOption = page.locator(".comment-editor-option").filter({ hasText: "@alice" });
     await expect(aliceOption).toBeVisible({ timeout: 10_000 });
     await aliceOption.dispatchEvent("pointerdown");
     await expect(editor).toContainText("@alice");
@@ -121,14 +125,21 @@ test.describe("comment editor autocomplete", () => {
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    await expect(detail.locator(".event-body").filter({ hasText: /@alice/ }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(
+      detail
+        .locator(".event-body")
+        .filter({ hasText: /@alice/ })
+        .first(),
+    ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Select a PR")).toHaveCount(0);
   });
 
   test("issue comment editor accepts # reference and submits end-to-end", async ({ page }) => {
     await page.goto("/issues/github/acme/widgets/12");
     await page.locator(".issue-detail").waitFor({ state: "visible", timeout: 10_000 });
-    await expect(page.getByText("Detail not yet loaded")).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByText("Detail not yet loaded")).toHaveCount(0, {
+      timeout: 10_000,
+    });
 
     const detail = page.locator(".issue-detail");
     const shell = detail.locator(".comment-editor-shell").first();
@@ -138,13 +149,20 @@ test.describe("comment editor autocomplete", () => {
     await expect(submit).toBeVisible();
     await editor.fill("See #1");
 
-    await expect(page.locator(".comment-editor-option").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".comment-editor-option").first()).toBeVisible({
+      timeout: 10_000,
+    });
     await editor.press("Enter");
 
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    await expect(detail.locator(".event-body").filter({ hasText: /See #1/ }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(
+      detail
+        .locator(".event-body")
+        .filter({ hasText: /See #1/ })
+        .first(),
+    ).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Select a PR")).toHaveCount(0);
   });
 });

@@ -20,11 +20,7 @@ function patchForFile(file: DiffFixtureFile): string {
   if (file.is_binary || file.hunks.length === 0) return "";
   const oldPath = file.status === "added" ? "/dev/null" : `a/${file.old_path || file.path}`;
   const newPath = file.status === "deleted" ? "/dev/null" : `b/${file.path}`;
-  const lines = [
-    `diff --git a/${file.old_path || file.path} b/${file.path}`,
-    `--- ${oldPath}`,
-    `+++ ${newPath}`,
-  ];
+  const lines = [`diff --git a/${file.old_path || file.path} b/${file.path}`, `--- ${oldPath}`, `+++ ${newPath}`];
   for (const hunk of file.hunks) {
     lines.push(
       `@@ -${patchRange(hunk.old_start, hunk.old_count)} +${patchRange(hunk.new_start, hunk.new_count)} @@${hunk.section ? ` ${hunk.section}` : ""}`,
@@ -82,23 +78,103 @@ const longLineDiff: DiffResult = withServerDiffData({
           new_count: 16,
           section: "jobs",
           lines: [
-            { type: "context", content: "jobs:", old_num: 10, new_num: 10 },
-            { type: "context", content: "  test:", old_num: 11, new_num: 11 },
-            { type: "context", content: "    runs-on: ubuntu-latest", old_num: 12, new_num: 12 },
-            { type: "delete", content: "    name: Run tests", old_num: 13 },
-            { type: "add", content: "    name: Run tests with cross-browser coverage on multiple platforms and architectures", new_num: 13 },
-            { type: "context", content: "    steps:", old_num: 14, new_num: 14 },
-            { type: "delete", content: "      - run: go test ./...", old_num: 15 },
-            { type: "add", content: "      - run: go build -o ./cmd/e2e-server/e2e-server ./cmd/e2e-server && playwright test --config playwright-e2e.config.ts --project=chromium --grep \"UTC timestamp\"", new_num: 15 },
-            { type: "add", content: "      - run: playwright test --config playwright-e2e.config.ts --project=chromium --reporter=html --output=test-results/cross-browser-coverage", new_num: 16 },
-            { type: "context", content: "  coverage:", old_num: 16, new_num: 17 },
-            { type: "context", content: "    runs-on: ubuntu-latest", old_num: 17, new_num: 18 },
-            { type: "delete", content: "      - run: go test -coverprofile=coverage.out ./...", old_num: 18 },
-            { type: "delete", content: "      - run: go tool cover -html=coverage.out", old_num: 19 },
-            { type: "add", content: "      - run: go test -coverprofile=coverage.out -covermode=atomic -race -shuffle=on -timeout=300s ./internal/... ./cmd/... 2>&1 | tee test-output.log", new_num: 19 },
-            { type: "add", content: "      - run: go tool cover -html=coverage.out -o coverage-report.html && upload-artifact coverage-report.html coverage.out test-output.log", new_num: 20 },
-            { type: "add", content: "      - run: playwright install --with-deps ${{ matrix.browser }} && playwright test --config playwright-e2e.config.ts --project=${{ matrix.browser }}", new_num: 21 },
-            { type: "context", content: "    strategy:", old_num: 20, new_num: 22 },
+            {
+              type: "context",
+              content: "jobs:",
+              old_num: 10,
+              new_num: 10,
+            },
+            {
+              type: "context",
+              content: "  test:",
+              old_num: 11,
+              new_num: 11,
+            },
+            {
+              type: "context",
+              content: "    runs-on: ubuntu-latest",
+              old_num: 12,
+              new_num: 12,
+            },
+            {
+              type: "delete",
+              content: "    name: Run tests",
+              old_num: 13,
+            },
+            {
+              type: "add",
+              content: "    name: Run tests with cross-browser coverage on multiple platforms and architectures",
+              new_num: 13,
+            },
+            {
+              type: "context",
+              content: "    steps:",
+              old_num: 14,
+              new_num: 14,
+            },
+            {
+              type: "delete",
+              content: "      - run: go test ./...",
+              old_num: 15,
+            },
+            {
+              type: "add",
+              content:
+                '      - run: go build -o ./cmd/e2e-server/e2e-server ./cmd/e2e-server && playwright test --config playwright-e2e.config.ts --project=chromium --grep "UTC timestamp"',
+              new_num: 15,
+            },
+            {
+              type: "add",
+              content:
+                "      - run: playwright test --config playwright-e2e.config.ts --project=chromium --reporter=html --output=test-results/cross-browser-coverage",
+              new_num: 16,
+            },
+            {
+              type: "context",
+              content: "  coverage:",
+              old_num: 16,
+              new_num: 17,
+            },
+            {
+              type: "context",
+              content: "    runs-on: ubuntu-latest",
+              old_num: 17,
+              new_num: 18,
+            },
+            {
+              type: "delete",
+              content: "      - run: go test -coverprofile=coverage.out ./...",
+              old_num: 18,
+            },
+            {
+              type: "delete",
+              content: "      - run: go tool cover -html=coverage.out",
+              old_num: 19,
+            },
+            {
+              type: "add",
+              content:
+                "      - run: go test -coverprofile=coverage.out -covermode=atomic -race -shuffle=on -timeout=300s ./internal/... ./cmd/... 2>&1 | tee test-output.log",
+              new_num: 19,
+            },
+            {
+              type: "add",
+              content:
+                "      - run: go tool cover -html=coverage.out -o coverage-report.html && upload-artifact coverage-report.html coverage.out test-output.log",
+              new_num: 20,
+            },
+            {
+              type: "add",
+              content:
+                "      - run: playwright install --with-deps ${{ matrix.browser }} && playwright test --config playwright-e2e.config.ts --project=${{ matrix.browser }}",
+              new_num: 21,
+            },
+            {
+              type: "context",
+              content: "    strategy:",
+              old_num: 20,
+              new_num: 22,
+            },
           ],
         },
       ],
@@ -136,26 +212,31 @@ test.describe("diff highlight backgrounds on horizontal scroll", () => {
     });
 
     await page.goto("/pulls/github/acme/widgets/1/files");
-    await page.locator(".diff-file").first()
-      .waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".diff-file").first().waitFor({ state: "visible", timeout: 10_000 });
 
     // Wait for syntax highlighting on both add and delete lines — highlighting
     // is incremental so we need both row types ready before asserting widths.
     const diffHost = page.locator(".pierre-diff").first();
-    await expect.poll(async () => {
-      return await diffHost.evaluate((host) => {
-        return Boolean(host.shadowRoot?.querySelector(
-          "[data-content] [data-line-type=\"change-addition\"]",
-        ));
-      });
-    }, { timeout: 10_000 }).toBe(true);
-    await expect.poll(async () => {
-      return await diffHost.evaluate((host) => {
-        return Boolean(host.shadowRoot?.querySelector(
-          "[data-content] [data-line-type=\"change-deletion\"]",
-        ));
-      });
-    }, { timeout: 10_000 }).toBe(true);
+    await expect
+      .poll(
+        async () => {
+          return await diffHost.evaluate((host) => {
+            return Boolean(host.shadowRoot?.querySelector('[data-content] [data-line-type="change-addition"]'));
+          });
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () => {
+          return await diffHost.evaluate((host) => {
+            return Boolean(host.shadowRoot?.querySelector('[data-content] [data-line-type="change-deletion"]'));
+          });
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     // Verify the Pierre code grid and content column are present.
     const widths = await diffHost.evaluate((host) => {
@@ -178,13 +259,17 @@ test.describe("diff highlight backgrounds on horizontal scroll", () => {
       const root = host.shadowRoot;
       const content = root?.querySelector("[data-content]");
       if (!content) {
-        return { contentWidth: 0, addWidths: [] as number[], delWidths: [] as number[] };
+        return {
+          contentWidth: 0,
+          addWidths: [] as number[],
+          delWidths: [] as number[],
+        };
       }
       const contentWidth = content.getBoundingClientRect().width;
-      const adds = [...content.querySelectorAll("[data-line-type=\"change-addition\"]")].map(
+      const adds = [...content.querySelectorAll('[data-line-type="change-addition"]')].map(
         (r) => r.getBoundingClientRect().width,
       );
-      const dels = [...content.querySelectorAll("[data-line-type=\"change-deletion\"]")].map(
+      const dels = [...content.querySelectorAll('[data-line-type="change-deletion"]')].map(
         (r) => r.getBoundingClientRect().width,
       );
       return { contentWidth, addWidths: adds, delWidths: dels };

@@ -8,10 +8,14 @@ test.beforeEach(async ({ page }) => {
 test("? opens the cheatsheet and shows j/k under On this view", async ({ page }) => {
   await page.goto("/pulls");
   await page.keyboard.press("?");
-  const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  const sheet = page.getByRole("dialog", {
+    name: "Keyboard shortcuts",
+  });
   await expect(sheet).toBeVisible();
   // j and k navigate PRs on /pulls — they should appear under "On this view".
-  const onThisView = sheet.locator(".cheatsheet-section", { hasText: "On this view" });
+  const onThisView = sheet.locator(".cheatsheet-section", {
+    hasText: "On this view",
+  });
   await expect(onThisView).toContainText(/Next pull request|Previous pull request/i);
 });
 

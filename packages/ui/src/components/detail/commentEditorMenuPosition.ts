@@ -22,9 +22,7 @@ interface MenuPosition {
   maxWidth: number;
 }
 
-export function computeCommentEditorMenuPosition(
-  input: MenuPositionInput,
-): MenuPosition {
+export function computeCommentEditorMenuPosition(input: MenuPositionInput): MenuPosition {
   const availableWidth = Math.max(0, input.viewportWidth - VIEWPORT_MARGIN * 2);
   const maxWidth = Math.min(MENU_MAX_WIDTH, availableWidth);
   const width = Math.max(Math.min(maxWidth, availableWidth), Math.min(MENU_MIN_WIDTH, availableWidth));
@@ -34,10 +32,7 @@ export function computeCommentEditorMenuPosition(
   const fitsBelow = belowTop + input.menuHeight <= input.viewportHeight - VIEWPORT_MARGIN;
 
   const unclampedLeft = input.caretRect.left + input.caretRect.width;
-  const left = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(unclampedLeft, input.viewportWidth - VIEWPORT_MARGIN - width),
-  );
+  const left = Math.max(VIEWPORT_MARGIN, Math.min(unclampedLeft, input.viewportWidth - VIEWPORT_MARGIN - width));
 
   return {
     top: fitsBelow ? belowTop : Math.max(VIEWPORT_MARGIN, aboveTop),

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   addSessionToTree,
   closeSessionInTree,
@@ -32,13 +32,7 @@ describe("terminal layout tree", () => {
   });
 
   it("clamps split ratios", () => {
-    const root = splitPane(
-      createLeaf("ws-1_a", "leaf-a"),
-      "leaf-a",
-      "ws-1_b",
-      "vertical",
-      "split-a",
-    );
+    const root = splitPane(createLeaf("ws-1_a", "leaf-a"), "leaf-a", "ws-1_b", "vertical", "split-a");
 
     const updated = updateSplitRatio(root, "split-a", 0.98);
 
@@ -46,25 +40,16 @@ describe("terminal layout tree", () => {
   });
 
   it("moves an existing session into another pane as a split", () => {
-    const root = splitPane(
-      createLeaf("ws-1_a", "leaf-a"),
-      "leaf-a",
-      "ws-1_b",
-      "horizontal",
-      "split-a",
-    );
+    const root = splitPane(createLeaf("ws-1_a", "leaf-a"), "leaf-a", "ws-1_b", "horizontal", "split-a");
 
-    const moved = splitSessionIntoPane(
-      root,
-      "leaf-a",
-      "ws-1_b",
-      "vertical",
-      "after",
-    );
+    const moved = splitSessionIntoPane(root, "leaf-a", "ws-1_b", "vertical", "after");
 
     expect(collectSessionKeys(moved)).toEqual(["ws-1_a", "ws-1_b"]);
     expect(countLeaves(moved)).toBe(2);
-    expect(moved).toMatchObject({ type: "split", direction: "vertical" });
+    expect(moved).toMatchObject({
+      type: "split",
+      direction: "vertical",
+    });
   });
 
   it("maps pointer position to split edges only near pane edges", () => {

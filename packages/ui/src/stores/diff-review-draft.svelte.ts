@@ -1,10 +1,6 @@
 import type { MiddlemanClient } from "../types.js";
 import type { components } from "../api/generated/schema.js";
-import {
-  providerItemPath,
-  providerRouteParams,
-  type ProviderRouteRef,
-} from "../api/provider-routes.js";
+import { providerItemPath, providerRouteParams, type ProviderRouteRef } from "../api/provider-routes.js";
 
 export type DiffReviewDraft = components["schemas"]["DiffReviewDraftResponse"];
 export type DiffReviewDraftComment = components["schemas"]["DiffReviewDraftComment"];
@@ -12,16 +8,10 @@ export type DiffReviewLineRange = components["schemas"]["DiffReviewLineRange"];
 
 export interface DiffReviewDraftStoreOptions {
   client: MiddlemanClient;
-  onPublished?: (
-    ref: ProviderRouteRef,
-    number: number,
-  ) => Promise<void> | void;
+  onPublished?: (ref: ProviderRouteRef, number: number) => Promise<void> | void;
 }
 
-function apiErrorMessage(
-  error: { detail?: string; title?: string } | undefined,
-  fallback: string,
-): string {
+function apiErrorMessage(error: { detail?: string; title?: string } | undefined, fallback: string): string {
   return error?.detail ?? error?.title ?? fallback;
 }
 
@@ -139,10 +129,7 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     }
   }
 
-  function setRouteContext(
-    nextRef: ProviderRouteRef,
-    nextNumber: number,
-  ): void {
+  function setRouteContext(nextRef: ProviderRouteRef, nextNumber: number): void {
     const changed =
       !ref ||
       ref.provider !== nextRef.provider ||
@@ -188,10 +175,9 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     loading = true;
     storeError = null;
     try {
-      const { data, error, response } = await apiClient.GET(
-        providerItemPath("pulls", ref, "/review-draft"),
-        { params },
-      );
+      const { data, error, response } = await apiClient.GET(providerItemPath("pulls", ref, "/review-draft"), {
+        params,
+      });
       if (!data) {
         throw new Error(apiErrorMessage(error, `HTTP ${response.status}`));
       }
@@ -211,10 +197,7 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     }
   }
 
-  async function createComment(
-    body: string,
-    range: DiffReviewLineRange,
-  ): Promise<boolean> {
+  async function createComment(body: string, range: DiffReviewLineRange): Promise<boolean> {
     if (!enabled || !ref) return false;
     const params = currentParams();
     if (!params) return false;
@@ -226,13 +209,10 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     storeError = null;
     storeWarning = null;
     try {
-      const { data, error, response } = await apiClient.POST(
-        providerItemPath("pulls", ref, "/review-draft/comments"),
-        {
-          params,
-          body: { body, range },
-        },
-      );
+      const { data, error, response } = await apiClient.POST(providerItemPath("pulls", ref, "/review-draft/comments"), {
+        params,
+        body: { body, range },
+      });
       if (!data) {
         throw new Error(apiErrorMessage(error, `HTTP ${response.status}`));
       }
@@ -302,10 +282,10 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     storeError = null;
     storeWarning = null;
     try {
-      const { data, error, response } = await apiClient.POST(
-        providerItemPath("pulls", ref, "/review-draft/publish"),
-        { params, body: { action, body } },
-      );
+      const { data, error, response } = await apiClient.POST(providerItemPath("pulls", ref, "/review-draft/publish"), {
+        params,
+        body: { action, body },
+      });
       if (!response.ok) {
         throw new Error(apiErrorMessage(error, `HTTP ${response.status}`));
       }
@@ -347,10 +327,9 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     storeError = null;
     storeWarning = null;
     try {
-      const { error, response } = await apiClient.DELETE(
-        providerItemPath("pulls", ref, "/review-draft"),
-        { params },
-      );
+      const { error, response } = await apiClient.DELETE(providerItemPath("pulls", ref, "/review-draft"), {
+        params,
+      });
       if (!response.ok) {
         throw new Error(apiErrorMessage(error, `HTTP ${response.status}`));
       }
@@ -367,10 +346,7 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     }
   }
 
-  async function setThreadResolved(
-    threadID: string,
-    resolved: boolean,
-  ): Promise<boolean> {
+  async function setThreadResolved(threadID: string, resolved: boolean): Promise<boolean> {
     if (!ref || !number) return false;
     const params = currentParams();
     if (!params) return false;
@@ -381,20 +357,15 @@ export function createDiffReviewDraftStore(opts: DiffReviewDraftStoreOptions) {
     storeError = null;
     storeWarning = null;
     try {
-      const path = resolved
-        ? "/review-threads/{thread_id}/resolve"
-        : "/review-threads/{thread_id}/unresolve";
-      const { error, response } = await apiClient.POST(
-        providerItemPath("pulls", ref, path),
-        {
-          params: {
-            path: {
-              ...params.path,
-              thread_id: threadID,
-            },
+      const path = resolved ? "/review-threads/{thread_id}/resolve" : "/review-threads/{thread_id}/unresolve";
+      const { error, response } = await apiClient.POST(providerItemPath("pulls", ref, path), {
+        params: {
+          path: {
+            ...params.path,
+            thread_id: threadID,
           },
         },
-      );
+      });
       if (!response.ok) {
         throw new Error(apiErrorMessage(error, `HTTP ${response.status}`));
       }

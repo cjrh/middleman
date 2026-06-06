@@ -38,9 +38,7 @@ function stripHostPrefix(value: string, platformHost: string): string {
   return value.replace(/^[^/]+\//, "");
 }
 
-export function buildRepoTree(
-  options: readonly RepoTreeOption[],
-): HostNode[] {
+export function buildRepoTree(options: readonly RepoTreeOption[]): HostNode[] {
   const hosts = new Map<string, HostNode>();
 
   for (const option of options) {
@@ -82,9 +80,7 @@ export function buildRepoTree(
     });
   }
 
-  const sorted = [...hosts.values()].sort((a, b) =>
-    a.label.localeCompare(b.label),
-  );
+  const sorted = [...hosts.values()].sort((a, b) => a.label.localeCompare(b.label));
   for (const host of sorted) {
     host.children.sort((a, b) => a.label.localeCompare(b.label));
     for (const owner of host.children) {
@@ -113,14 +109,10 @@ export interface VisibleRowsOptions {
   query?: string;
 }
 
-export function visibleRows(
-  tree: readonly HostNode[],
-  { isCollapsed, query }: VisibleRowsOptions,
-): VisibleRow[] {
+export function visibleRows(tree: readonly HostNode[], { isCollapsed, query }: VisibleRowsOptions): VisibleRow[] {
   const q = query?.trim().toLowerCase() ?? "";
   const filtering = q !== "";
-  const matches = (leaf: RepoLeaf) =>
-    !filtering || leaf.value.toLowerCase().includes(q);
+  const matches = (leaf: RepoLeaf) => !filtering || leaf.value.toLowerCase().includes(q);
 
   // Prune to the owners/hosts that still have a matching leaf, but keep a
   // reference to the ORIGINAL (unpruned) node alongside the matching leaves.
@@ -131,7 +123,10 @@ export function visibleRows(
     .map((host) => ({
       original: host,
       owners: host.children
-        .map((owner) => ({ original: owner, matchingLeaves: owner.children.filter(matches) }))
+        .map((owner) => ({
+          original: owner,
+          matchingLeaves: owner.children.filter(matches),
+        }))
         .filter((owner) => owner.matchingLeaves.length > 0),
     }))
     .filter((host) => host.owners.length > 0);
@@ -144,7 +139,12 @@ export function visibleRows(
     const ownerDepth = singleHost ? 0 : 1;
     if (!singleHost) {
       const hostExpanded = expandedOf(host.original.id);
-      rows.push({ node: host.original, depth: 0, hasChildren: true, expanded: hostExpanded });
+      rows.push({
+        node: host.original,
+        depth: 0,
+        hasChildren: true,
+        expanded: hostExpanded,
+      });
       if (!hostExpanded) continue;
     }
     for (const owner of host.owners) {
@@ -192,10 +192,7 @@ export function collectLeafValues(node: RepoTreeNodeData): string[] {
   return values;
 }
 
-export function nodeSelectionState(
-  node: RepoTreeNodeData,
-  active: ReadonlySet<string>,
-): SelectionState {
+export function nodeSelectionState(node: RepoTreeNodeData, active: ReadonlySet<string>): SelectionState {
   const leaves = collectLeafValues(node);
   if (leaves.length === 0) return "unchecked";
   let selected = 0;
@@ -205,10 +202,7 @@ export function nodeSelectionState(
   return "partial";
 }
 
-export function toggleSubtree(
-  node: RepoTreeNodeData,
-  activeValues: readonly string[],
-): string[] {
+export function toggleSubtree(node: RepoTreeNodeData, activeValues: readonly string[]): string[] {
   const leaves = collectLeafValues(node);
   if (nodeSelectionState(node, new Set(activeValues)) === "checked") {
     const remove = new Set(leaves);

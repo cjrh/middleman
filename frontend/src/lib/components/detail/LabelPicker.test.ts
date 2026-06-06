@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import LabelPicker from "../../../../../packages/ui/src/components/detail/LabelPicker.svelte";
 import type { Label } from "@middleman/ui/api/types";
 
@@ -31,7 +31,9 @@ describe("LabelPicker", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: /bug/i }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("menuitemcheckbox", { name: /triage/i }).getAttribute("aria-checked")).toBe("false");
 
-    await fireEvent.input(screen.getByLabelText("Filter labels"), { target: { value: "tri" } });
+    await fireEvent.input(screen.getByLabelText("Filter labels"), {
+      target: { value: "tri" },
+    });
 
     expect(screen.queryByRole("menuitemcheckbox", { name: /bug/i })).toBeNull();
     expect(screen.getByRole("menuitemcheckbox", { name: /triage/i })).toBeTruthy();

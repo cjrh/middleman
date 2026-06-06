@@ -1,20 +1,8 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-} from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  DiffFile,
-  DiffResult,
-  FilesResult,
-} from "../../api/types.js";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import type { DiffFile, DiffResult, FilesResult } from "../../api/types.js";
 import { STORES_KEY } from "../../context.js";
-import type {
-  DiffScrollTarget,
-  DiffStore,
-} from "../../stores/diff.svelte.js";
+import type { DiffScrollTarget, DiffStore } from "../../stores/diff.svelte.js";
 
 vi.mock("./DiffFile.svelte", async () => ({
   default: (await import("./DiffViewTestFile.svelte")).default,
@@ -45,24 +33,26 @@ function makeFileWithLine(path: string, line: number): DiffFile {
   return {
     ...makeFile(path),
     patch: `@@ -${line},1 +${line},1 @@\n line ${line}\n`,
-    hunks: [{
-      old_start: line,
-      old_count: 1,
-      new_start: line,
-      new_count: 1,
-      lines: [{
-        type: "context",
-        content: `line ${line}`,
-        old_num: line,
-        new_num: line,
-      }],
-    }],
+    hunks: [
+      {
+        old_start: line,
+        old_count: 1,
+        new_start: line,
+        new_count: 1,
+        lines: [
+          {
+            type: "context",
+            content: `line ${line}`,
+            old_num: line,
+            new_num: line,
+          },
+        ],
+      },
+    ],
   };
 }
 
-function makeDiffStore(
-  overrides: Partial<DiffStore> = {},
-): DiffStore {
+function makeDiffStore(overrides: Partial<DiffStore> = {}): DiffStore {
   const activeFile = overrides.getActiveFile?.() ?? "a.ts";
   const diff: DiffResult = {
     stale: false,
@@ -261,10 +251,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.filePath === "b.ts"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.filePath === "b.ts") {
         const diffArea = document.querySelector(".diff-area") as HTMLDivElement;
         const top = 460 - diffArea.scrollTop;
         return {
@@ -327,10 +314,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.filePath === "b.ts"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.filePath === "b.ts") {
         const diffArea = document.querySelector(".diff-area") as HTMLDivElement;
         const top = 460 - diffArea.scrollTop;
         return {
@@ -393,10 +377,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.filePath === "b.ts"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.filePath === "b.ts") {
         targetMeasurements += 1;
         if (targetMeasurements === 1) {
           return {
@@ -475,11 +456,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.diffPath === "b.ts" &&
-        this.dataset.diffNewLine === "2"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.diffPath === "b.ts" && this.dataset.diffNewLine === "2") {
         const diffArea = document.querySelector(".diff-area") as HTMLDivElement;
         const top = 460 - diffArea.scrollTop;
         return {
@@ -507,7 +484,11 @@ describe("DiffView", () => {
       const diff = makeDiffStore({
         getDiff: () => result,
         getVisibleDiffFiles: () => files,
-        getScrollTarget: () => ({ path: "b.ts", line: 2, side: "right" }),
+        getScrollTarget: () => ({
+          path: "b.ts",
+          line: 2,
+          side: "right",
+        }),
         consumeScrollTarget,
       });
 
@@ -543,11 +524,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.diffPath === "b.ts" &&
-        this.dataset.diffNewLine === "42"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.diffPath === "b.ts" && this.dataset.diffNewLine === "42") {
         const diffArea = document.querySelector(".diff-area") as HTMLDivElement;
         const top = 460 - diffArea.scrollTop;
         return {
@@ -562,10 +539,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.filePath === "b.ts"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.filePath === "b.ts") {
         return {
           top: 460,
           bottom: 520,
@@ -591,7 +565,11 @@ describe("DiffView", () => {
       const diff = makeDiffStore({
         getDiff: () => result,
         getVisibleDiffFiles: () => files,
-        getScrollTarget: () => ({ path: "b.ts", line: 42, side: "right" }),
+        getScrollTarget: () => ({
+          path: "b.ts",
+          line: 42,
+          side: "right",
+        }),
         consumeScrollTarget,
       });
 
@@ -631,10 +609,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.filePath === "b.ts"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.filePath === "b.ts") {
         return {
           top: 120,
           bottom: 180,
@@ -660,7 +635,11 @@ describe("DiffView", () => {
       const diff = makeDiffStore({
         getDiff: () => result,
         getVisibleDiffFiles: () => files,
-        getScrollTarget: () => ({ path: "b.ts", line: 42, side: "right" }),
+        getScrollTarget: () => ({
+          path: "b.ts",
+          line: 42,
+          side: "right",
+        }),
         consumeScrollTarget,
       });
 
@@ -705,10 +684,7 @@ describe("DiffView", () => {
           toJSON: () => ({}),
         } as DOMRect;
       }
-      if (
-        this instanceof HTMLElement &&
-        this.dataset.filePath === "b.ts"
-      ) {
+      if (this instanceof HTMLElement && this.dataset.filePath === "b.ts") {
         return {
           top: 120,
           bottom: 180,

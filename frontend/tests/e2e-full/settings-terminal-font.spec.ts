@@ -1,16 +1,6 @@
 import { execFileSync } from "node:child_process";
-import {
-  expect,
-  request as playwrightRequest,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
-import {
-  startIsolatedE2EServer,
-  startIsolatedWorkspaceE2EServer,
-  type IsolatedE2EServer,
-} from "./support/e2eServer";
+import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from "@playwright/test";
+import { startIsolatedE2EServer, startIsolatedWorkspaceE2EServer, type IsolatedE2EServer } from "./support/e2eServer";
 
 let isolatedServer: IsolatedE2EServer | undefined;
 let api: APIRequestContext | undefined;
@@ -44,10 +34,7 @@ async function waitForWorkspaceReady(
       return workspace;
     }
     if (workspace.status === "error") {
-      throw new Error(
-        workspace.error_message ??
-          `workspace ${workspaceId} failed to become ready`,
-      );
+      throw new Error(workspace.error_message ?? `workspace ${workspaceId} failed to become ready`);
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -56,12 +43,10 @@ async function waitForWorkspaceReady(
 }
 
 async function terminalScreenSizeKey(page: Page): Promise<string> {
-  return await page
-    .locator(".terminal-container .xterm-screen")
-    .evaluate((element) => {
-      const style = getComputedStyle(element);
-      return `${style.width}x${style.height}`;
-    });
+  return await page.locator(".terminal-container .xterm-screen").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return `${style.width}x${style.height}`;
+  });
 }
 
 test.beforeAll(async () => {
@@ -76,13 +61,9 @@ test.afterAll(async () => {
   await isolatedServer?.stop();
 });
 
-test("settings saves and reloads workspace terminal options", async ({
-  page,
-}) => {
+test("settings saves and reloads workspace terminal options", async ({ page }) => {
   await page.goto(`${isolatedServer!.info.base_url}/settings`);
-  await page
-    .locator(".settings-page")
-    .waitFor({ state: "visible", timeout: 10_000 });
+  await page.locator(".settings-page").waitFor({ state: "visible", timeout: 10_000 });
 
   const input = page.getByLabel("Monospace font family");
   const fontSize = page.getByLabel("Font size");
@@ -91,7 +72,10 @@ test("settings saves and reloads workspace terminal options", async ({
   const letterSpacing = page.getByLabel("Letter spacing");
   const cursorBlink = page.getByLabel("Cursor blink");
   const renderer = page.getByLabel("Terminal renderer");
-  const saveButton = page.getByRole("button", { name: "Save", exact: true });
+  const saveButton = page.getByRole("button", {
+    name: "Save",
+    exact: true,
+  });
   await expect(input).toHaveValue("");
   await expect(fontSize).toHaveValue("14");
   await expect(scrollback).toHaveValue("1000");
@@ -110,17 +94,12 @@ test("settings saves and reloads workspace terminal options", async ({
   await input.pressSequentially('"Iosevka Term", monospace');
   await expect(saveButton).toBeEnabled();
   const saveResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/api/v1/settings") &&
-      response.request().method() === "PUT",
+    (response) => response.url().endsWith("/api/v1/settings") && response.request().method() === "PUT",
   );
   await saveButton.click();
   const saveResponse = await saveResponsePromise;
   const saveBody = await saveResponse.text();
-  expect(
-    saveResponse.status(),
-    `PUT /api/v1/settings failed: ${saveBody}`,
-  ).toBe(200);
+  expect(saveResponse.status(), `PUT /api/v1/settings failed: ${saveBody}`).toBe(200);
 
   await expect
     .poll(async () => {
@@ -154,12 +133,8 @@ test("settings saves and reloads workspace terminal options", async ({
     });
 
   await page.reload();
-  await page
-    .locator(".settings-page")
-    .waitFor({ state: "visible", timeout: 10_000 });
-  await expect(page.getByLabel("Monospace font family")).toHaveValue(
-    '"Iosevka Term", monospace',
-  );
+  await page.locator(".settings-page").waitFor({ state: "visible", timeout: 10_000 });
+  await expect(page.getByLabel("Monospace font family")).toHaveValue('"Iosevka Term", monospace');
   await expect(page.getByLabel("Font size")).toHaveValue("18");
   await expect(page.getByLabel("Scrollback")).toHaveValue("5000");
   await expect(page.getByLabel("Line height")).toHaveValue("1.15");
@@ -171,9 +146,7 @@ test("settings saves and reloads workspace terminal options", async ({
 test.describe("terminal options popover", () => {
   test.describe.configure({ timeout: lockedWorkspaceTestTimeoutMs });
 
-  test("live previews, reverts unsaved changes, and saves from the toolbar", async ({
-    page,
-  }) => {
+  test("live previews, reverts unsaved changes, and saves from the toolbar", async ({ page }) => {
     test.skip(
       !hasCommand("git") || !hasCommand("tmux", ["-V"]),
       "git and tmux are required for the real workspace flow",
@@ -187,65 +160,37 @@ test.describe("terminal options popover", () => {
         baseURL: workspaceServer.info.base_url,
       });
 
-      const createResponse = await workspaceApi.post(
-        "/api/v1/issues/github/acme/widgets/10/workspace",
-        { data: {} },
-      );
+      const createResponse = await workspaceApi.post("/api/v1/issues/github/acme/widgets/10/workspace", {
+        data: {},
+      });
       expect(createResponse.status()).toBe(202);
-      const workspace =
-        (await createResponse.json()) as WorkspaceStatusResponse;
+      const workspace = (await createResponse.json()) as WorkspaceStatusResponse;
       await waitForWorkspaceReady(workspaceApi, workspace.id);
 
       await page.addInitScript((workspaceId) => {
-        localStorage.setItem(
-          `middleman-workspace-active-tab:${workspaceId}`,
-          "shell",
-        );
+        localStorage.setItem(`middleman-workspace-active-tab:${workspaceId}`, "shell");
       }, workspace.id);
 
-      await page.goto(
-        `${workspaceServer.info.base_url}/terminal/${workspace.id}`,
-      );
-      await expect(
-        page.locator(".terminal-container .xterm-screen"),
-      ).toBeVisible();
-      await expect
-        .poll(() => terminalScreenSizeKey(page))
-        .not.toBe("0pxx0px");
+      await page.goto(`${workspaceServer.info.base_url}/terminal/${workspace.id}`);
+      await expect(page.locator(".terminal-container .xterm-screen")).toBeVisible();
+      await expect.poll(() => terminalScreenSizeKey(page)).not.toBe("0pxx0px");
       const initialScreenSize = await terminalScreenSizeKey(page);
 
-      await page
-        .getByRole("button", { name: "Terminal options" })
-        .click();
-      await expect(
-        page.getByRole("dialog", { name: "Terminal options" }),
-      ).toBeVisible();
+      await page.getByRole("button", { name: "Terminal options" }).click();
+      await expect(page.getByRole("dialog", { name: "Terminal options" })).toBeVisible();
       await page.getByLabel("Font size").fill("20");
-      await expect
-        .poll(() => terminalScreenSizeKey(page))
-        .not.toBe(initialScreenSize);
+      await expect.poll(() => terminalScreenSizeKey(page)).not.toBe(initialScreenSize);
 
       await page.keyboard.press("Escape");
-      await expect(
-        page.getByRole("dialog", { name: "Terminal options" }),
-      ).toBeHidden();
-      await expect
-        .poll(() => terminalScreenSizeKey(page))
-        .toBe(initialScreenSize);
+      await expect(page.getByRole("dialog", { name: "Terminal options" })).toBeHidden();
+      await expect.poll(() => terminalScreenSizeKey(page)).toBe(initialScreenSize);
 
-      await page
-        .getByRole("button", { name: "Terminal options" })
-        .click();
+      await page.getByRole("button", { name: "Terminal options" }).click();
       await page.getByLabel("Font size").fill("18");
-      await expect
-        .poll(() => terminalScreenSizeKey(page))
-        .not.toBe(initialScreenSize);
+      await expect.poll(() => terminalScreenSizeKey(page)).not.toBe(initialScreenSize);
       let releaseSettingsSave: (() => void) | undefined;
       await page.route("**/api/v1/settings", async (route) => {
-        if (
-          route.request().method() === "PUT" &&
-          releaseSettingsSave === undefined
-        ) {
+        if (route.request().method() === "PUT" && releaseSettingsSave === undefined) {
           await new Promise<void>((resolve) => {
             releaseSettingsSave = resolve;
           });
@@ -253,25 +198,16 @@ test.describe("terminal options popover", () => {
         await route.continue();
       });
       const saveResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/settings") &&
-          response.request().method() === "PUT",
+        (response) => response.url().endsWith("/api/v1/settings") && response.request().method() === "PUT",
       );
       await page.getByRole("button", { name: "Save", exact: true }).click();
-      await expect
-        .poll(() => releaseSettingsSave !== undefined)
-        .toBe(true);
+      await expect.poll(() => releaseSettingsSave !== undefined).toBe(true);
       await page.keyboard.press("Escape");
-      await expect(
-        page.getByRole("dialog", { name: "Terminal options" }),
-      ).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Terminal options" })).toBeVisible();
       releaseSettingsSave?.();
       const saveResponse = await saveResponsePromise;
       const saveBody = await saveResponse.text();
-      expect(
-        saveResponse.status(),
-        `PUT /api/v1/settings failed: ${saveBody}`,
-      ).toBe(200);
+      expect(saveResponse.status(), `PUT /api/v1/settings failed: ${saveBody}`).toBe(200);
 
       await expect
         .poll(async () => {
@@ -284,9 +220,7 @@ test.describe("terminal options popover", () => {
         .toBe(18);
 
       await page.keyboard.press("Escape");
-      await expect
-        .poll(() => terminalScreenSizeKey(page))
-        .not.toBe(initialScreenSize);
+      await expect.poll(() => terminalScreenSizeKey(page)).not.toBe(initialScreenSize);
     } finally {
       await workspaceApi?.dispose();
       await workspaceServer?.stop();

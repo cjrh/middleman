@@ -1,31 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import WorkspaceFirstRunPanel from "./WorkspaceFirstRunPanel.svelte";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- test helper needs dynamic window access
 const win = window as any;
 
 interface SetupArgs {
   ghAuthed: boolean;
   ghAvailable?: boolean;
-  handlers?: Partial<
-    Record<string, (ctx: unknown) => CommandResult | Promise<CommandResult>>
-  >;
+  handlers?: Partial<Record<string, (ctx: unknown) => CommandResult | Promise<CommandResult>>>;
 }
 
-function setupConfig({
-  ghAuthed,
-  ghAvailable = true,
-  handlers = {},
-}: SetupArgs): void {
+function setupConfig({ ghAuthed, ghAvailable = true, handlers = {} }: SetupArgs): void {
   win.__middleman_config = {
     actions: {
       project: [
@@ -78,9 +64,7 @@ describe("WorkspaceFirstRunPanel", () => {
         name: /Add an existing local repository/i,
       }),
     ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /Clone a repository/i }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Clone a repository/i })).toBeTruthy();
     expect(
       screen.getByRole("button", {
         name: /Connect a GitHub repository/i,
@@ -96,23 +80,22 @@ describe("WorkspaceFirstRunPanel", () => {
       name: /Connect a GitHub repository/i,
     });
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(
-      screen.getByText("Run gh auth login to use this option."),
-    ).toBeTruthy();
+    expect(screen.getByText("Run gh auth login to use this option.")).toBeTruthy();
   });
 
   it("uses an install-gh recovery hint when gh is unavailable", () => {
     setupConfig({ ghAuthed: false, ghAvailable: false });
     render(WorkspaceFirstRunPanel);
 
-    expect(
-      screen.getByText("Install gh to use this option."),
-    ).toBeTruthy();
+    expect(screen.getByText("Install gh to use this option.")).toBeTruthy();
   });
 
   it("invokes the action handler when the user clicks", async () => {
     const handler = vi.fn().mockResolvedValue({ ok: true });
-    setupConfig({ ghAuthed: true, handlers: { "add-existing": handler } });
+    setupConfig({
+      ghAuthed: true,
+      handlers: { "add-existing": handler },
+    });
     render(WorkspaceFirstRunPanel);
 
     const button = screen.getByRole("button", {
@@ -132,12 +115,8 @@ describe("WorkspaceFirstRunPanel", () => {
     setupConfig({ ghAuthed: true, handlers: { clone: handler } });
     render(WorkspaceFirstRunPanel);
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: /Clone a repository/i }),
-    );
-    expect(
-      await screen.findByText("Couldn't reach the remote"),
-    ).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: /Clone a repository/i }));
+    expect(await screen.findByText("Couldn't reach the remote")).toBeTruthy();
   });
 
   it("renders an upgrade-host hint when the action is not registered", async () => {
@@ -154,11 +133,11 @@ describe("WorkspaceFirstRunPanel", () => {
     render(WorkspaceFirstRunPanel);
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /Add an existing local repository/i }),
+      screen.getByRole("button", {
+        name: /Add an existing local repository/i,
+      }),
     );
-    expect(
-      await screen.findByText(/not available in this build/i),
-    ).toBeTruthy();
+    expect(await screen.findByText(/not available in this build/i)).toBeTruthy();
   });
 
   it("renders the tooling status block beneath the actions", () => {
@@ -172,15 +151,17 @@ describe("WorkspaceFirstRunPanel", () => {
     win.__middleman_config.workspace = {
       selectedHostKey: "gitlab-main",
       selectedWorktreeKey: null,
-      hosts: [{
-        key: "gitlab-main",
-        label: "GitLab",
-        connectionState: "connected",
-        platform: "gitlab",
-        projects: [],
-        sessions: [],
-        resources: null,
-      }],
+      hosts: [
+        {
+          key: "gitlab-main",
+          label: "GitLab",
+          connectionState: "connected",
+          platform: "gitlab",
+          projects: [],
+          sessions: [],
+          resources: null,
+        },
+      ],
     };
     win.__middleman_config.embed.tooling.glab = {
       available: true,

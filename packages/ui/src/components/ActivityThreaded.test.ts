@@ -1,13 +1,10 @@
 import { cleanup, fireEvent, render } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { ActivityItem } from "../api/types.js";
 import ActivityThreaded from "./ActivityThreaded.svelte";
 
-function activityItem(
-  id: string,
-  overrides: Partial<ActivityItem> = {},
-): ActivityItem {
+function activityItem(id: string, overrides: Partial<ActivityItem> = {}): ActivityItem {
   return {
     id,
     cursor: id,
@@ -34,10 +31,7 @@ function activityItem(
   };
 }
 
-function branchActivityItem(
-  id: string,
-  overrides: Partial<ActivityItem> = {},
-): ActivityItem {
+function branchActivityItem(id: string, overrides: Partial<ActivityItem> = {}): ActivityItem {
   return activityItem(id, {
     activity_type: "default_branch_commit",
     author: "alice",
@@ -108,9 +102,7 @@ describe("ActivityThreaded collapse", () => {
     expect(caret).not.toBeNull();
     await fireEvent.click(caret!);
     expect(toggleThreadItem).toHaveBeenCalledTimes(1);
-    expect(toggleThreadItem).toHaveBeenCalledWith(
-      "github|github.com|acme/widgets:pr:1",
-    );
+    expect(toggleThreadItem).toHaveBeenCalledWith("github|github.com|acme/widgets:pr:1");
     expect(onSelectItem).not.toHaveBeenCalled();
   });
 
@@ -118,9 +110,7 @@ describe("ActivityThreaded collapse", () => {
     const { container } = render(ActivityThreaded, {
       props: { items: [activityItem("c1")], onSelectItem: undefined },
     });
-    const label = container.querySelector(
-      ".repo-chip.repo-tag .repo-chip__label",
-    );
+    const label = container.querySelector(".repo-chip.repo-tag .repo-chip__label");
     expect(label?.textContent).toBe("acme/widgets");
   });
 
@@ -158,9 +148,7 @@ describe("ActivityThreaded collapse", () => {
     expect(rows[2]?.textContent).toContain("Refresh cache warmer");
     expect(container.textContent).not.toContain("main updates on acme/widgets");
     expect(container.textContent).not.toContain("#0");
-    expect(
-      container.querySelector(".branch-activity-row .thread-caret"),
-    ).toBeNull();
+    expect(container.querySelector(".branch-activity-row .thread-caret")).toBeNull();
   });
 
   it("labels commit rows without the branch type or duplicated commit text", () => {
@@ -185,9 +173,7 @@ describe("ActivityThreaded collapse", () => {
   it("selects default branch commit rows for an in-app diff", async () => {
     const onSelectItem = vi.fn();
     const onSelectBranchCommit = vi.fn();
-    const open = vi
-      .spyOn(window, "open")
-      .mockImplementation(() => null);
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
 
     const { container } = render(ActivityThreaded, {
       props: {
@@ -228,9 +214,7 @@ describe("ActivityThreaded collapse", () => {
       },
     });
 
-    expect(
-      container.querySelector(".branch-activity-row.selected"),
-    ).not.toBeNull();
+    expect(container.querySelector(".branch-activity-row.selected")).not.toBeNull();
   });
 
   it("shows the PR author on the item row, not the latest actor", () => {
@@ -260,9 +244,9 @@ describe("ActivityThreaded collapse", () => {
     expect(authorCell?.textContent?.trim()).toBe("prauthor");
 
     // Expanded event rows still attribute each event to its own actor.
-    const eventAuthors = Array.from(
-      container.querySelectorAll(".event-row .event-author"),
-    ).map((el) => el.textContent?.trim());
+    const eventAuthors = Array.from(container.querySelectorAll(".event-row .event-author")).map((el) =>
+      el.textContent?.trim(),
+    );
     expect(eventAuthors).toEqual(["Bob Example", "Alice Example"]);
   });
 
@@ -299,9 +283,7 @@ describe("ActivityThreaded collapse", () => {
     const { container } = render(ActivityThreaded, {
       props: { items: [activityItem("c1")], onSelectItem: undefined },
     });
-    const label = container.querySelector(
-      ".repo-chip.repo-tag .repo-chip__label",
-    );
+    const label = container.querySelector(".repo-chip.repo-tag .repo-chip__label");
     expect(label?.textContent).toBe("widgets");
   });
 
@@ -320,21 +302,17 @@ describe("ActivityThreaded collapse", () => {
 
   it("keeps force-push rows as provider compare links", async () => {
     const onSelectBranchCommit = vi.fn();
-    const open = vi
-      .spyOn(window, "open")
-      .mockImplementation(() => null);
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
 
     const { container } = render(ActivityThreaded, {
       props: {
         items: [
           branchActivityItem("force-1", {
             activity_type: "default_branch_force_push",
-            activity_url:
-              "https://github.com/acme/widgets/compare/aaaaaaaa...bbbbbbbb",
+            activity_url: "https://github.com/acme/widgets/compare/aaaaaaaa...bbbbbbbb",
             before_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             after_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            body_preview:
-              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            body_preview: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             commit_sha: "",
           }),
         ],

@@ -1,13 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { PullDetail } from "../../api/types.js";
-import {
-  ACTIONS_KEY,
-  API_CLIENT_KEY,
-  NAVIGATE_KEY,
-  STORES_KEY,
-  UI_CONFIG_KEY,
-} from "../../context.js";
+import { ACTIONS_KEY, API_CLIENT_KEY, NAVIGATE_KEY, STORES_KEY, UI_CONFIG_KEY } from "../../context.js";
 import PullDetailComponent from "./PullDetail.svelte";
 
 const capabilities = {
@@ -167,10 +161,7 @@ function renderPullDetail(
       hideWorkspaceAction: true,
     },
     context: new Map<symbol, unknown>([
-      [
-        API_CLIENT_KEY,
-        apiClient,
-      ],
+      [API_CLIENT_KEY, apiClient],
       [
         STORES_KEY,
         {
@@ -204,7 +195,9 @@ describe("PullDetail approvals", () => {
   it("shows approval count and expands approver names", async () => {
     renderPullDetail(pullDetail());
 
-    const trigger = screen.getByRole("button", { name: "APPROVED (2)" });
+    const trigger = screen.getByRole("button", {
+      name: "APPROVED (2)",
+    });
     await fireEvent.click(trigger);
 
     const popup = document.querySelector(".approval-popup");
@@ -222,7 +215,9 @@ describe("PullDetail approvals", () => {
 
     renderPullDetail(detail);
 
-    const trigger = screen.getByRole("button", { name: "APPROVED (2)" });
+    const trigger = screen.getByRole("button", {
+      name: "APPROVED (2)",
+    });
     await fireEvent.click(trigger);
 
     const popup = document.querySelector(".approval-popup");
@@ -249,7 +244,9 @@ describe("PullDetail approvals", () => {
     expect(detailStore.refreshPendingCI).not.toHaveBeenCalled();
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /CI:\s*1\s*pending\s*check/i }),
+      screen.getByRole("button", {
+        name: /CI:\s*1\s*pending\s*check/i,
+      }),
     );
 
     expect(detailStore.refreshPendingCI).toHaveBeenCalledTimes(1);
@@ -257,17 +254,12 @@ describe("PullDetail approvals", () => {
     await vi.advanceTimersByTimeAsync(15_000);
 
     expect(detailStore.refreshPendingCI).toHaveBeenCalledTimes(2);
-    expect(detailStore.refreshPendingCI).toHaveBeenCalledWith(
-      "acme",
-      "widget",
-      1,
-      {
-        provider: "github",
-        platformHost: "github.com",
-        repoPath: "acme/widget",
-        workflowApprovalSync: true,
-      },
-    );
+    expect(detailStore.refreshPendingCI).toHaveBeenCalledWith("acme", "widget", 1, {
+      provider: "github",
+      platformHost: "github.com",
+      repoPath: "acme/widget",
+      workflowApprovalSync: true,
+    });
   });
 
   it("uses one shared expanded slot for CI and stack status", async () => {
@@ -318,7 +310,7 @@ describe("PullDetail approvals", () => {
     detail.merge_request.CIStatus = "pending";
     detail.merge_request.CIChecksJSON = JSON.stringify([
       {
-        name: "frontend / svelte-check",
+        name: "frontend / vp check",
         status: "completed",
         conclusion: "failure",
         url: "https://example.com/frontend",
@@ -349,28 +341,28 @@ describe("PullDetail approvals", () => {
     renderPullDetail(detail, undefined, apiClient);
 
     await fireEvent.click(
-      screen.getByRole("button", { name: /CI:\s*1 failed check,\s*1 pending check/i }),
+      screen.getByRole("button", {
+        name: /CI:\s*1 failed check,\s*1 pending check/i,
+      }),
     );
 
-    expect(screen.getByText("frontend / svelte-check")).toBeTruthy();
+    expect(screen.getByText("frontend / vp check")).toBeTruthy();
 
     await fireEvent.click(
-      await screen.findByRole("button", { name: /Stacked: 2\/3, 1 downstack CI failure/i }),
+      await screen.findByRole("button", {
+        name: /Stacked: 2\/3, 1 downstack CI failure/i,
+      }),
     );
 
-    expect(screen.queryByText("frontend / svelte-check")).toBeNull();
+    expect(screen.queryByText("frontend / vp check")).toBeNull();
     expect(screen.getByText("3 PRs · current 2/3 · downstack CI failure")).toBeTruthy();
     expect(document.querySelector(".stack-row--current .stack-dot--current")).toBeTruthy();
     expect(screen.getByText("blocked by #1")).toBeTruthy();
 
-    const stackLinks = Array.from(
-      document.querySelectorAll<HTMLButtonElement>(".stack-member-link"),
-    ).map((button) => button.textContent?.trim());
-    expect(stackLinks).toEqual([
-      "#3 UI polish",
-      "#2 session storage",
-      "#1 base schema",
-    ]);
+    const stackLinks = Array.from(document.querySelectorAll<HTMLButtonElement>(".stack-member-link")).map((button) =>
+      button.textContent?.trim(),
+    );
+    expect(stackLinks).toEqual(["#3 UI polish", "#2 session storage", "#1 base schema"]);
     expect(document.querySelector(".stack-base-name")?.textContent?.trim()).toBe("main");
   });
 
@@ -422,7 +414,9 @@ describe("PullDetail approvals", () => {
 
     renderPullDetail(detail);
 
-    const actionsTrigger = screen.getByRole("button", { name: "Actions" });
+    const actionsTrigger = screen.getByRole("button", {
+      name: "Actions",
+    });
     await fireEvent.click(actionsTrigger);
     await fireEvent.click(getActionMenuLabelsButton());
 
@@ -507,9 +501,7 @@ describe("PullDetail approvals", () => {
 
       renderPullDetail(detail);
 
-      const requiredStatusWarning = screen.queryByText(
-        "Required status checks have not passed.",
-      );
+      const requiredStatusWarning = screen.queryByText("Required status checks have not passed.");
       const behindBranchWarning = screen.queryByText(
         "This branch is behind the base branch and may need to be updated.",
       );
@@ -538,9 +530,7 @@ describe("PullDetail approvals", () => {
     });
 
     await vi.waitFor(() => {
-      expect(
-        screen.queryByRole("button", { name: /merge/i }),
-      ).toBeNull();
+      expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
     });
   });
 

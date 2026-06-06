@@ -1,12 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  copyFileSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { copyFileSync, linkSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import os from "node:os";
@@ -18,12 +11,7 @@ const { stopE2EServer } = e2eServerModule;
 
 const originalEnv = { ...process.env };
 
-function writeFakeBun(
-  binDir: string,
-  frontendDir: string,
-  body: string,
-  windowsBody?: string,
-): void {
+function writeFakeBun(binDir: string, frontendDir: string, body: string, windowsBody?: string): void {
   if (process.platform === "win32") {
     const bunPath = path.join(binDir, "bun.exe");
     try {
@@ -31,10 +19,15 @@ function writeFakeBun(
     } catch {
       copyFileSync(process.execPath, bunPath);
     }
-    writeFileSync(path.join(frontendDir, "run"), windowsBody ?? body, { flag: "wx" });
+    writeFileSync(path.join(frontendDir, "run"), windowsBody ?? body, {
+      flag: "wx",
+    });
     return;
   }
-  writeFileSync(path.join(binDir, "bun"), body, { mode: 0o755, flag: "wx" });
+  writeFileSync(path.join(binDir, "bun"), body, {
+    mode: 0o755,
+    flag: "wx",
+  });
 }
 
 function prependExecutablePath(binDir: string): () => void {
@@ -197,9 +190,15 @@ describe("ensureEmbeddedFrontend", () => {
     mkdirSync(path.join(frontendDist, "assets"), { recursive: true });
     mkdirSync(embeddedDist, { recursive: true });
 
-    writeFileSync(path.join(frontendDist, "index.html"), "<html><body>ok</body></html>", { flag: "wx" });
-    writeFileSync(path.join(frontendDist, "assets", "app.js"), "console.log('ok');", { flag: "wx" });
-    writeFileSync(path.join(embeddedDist, "stub.html"), "stub", { flag: "wx" });
+    writeFileSync(path.join(frontendDist, "index.html"), "<html><body>ok</body></html>", {
+      flag: "wx",
+    });
+    writeFileSync(path.join(frontendDist, "assets", "app.js"), "console.log('ok');", {
+      flag: "wx",
+    });
+    writeFileSync(path.join(embeddedDist, "stub.html"), "stub", {
+      flag: "wx",
+    });
 
     await ensureEmbeddedFrontend(dir);
 
@@ -229,8 +228,12 @@ describe("ensureEmbeddedFrontend", () => {
 
     const embeddedIndex = path.join(embeddedDist, "index.html");
     const frontendIndex = path.join(frontendDist, "index.html");
-    writeFileSync(embeddedIndex, "<html><body>old</body></html>", { flag: "wx" });
-    writeFileSync(frontendIndex, "<html><body>new</body></html>", { flag: "wx" });
+    writeFileSync(embeddedIndex, "<html><body>old</body></html>", {
+      flag: "wx",
+    });
+    writeFileSync(frontendIndex, "<html><body>new</body></html>", {
+      flag: "wx",
+    });
 
     const oldTime = new Date("2026-01-01T00:00:00Z");
     const newTime = new Date("2026-01-01T00:00:10Z");
@@ -277,8 +280,12 @@ describe("ensureEmbeddedFrontend", () => {
     const frontendIndex = path.join(frontendDist, "index.html");
     const embeddedIndex = path.join(embeddedDist, "index.html");
     const sourceFile = path.join(frontendSrc, "App.svelte");
-    writeFileSync(frontendIndex, "<html><body>old dist</body></html>", { flag: "wx" });
-    writeFileSync(embeddedIndex, "<html><body>old embed</body></html>", { flag: "wx" });
+    writeFileSync(frontendIndex, "<html><body>old dist</body></html>", {
+      flag: "wx",
+    });
+    writeFileSync(embeddedIndex, "<html><body>old embed</body></html>", {
+      flag: "wx",
+    });
     writeFileSync(sourceFile, "<script></script>", { flag: "wx" });
 
     const oldTime = new Date("2026-01-01T00:00:00Z");
@@ -332,8 +339,12 @@ describe("ensureEmbeddedFrontend", () => {
     const frontendIndex = path.join(frontendDist, "index.html");
     const embeddedIndex = path.join(embeddedDist, "index.html");
     const sourceFile = path.join(frontendSrc, "App.svelte");
-    writeFileSync(frontendIndex, "<html><body>old dist</body></html>", { flag: "wx" });
-    writeFileSync(embeddedIndex, "<html><body>old embed</body></html>", { flag: "wx" });
+    writeFileSync(frontendIndex, "<html><body>old dist</body></html>", {
+      flag: "wx",
+    });
+    writeFileSync(embeddedIndex, "<html><body>old embed</body></html>", {
+      flag: "wx",
+    });
     writeFileSync(sourceFile, "<script></script>", { flag: "wx" });
 
     const oldTime = new Date("2026-01-01T00:00:00Z");
@@ -344,9 +355,7 @@ describe("ensureEmbeddedFrontend", () => {
 
     const restorePath = prependExecutablePath(binDir);
     try {
-      await expect(ensureEmbeddedFrontend(dir)).rejects.toThrow(
-        /frontend build failed/,
-      );
+      await expect(ensureEmbeddedFrontend(dir)).rejects.toThrow(/frontend build failed/);
     } finally {
       restorePath();
     }
@@ -377,7 +386,9 @@ describe("ensureEmbeddedFrontend", () => {
     const frontendIndex = path.join(frontendDist, "index.html");
     const embeddedIndex = path.join(embeddedDist, "index.html");
     const sourceFile = path.join(frontendSrc, "App.svelte");
-    writeFileSync(frontendIndex, "<html><body>existing dist</body></html>", { flag: "wx" });
+    writeFileSync(frontendIndex, "<html><body>existing dist</body></html>", {
+      flag: "wx",
+    });
     writeFileSync(sourceFile, "<script></script>", { flag: "wx" });
 
     const oldTime = new Date("2026-01-01T00:00:00Z");
@@ -529,7 +540,10 @@ describe("cleanupManagedServerProcess", () => {
     const cleanupManagedServerProcess = (
       e2eServerModule as {
         cleanupManagedServerProcess?: (
-          managedChild?: { pid?: number; exitCode: number | null } | null,
+          managedChild?: {
+            pid?: number;
+            exitCode: number | null;
+          } | null,
         ) => void;
       }
     ).cleanupManagedServerProcess;

@@ -2,15 +2,10 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { svelteTesting } from "@testing-library/svelte/vite";
-import {
-  searchForWorkspaceRoot,
-  type Plugin,
-  type ProxyOptions,
-  type UserConfig,
-} from "vite";
-import type { InlineConfig } from "vitest/node";
-import { resolveDevApiUrl } from "./src/lib/dev/apiProxyTarget";
-import { healthcheckPlugin } from "./src/lib/dev/healthcheckPlugin";
+import { searchForWorkspaceRoot, type Plugin, type ProxyOptions, type UserConfig } from "vite";
+import type { InlineConfig } from "vite-plus/test/node";
+import { resolveDevApiUrl } from "./src/lib/dev/apiProxyTarget.ts";
+import { healthcheckPlugin } from "./src/lib/dev/healthcheckPlugin.ts";
 
 const require = createRequire(import.meta.url);
 const testingLibrarySvelteEntry = require.resolve("@testing-library/svelte");
@@ -47,8 +42,7 @@ function devApiUrlPlugin(url: string): Plugin {
       return [
         {
           tag: "script",
-          children:
-            `window.__MIDDLEMAN_DEV_API_URL__ = ${JSON.stringify(url)};`,
+          children: `window.__MIDDLEMAN_DEV_API_URL__ = ${JSON.stringify(url)};`,
           injectTo: "head-prepend",
         },
       ];
@@ -56,14 +50,12 @@ function devApiUrlPlugin(url: string): Plugin {
   };
 }
 
-export function resolveViteServerPort(
-  argv: readonly string[] = process.argv,
-): number {
+export function resolveViteServerPort(argv: readonly string[] = process.argv): number {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (!arg) continue;
-    if (arg === "--port" && i+1 < argv.length) {
-      const next = argv[i+1];
+    if (arg === "--port" && i + 1 < argv.length) {
+      const next = argv[i + 1];
       const parsed = parsePort(next);
       if (parsed !== null) return parsed;
     }
@@ -91,17 +83,12 @@ function parseHostList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-export function resolveViteAllowedHosts(
-  env: Record<string, string | undefined> = process.env,
-): string[] | undefined {
+export function resolveViteAllowedHosts(env: Record<string, string | undefined> = process.env): string[] | undefined {
   const hosts = parseHostList(env.MIDDLEMAN_VITE_ALLOWED_HOSTS);
   return hosts.length > 0 ? hosts : undefined;
 }
 
-export function resolveViteHmr(
-  port = resolveViteServerPort(),
-  env: Record<string, string | undefined> = process.env,
-) {
+export function resolveViteHmr(port = resolveViteServerPort(), env: Record<string, string | undefined> = process.env) {
   const protocol = env.MIDDLEMAN_VITE_HMR_PROTOCOL === "wss" ? "wss" : "ws";
   const host = env.MIDDLEMAN_VITE_HMR_HOST?.trim() || "127.0.0.1";
   const clientPort = parsePort(env.MIDDLEMAN_VITE_HMR_CLIENT_PORT) ?? port;
@@ -114,17 +101,13 @@ export function resolveViteHmr(
   };
 }
 
-function logWebSocketProxyRequests(): NonNullable<
-  ProxyOptions["configure"]
-> {
+function logWebSocketProxyRequests(): NonNullable<ProxyOptions["configure"]> {
   return (proxy) => {
     proxy.on("proxyReqWs", (_proxyReq, req, socket) => {
       const url = req.url ?? "<unknown>";
       console.info(`[vite:ws-proxy] open ${url}`);
       socket.on("error", (err) => {
-        console.error(
-          `[vite:ws-proxy] socket error ${url}: ${err.message}`,
-        );
+        console.error(`[vite:ws-proxy] socket error ${url}: ${err.message}`);
       });
     });
     proxy.on("error", (err, req) => {
@@ -132,18 +115,13 @@ function logWebSocketProxyRequests(): NonNullable<
       console.error(`[vite:ws-proxy] error ${url}: ${err.message}`);
     });
     proxy.on("close", (_proxyRes, _proxySocket, proxyHead) => {
-      const headLength =
-        proxyHead instanceof Buffer ? proxyHead.length : 0;
-      console.info(
-        `[vite:ws-proxy] close proxyHeadBytes=${headLength}`,
-      );
+      const headLength = proxyHead instanceof Buffer ? proxyHead.length : 0;
+      console.info(`[vite:ws-proxy] close proxyHeadBytes=${headLength}`);
     });
   };
 }
 
-export function webSocketDebugEnabled(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
+export function webSocketDebugEnabled(env: Record<string, string | undefined> = process.env): boolean {
   switch (env.MIDDLEMAN_WS_DEBUG?.trim().toLowerCase()) {
     case "1":
     case "true":
@@ -184,12 +162,7 @@ const config = {
       return hostType === "js" ? { relative: true } : undefined;
     },
   },
-  plugins: [
-    healthcheckPlugin(),
-    devApiUrlPlugin(apiUrl),
-    svelte(),
-    svelteTesting(),
-  ],
+  plugins: [healthcheckPlugin(), devApiUrlPlugin(apiUrl), svelte(), svelteTesting()],
   resolve: {
     alias: [
       {
@@ -281,10 +254,7 @@ const config = {
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    include: [
-      "src/**/*.{test,spec}.?(c|m)[jt]s?(x)",
-      "../packages/ui/src/**/*.{test,spec}.?(c|m)[jt]s?(x)",
-    ],
+    include: ["src/**/*.{test,spec}.?(c|m)[jt]s?(x)", "../packages/ui/src/**/*.{test,spec}.?(c|m)[jt]s?(x)"],
     exclude: ["tests/e2e/**", "tests/e2e-full/**", "node_modules/**"],
   },
   build: {

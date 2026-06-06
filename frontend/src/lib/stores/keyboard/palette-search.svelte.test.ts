@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { groupResults, parsePaletteQuery } from "./palette-search.svelte.js";
 import type { Action } from "./types.js";
@@ -154,13 +154,9 @@ describe("groupResults", () => {
   });
 
   it("caps each group at 10 entries after filtering", () => {
-    const manyCommands = Array.from({ length: 15 }, (_, i) =>
-      action(`cmd.${i}`, `match-${i}`),
-    );
+    const manyCommands = Array.from({ length: 15 }, (_, i) => action(`cmd.${i}`, `match-${i}`));
     const manyPulls = Array.from({ length: 15 }, (_, i) => pull(i, `match-${i}`));
-    const manyIssues = Array.from({ length: 15 }, (_, i) =>
-      issue(i, `match-${i}`),
-    );
+    const manyIssues = Array.from({ length: 15 }, (_, i) => issue(i, `match-${i}`));
     const out = groupResults({
       commands: manyCommands,
       pulls: manyPulls,

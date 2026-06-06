@@ -1,7 +1,4 @@
-import {
-  getUIConfig,
-  getSidebarWidth as getEmbeddedSidebarWidth,
-} from "./embed-config.svelte.js";
+import { getUIConfig, getSidebarWidth as getEmbeddedSidebarWidth } from "./embed-config.svelte.js";
 
 const STORAGE_KEY = "middleman-sidebar";
 const WIDTH_STORAGE_KEY = "middleman-sidebar-width";
@@ -18,10 +15,7 @@ let narrowCollapsed = $state(false);
 let narrowOpened = $state(false);
 
 function clampWidth(value: number): number {
-  return Math.max(
-    MIN_WIDTH,
-    Math.min(MAX_WIDTH, Math.round(value)),
-  );
+  return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(value)));
 }
 
 function loadPersisted(): boolean {
@@ -62,10 +56,7 @@ function persist(value: boolean): void {
 
 function persistWidth(value: number): void {
   try {
-    localStorage.setItem(
-      WIDTH_STORAGE_KEY,
-      String(clampWidth(value)),
-    );
+    localStorage.setItem(WIDTH_STORAGE_KEY, String(clampWidth(value)));
   } catch {
     // Storage blocked
   }

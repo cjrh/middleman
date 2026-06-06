@@ -13,10 +13,7 @@ function lockRootSuffix(): string {
   }
 }
 
-const LOCK_ROOT = path.join(
-  os.tmpdir(),
-  `middleman-playwright-locks-${lockRootSuffix()}`,
-);
+const LOCK_ROOT = path.join(os.tmpdir(), `middleman-playwright-locks-${lockRootSuffix()}`);
 export type ExclusiveLockOptions = {
   rootDir?: string;
 };
@@ -29,18 +26,17 @@ function safeLockName(name: string): string {
   return trimmed.replace(/[^A-Za-z0-9._-]/g, "-");
 }
 
-export function exclusiveLockPath(
-  name: string,
-  rootDir: string = LOCK_ROOT,
-): string {
+export function exclusiveLockPath(name: string, rootDir: string = LOCK_ROOT): string {
   return path.join(rootDir, `${safeLockName(name)}.lock`);
 }
 
 function lockMetadata(): string {
-  return JSON.stringify({
-    created_at: new Date().toISOString(),
-    pid: process.pid,
-  }) + "\n";
+  return (
+    JSON.stringify({
+      created_at: new Date().toISOString(),
+      pid: process.pid,
+    }) + "\n"
+  );
 }
 
 function lockWorkerScript(): string {
@@ -201,19 +197,9 @@ async function ensureLockRoot(rootDir: string): Promise<void> {
 }
 
 function spawnLockProcess(lockPath: string): ChildProcess {
-  return spawn(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      lockWorkerScript(),
-      lockPath,
-      lockMetadata(),
-    ],
-    {
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  );
+  return spawn(process.execPath, ["--input-type=module", "-e", lockWorkerScript(), lockPath, lockMetadata()], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
 
 async function waitForLockProcess(child: ChildProcess): Promise<void> {
@@ -246,9 +232,7 @@ async function waitForLockProcess(child: ChildProcess): Promise<void> {
         return;
       }
       cleanup();
-      reject(new Error(
-        `lock helper exited before acquiring lock (code=${code}, signal=${signal}): ${stderr.trim()}`,
-      ));
+      reject(new Error(`lock helper exited before acquiring lock (code=${code}, signal=${signal}): ${stderr.trim()}`));
     };
 
     child.stdout?.on("data", onStdout);

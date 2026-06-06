@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/svelte";
 import { createRawSnippet } from "svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import Chip from "./Chip.svelte";
 
@@ -37,8 +37,6 @@ describe("Chip", () => {
     });
 
     const chip = screen.getByText("acme/widgets").closest(".chip");
-    expect(chip?.querySelector(".chip__label")?.textContent).toBe(
-      "acme/widgets",
-    );
+    expect(chip?.querySelector(".chip__label")?.textContent).toBe("acme/widgets");
   });
 });

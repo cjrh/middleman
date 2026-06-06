@@ -1,7 +1,4 @@
-import type {
-  TerminalLayoutState,
-  WorkflowNode,
-} from "./terminal-layout";
+import type { TerminalLayoutState, WorkflowNode } from "./terminal-layout";
 
 export interface WorkflowPresetSession {
   sourceKey: string;
@@ -31,10 +28,9 @@ export function mapWorkflowNodeSessionKeys(
       return mapped ? ([`session:${mapped}`] as const) : [];
     });
     if (tabs.length === 0) return null;
-    const activeTabKey =
-      node.activeTabKey.startsWith("session:")
-        ? keyMap.get(node.activeTabKey.slice("session:".length))
-        : node.activeTabKey;
+    const activeTabKey = node.activeTabKey.startsWith("session:")
+      ? keyMap.get(node.activeTabKey.slice("session:".length))
+      : node.activeTabKey;
     return {
       ...node,
       tabs,

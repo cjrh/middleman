@@ -1,10 +1,5 @@
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import SplitResizeHandle from "./SplitResizeHandle.svelte";
 
 describe("SplitResizeHandle", () => {
@@ -49,12 +44,8 @@ describe("SplitResizeHandle", () => {
     await fireEvent.mouseUp(window, { clientX: 150 });
 
     expect(onResizeStart).toHaveBeenCalledOnce();
-    expect(onResize).toHaveBeenCalledWith(
-      expect.objectContaining({ deltaX: 40 }),
-    );
-    expect(onResizeEnd).toHaveBeenCalledWith(
-      expect.objectContaining({ deltaX: 50 }),
-    );
+    expect(onResize).toHaveBeenCalledWith(expect.objectContaining({ deltaX: 40 }));
+    expect(onResizeEnd).toHaveBeenCalledWith(expect.objectContaining({ deltaX: 50 }));
   });
 
   it("reports arrow-key resize deltas", async () => {
@@ -78,14 +69,8 @@ describe("SplitResizeHandle", () => {
     await fireEvent.keyDown(handle, { key: "ArrowRight" });
 
     expect(onResizeStart).toHaveBeenCalledTimes(2);
-    expect(onResize).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ deltaX: -32 }),
-    );
-    expect(onResize).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ deltaX: 32 }),
-    );
+    expect(onResize).toHaveBeenNthCalledWith(1, expect.objectContaining({ deltaX: -32 }));
+    expect(onResize).toHaveBeenNthCalledWith(2, expect.objectContaining({ deltaX: 32 }));
     expect(onResizeEnd).toHaveBeenCalledTimes(2);
   });
 });
