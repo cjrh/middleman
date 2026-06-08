@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { defaultActions, setStoreInstances } from "./actions.js";
+import { isSidebarCollapsed, setSidebarCollapsed } from "../sidebar.svelte.js";
 import {
   OPEN_LABEL_PICKER_EVENT,
   type OpenLabelPickerDetail,
@@ -15,6 +16,7 @@ function ctx(page: Context["page"], overrides: Partial<Context> = {}): Context {
     selectedIssue: null,
     isDiffView: false,
     detailTab: "conversation",
+    sidebarTargetAvailable: true,
     ...overrides,
   };
 }
@@ -38,6 +40,10 @@ const selected = {
 };
 
 describe("defaultActions", () => {
+  afterEach(() => {
+    setSidebarCollapsed(false);
+  });
+
   it("includes the migrated globals", () => {
     const ids = defaultActions.map((a) => a.id);
     expect(ids).toEqual(
@@ -155,5 +161,82 @@ describe("defaultActions", () => {
     expect(cheatsheet!.when(ctx("reviews"))).toBe(false);
     expect(cheatsheet!.when(ctx("pulls"))).toBe(true);
     expect(cheatsheet!.when(ctx("issues"))).toBe(true);
+  });
+
+  it("sidebar.toggle reserves the chord everywhere but only toggles pages with a sidebar target", () => {
+    const action = defaultActions.find((a) => a.id === "sidebar.toggle");
+    expect(action).toBeDefined();
+
+    const visible = action!.visible ?? action!.when;
+
+    expect(action!.when(ctx("activity"))).toBe(true);
+    expect(visible(ctx("activity"))).toBe(false);
+    setSidebarCollapsed(false);
+    action!.handler(ctx("activity"));
+    expect(isSidebarCollapsed()).toBe(false);
+
+    expect(action!.when(ctx("repos"))).toBe(true);
+    expect(visible(ctx("repos"))).toBe(false);
+    expect(
+      action!.when(
+        ctx("pulls", {
+          route: { page: "pulls", view: "list" } as never,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      visible(
+        ctx("pulls", {
+          route: { page: "pulls", view: "list" } as never,
+        }),
+      ),
+    ).toBe(true);
+    action!.handler(
+      ctx("pulls", {
+        route: { page: "pulls", view: "list" } as never,
+      }),
+    );
+    expect(isSidebarCollapsed()).toBe(true);
+    setSidebarCollapsed(false);
+    const compactPulls = ctx("pulls", {
+      route: { page: "pulls", view: "list" } as never,
+      sidebarTargetAvailable: false,
+    });
+    expect(action!.when(compactPulls)).toBe(true);
+    expect(visible(compactPulls)).toBe(false);
+    action!.handler(compactPulls);
+    expect(isSidebarCollapsed()).toBe(false);
+    expect(
+      action!.when(
+        ctx("pulls", {
+          route: { page: "pulls", view: "board" } as never,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      visible(
+        ctx("pulls", {
+          route: { page: "pulls", view: "board" } as never,
+        }),
+      ),
+    ).toBe(false);
+    expect(action!.when(ctx("issues"))).toBe(true);
+    expect(visible(ctx("issues"))).toBe(true);
+    expect(action!.when(ctx("workspaces"))).toBe(true);
+    expect(visible(ctx("workspaces"))).toBe(true);
+    expect(
+      action!.when(
+        ctx("terminal", {
+          route: { page: "terminal", workspaceId: "1" } as never,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      visible(
+        ctx("terminal", {
+          route: { page: "terminal", workspaceId: "1" } as never,
+        }),
+      ),
+    ).toBe(true);
   });
 });

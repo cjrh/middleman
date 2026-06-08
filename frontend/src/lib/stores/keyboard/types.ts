@@ -16,6 +16,7 @@ export interface Context {
   selectedIssue: IssueSelection | null;
   isDiffView: boolean;
   detailTab: DetailTab;
+  sidebarTargetAvailable: boolean;
 }
 
 export interface PreviewBlock {
@@ -32,6 +33,7 @@ export interface Action {
   binding: KeySpec | KeySpec[] | null;
   priority: number;
   when: (ctx: Context) => boolean;
+  visible?: (ctx: Context) => boolean;
   handler: (ctx: Context) => void | Promise<void>;
   preview?: (ctx: Context) => PreviewBlock;
 }

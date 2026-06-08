@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { dispatchKeydown } from "./dispatch.svelte.js";
+import { defaultActions } from "./actions.js";
 import { registerScopedActions, resetRegistry } from "./registry.svelte.js";
+import { isSidebarCollapsed, setSidebarCollapsed } from "../sidebar.svelte.js";
 import { pushModalFrame, resetModalStack } from "@middleman/ui/stores/keyboard/modal-stack";
 import type { Action, Context } from "./types.js";
 
@@ -14,12 +16,17 @@ const ctx: Context = {
   selectedIssue: null,
   isDiffView: false,
   detailTab: "conversation",
+  sidebarTargetAvailable: true,
 };
 
 const event = (init: Partial<KeyboardEvent>) =>
   Object.assign(new KeyboardEvent("keydown", init), {
     preventDefault: vi.fn(),
   });
+
+afterEach(() => {
+  setSidebarCollapsed(false);
+});
 
 describe("dispatchKeydown — global registry", () => {
   beforeEach(() => {
@@ -59,6 +66,21 @@ describe("dispatchKeydown — global registry", () => {
     registerScopedActions("test", [a]);
     dispatchKeydown(event({ key: "j" }), () => ctx);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("reserves Cmd+[ on pages where the sidebar command is hidden", () => {
+    registerScopedActions("defaults", defaultActions);
+    setSidebarCollapsed(false);
+    const e = event({ key: "[", metaKey: true });
+
+    dispatchKeydown(e, () => ({
+      ...ctx,
+      page: "activity",
+      route: { page: "activity" } as never,
+    }));
+
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(isSidebarCollapsed()).toBe(false);
   });
 });
 

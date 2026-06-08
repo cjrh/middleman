@@ -437,13 +437,17 @@ function treeFileItem(pageOrLocator: Page | ReturnType<Page["locator"]>, path: s
   return pageOrLocator.locator(`.diff-file-tree [data-item-path="${cssString(path)}"]`);
 }
 
+async function clickVisibleTarget(target: Locator): Promise<void> {
+  await expect(target).toBeVisible({ timeout: 10_000 });
+  await target.scrollIntoViewIfNeeded();
+  const box = await target.boundingBox();
+  expect(box).not.toBeNull();
+  await target.page().mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+}
+
 async function clickTreeFileItem(pageOrLocator: Page | ReturnType<Page["locator"]>, path: string): Promise<void> {
   const item = treeFileItem(pageOrLocator, path);
-  await expect(item).toBeVisible();
-  await item.scrollIntoViewIfNeeded();
-  await item.click({ timeout: 2_000 }).catch(async () => {
-    await item.evaluate((node) => (node as HTMLElement).click());
-  });
+  await clickVisibleTarget(item);
   await expect(item).toHaveAttribute("aria-selected", "true");
 }
 
@@ -596,8 +600,7 @@ async function clickPierreContextExpander(
     .filter({ visible: true })
     .nth(separatorIndex);
   const expander = separator.locator(buttonSelector).filter({ visible: true }).first();
-  await expect(expander).toBeVisible();
-  await expander.evaluate((button: HTMLElement) => button.click());
+  await clickVisibleTarget(expander);
 }
 
 async function expectPierreDarkBackgroundMatchesAppSurface(file: ReturnType<Page["locator"]>) {
@@ -920,7 +923,7 @@ async function selectPierreReviewLine(file: Locator, line: number, side: "left" 
   ].join(",");
   const target = file.locator(`.pierre-diff ${selector}`).first();
   await expect(target).toBeVisible({ timeout: 10_000 });
-  await target.locator("[data-middleman-line-comment-button]").click();
+  await clickVisibleTarget(target.locator("[data-middleman-line-comment-button]"));
 }
 
 // --- Functional tests ---
@@ -2625,14 +2628,16 @@ test.describe("diff view (git-backed)", () => {
       const cacheFile = page.locator('[data-file-path="internal/cache.go"]');
       await cacheFile.scrollIntoViewIfNeeded();
       await selectPierreReviewLine(cacheFile, 1, "right");
-      await expect(page.getByPlaceholder("Leave a comment")).toBeVisible();
+      const rightComposer = page.getByPlaceholder("Leave a comment");
+      await expect(rightComposer).toBeVisible();
+      await expect(rightComposer).toBeFocused();
       await expectPierreDiffFirstVisible(cacheFile, diffAdditionsSelector);
       const cacheContentBox = await cacheFile.locator(".file-content").boundingBox();
       const composerBox = await cacheFile.locator(".inline-composer").boundingBox();
       expect(cacheContentBox).not.toBeNull();
       expect(composerBox).not.toBeNull();
       expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(cacheContentBox!.x + cacheContentBox!.width + 1);
-      await page.getByPlaceholder("Leave a comment").fill("Right-side cache note");
+      await rightComposer.fill("Right-side cache note");
       await page.getByRole("button", { name: "Add comment" }).click();
       await expect(
         page.locator(".inline-draft-comment", {
@@ -2643,8 +2648,10 @@ test.describe("diff view (git-backed)", () => {
       const configFile = page.locator('[data-file-path="config.yaml"]');
       await configFile.scrollIntoViewIfNeeded();
       await selectPierreReviewLine(configFile, 1, "left");
-      await expect(page.getByPlaceholder("Leave a comment")).toBeVisible();
-      await page.getByPlaceholder("Leave a comment").fill("Left-side config note");
+      const leftComposer = page.getByPlaceholder("Leave a comment");
+      await expect(leftComposer).toBeVisible();
+      await expect(leftComposer).toBeFocused();
+      await leftComposer.fill("Left-side config note");
       await page.getByRole("button", { name: "Add comment" }).click();
       await expect(
         page.locator(".inline-draft-comment", {
