@@ -47,7 +47,7 @@ func insertMonitorWorkspace(
 	associatedPRNumber *int,
 ) string {
 	t.Helper()
-	ws := &db.Workspace{
+	ws := db.Workspace{
 		ID:                 "ws-issue",
 		PlatformHost:       "github.com",
 		RepoOwner:          "acme",
@@ -60,8 +60,30 @@ func insertMonitorWorkspace(
 		TmuxSession:        "middleman-ws-issue",
 		Status:             "ready",
 	}
-	require.NoError(t, d.InsertWorkspace(context.Background(), ws))
+	require.NoError(t, d.InsertWorkspace(context.Background(), &ws))
 	return ws.ID
+}
+
+func insertMonitorWorkspaceWithIdentity(
+	t *testing.T,
+	d *db.DB,
+	id, provider, host, owner, name, worktreePath string,
+) string {
+	t.Helper()
+	require.NoError(t, d.InsertWorkspace(context.Background(), &db.Workspace{
+		ID:           id,
+		Platform:     provider,
+		PlatformHost: host,
+		RepoOwner:    owner,
+		RepoName:     name,
+		ItemType:     db.WorkspaceItemTypeIssue,
+		ItemNumber:   7,
+		GitHeadRef:   "middleman/issue-7",
+		WorktreePath: worktreePath,
+		TmuxSession:  "middleman-" + id,
+		Status:       "ready",
+	}))
+	return id
 }
 
 func seedIssue(
@@ -170,6 +192,57 @@ func TestPRMonitorRunOnceFallsBackToLocalBranchNameAndHeadSHA(t *testing.T) {
 	assert.Equal(42, *ws.AssociatedPRNumber)
 }
 
+func TestPRMonitorRunOnceFallsBackToLocalHeadSHAWhenUpstreamRepoMetadataMissing(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	repoID, err := d.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitlab",
+		PlatformHost: "gitlab.com",
+		Owner:        "Group/SubGroup",
+		Name:         "Project",
+		RepoPath:     "Group/SubGroup/Project",
+	})
+	require.NoError(err)
+	seedIssue(t, d, repoID, 7, "Track workspace association")
+
+	worktreePath := setupMonitorRepo(t)
+	runWorkspaceTestGit(t, worktreePath, "checkout", "-b", "feature/gitlab")
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, "feature.txt"), []byte("feature\n"), 0o644,
+	))
+	runWorkspaceTestGit(t, worktreePath, "add", ".")
+	runWorkspaceTestGit(t, worktreePath, "commit", "-m", "feature commit")
+	runWorkspaceTestGit(t, worktreePath, "push", "-u", "origin", "feature/gitlab")
+	runWorkspaceTestGit(
+		t, worktreePath,
+		"remote", "set-url", "origin",
+		"git@gitlab.com:Group/SubGroup/Project.git",
+	)
+	headSHA, err := gitHeadSHA(ctx, worktreePath)
+	require.NoError(err)
+	seedMRWithPlatformHead(t, d, repoID, 42, "feature/gitlab", headSHA)
+	workspaceID := insertMonitorWorkspaceWithIdentity(
+		t, d, "ws-gitlab", "gitlab", "gitlab.com",
+		"Group/SubGroup", "Project", worktreePath,
+	)
+
+	monitor := NewPRMonitor(d)
+	updates, err := monitor.RunOnce(ctx)
+	require.NoError(err)
+	require.Len(updates, 1)
+	assert.Equal(workspaceID, updates[0].WorkspaceID)
+	assert.Equal(42, updates[0].PRNumber)
+
+	ws, err := d.GetWorkspace(ctx, workspaceID)
+	require.NoError(err)
+	require.NotNil(ws)
+	require.NotNil(ws.AssociatedPRNumber)
+	assert.Equal(42, *ws.AssociatedPRNumber)
+}
+
 func TestPRMonitorRunOnceRejectsLocalBranchWithMismatchedHeadSHA(t *testing.T) {
 	assert := Assert.New(t)
 	require := require.New(t)
@@ -210,6 +283,65 @@ func TestPRMonitorRunOnceRejectsLocalBranchWithMismatchedHeadSHA(t *testing.T) {
 	assert.Nil(ws.AssociatedPRNumber)
 }
 
+func TestPRMonitorRunOnceRejectsLocalBranchWithMismatchedUpstreamRemote(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	repoID := seedRepo(t, d, "github.com", "acme", "widget")
+	seedIssue(t, d, repoID, 7, "Track workspace association")
+	worktreePath := setupMonitorRepo(t)
+	runWorkspaceTestGit(t, worktreePath, "checkout", "-b", "feature/shared")
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, "feature.txt"), []byte("feature\n"), 0o644,
+	))
+	runWorkspaceTestGit(t, worktreePath, "add", ".")
+	runWorkspaceTestGit(t, worktreePath, "commit", "-m", "feature commit")
+	runWorkspaceTestGit(
+		t, worktreePath,
+		"remote", "set-url", "origin", "git@github.com:acme/widget.git",
+	)
+	runWorkspaceTestGit(
+		t, worktreePath,
+		"config", "branch.feature/shared.remote", "origin",
+	)
+	runWorkspaceTestGit(
+		t, worktreePath,
+		"config", "branch.feature/shared.merge", "refs/heads/feature/shared",
+	)
+	headSHA, err := gitHeadSHA(ctx, worktreePath)
+	require.NoError(err)
+	now := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	_, err = d.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:           repoID,
+		PlatformID:       repoID*10000 + 42,
+		Number:           42,
+		Title:            "Test PR",
+		Author:           "author",
+		State:            "open",
+		HeadBranch:       "feature/shared",
+		HeadRepoCloneURL: "https://github.com/fork/widget.git",
+		PlatformHeadSHA:  headSHA,
+		BaseBranch:       "main",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		LastActivityAt:   now,
+	})
+	require.NoError(err)
+	insertMonitorWorkspace(t, d, worktreePath, nil)
+
+	monitor := NewPRMonitor(d)
+	updates, err := monitor.RunOnce(ctx)
+	require.NoError(err)
+	assert.Empty(updates)
+
+	ws, err := d.GetWorkspace(ctx, "ws-issue")
+	require.NoError(err)
+	require.NotNil(ws)
+	assert.Nil(ws.AssociatedPRNumber)
+}
+
 func TestPRMonitorRunOnceSkipsSyntheticIssueBranch(t *testing.T) {
 	assert := Assert.New(t)
 	require := require.New(t)
@@ -233,6 +365,47 @@ func TestPRMonitorRunOnceSkipsSyntheticIssueBranch(t *testing.T) {
 	require.NoError(err)
 	require.NotNil(ws)
 	assert.Nil(ws.AssociatedPRNumber)
+}
+
+func TestPRMonitorRunOnceAssociatesPRFromManagedIssueBranch(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	repoID := seedRepo(t, d, "github.com", "acme", "widget")
+	seedIssue(t, d, repoID, 7, "Track workspace association")
+	seedMRWithHeadRepo(
+		t, d, repoID, 42,
+		"middleman/issue-7", "https://github.com/acme/widget.git",
+	)
+
+	worktreePath := setupMonitorRepo(t)
+	runWorkspaceTestGit(t, worktreePath, "checkout", "-b", "middleman/issue-7")
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, "feature.txt"), []byte("feature\n"), 0o644,
+	))
+	runWorkspaceTestGit(t, worktreePath, "add", ".")
+	runWorkspaceTestGit(t, worktreePath, "commit", "-m", "feature commit")
+	runWorkspaceTestGit(t, worktreePath, "push", "-u", "origin", "middleman/issue-7")
+	runWorkspaceTestGit(
+		t, worktreePath,
+		"remote", "set-url", "origin", "git@github.com:acme/widget.git",
+	)
+	insertMonitorWorkspace(t, d, worktreePath, nil)
+
+	monitor := NewPRMonitor(d)
+	updates, err := monitor.RunOnce(ctx)
+	require.NoError(err)
+	require.Len(updates, 1)
+	assert.Equal("ws-issue", updates[0].WorkspaceID)
+	assert.Equal(42, updates[0].PRNumber)
+
+	ws, err := d.GetWorkspace(ctx, "ws-issue")
+	require.NoError(err)
+	require.NotNil(ws)
+	require.NotNil(ws.AssociatedPRNumber)
+	assert.Equal(42, *ws.AssociatedPRNumber)
 }
 
 func TestPRMonitorRunOnceAssociatesPRWhenSlugWorkspaceCheckedOutToBareBranch(t *testing.T) {
@@ -344,6 +517,80 @@ func TestPRMonitorRunOnceUsesUpstreamRemoteIdentity(t *testing.T) {
 	assert.Equal(42, updates[0].PRNumber)
 }
 
+func TestPRMonitorRunOnceScopesCandidatesByWorkspaceProvider(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	githubRepoID, err := d.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "git.example.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	gitlabRepoID, err := d.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitlab",
+		PlatformHost: "git.example.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	seedIssue(t, d, gitlabRepoID, 7, "Track workspace association")
+
+	worktreePath := setupMonitorRepo(t)
+	runWorkspaceTestGit(t, worktreePath, "checkout", "-b", "feature/provider-scope")
+	require.NoError(os.WriteFile(
+		filepath.Join(worktreePath, "feature.txt"), []byte("feature\n"), 0o644,
+	))
+	runWorkspaceTestGit(t, worktreePath, "add", ".")
+	runWorkspaceTestGit(t, worktreePath, "commit", "-m", "feature commit")
+	headSHA, err := gitHeadSHA(ctx, worktreePath)
+	require.NoError(err)
+	seedMRWithPlatformHead(
+		t, d, githubRepoID, 42, "feature/provider-scope", headSHA,
+	)
+	workspaceID := insertMonitorWorkspaceWithIdentity(
+		t, d, "ws-gitlab-provider-scope", "gitlab", "git.example.com",
+		"acme", "widget", worktreePath,
+	)
+
+	monitor := NewPRMonitor(d)
+	updates, err := monitor.RunOnce(ctx)
+	require.NoError(err)
+	assert.Empty(updates)
+
+	ws, err := d.GetWorkspace(ctx, workspaceID)
+	require.NoError(err)
+	require.NotNil(ws)
+	assert.Nil(ws.AssociatedPRNumber)
+}
+
+func TestPRMonitorRefreshWorkspaceAssociationReturnsInspectionError(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	repoID := seedRepo(t, d, "github.com", "acme", "widget")
+	seedIssue(t, d, repoID, 7, "Track workspace association")
+	workspaceID := insertMonitorWorkspace(
+		t, d, filepath.Join(t.TempDir(), "missing-worktree"), nil,
+	)
+
+	monitor := NewPRMonitor(d)
+	update, changed, err := monitor.RefreshWorkspaceAssociation(ctx, workspaceID)
+	require.Error(err)
+	require.ErrorContains(err, "detect associated PR")
+	assert.False(changed)
+	assert.Equal(PRAssociationUpdate{}, update)
+
+	updates, err := monitor.RunOnce(ctx)
+	require.NoError(err)
+	assert.Empty(updates)
+}
+
 func TestSelectPRByUpstream(t *testing.T) {
 	assert := Assert.New(t)
 	candidates := []db.MergeRequest{
@@ -402,15 +649,21 @@ func TestSelectPRByBranchRejectsAmbiguousMatches(t *testing.T) {
 		{Number: 44, HeadBranch: "wrong-head", PlatformHeadSHA: "def456"},
 	}
 
-	number, ok := selectPRByLocalBranch(candidates, "single-local", "abc123")
+	number, ok := selectPRByLocalBranch(
+		candidates, "single-local", "abc123", upstreamState{},
+	)
 	assert.True(ok)
 	assert.Equal(43, number)
 
-	number, ok = selectPRByLocalBranch(candidates, "shared-local", "abc123")
+	number, ok = selectPRByLocalBranch(
+		candidates, "shared-local", "abc123", upstreamState{},
+	)
 	assert.False(ok)
 	assert.Zero(number)
 
-	number, ok = selectPRByLocalBranch(candidates, "wrong-head", "abc123")
+	number, ok = selectPRByLocalBranch(
+		candidates, "wrong-head", "abc123", upstreamState{},
+	)
 	assert.False(ok)
 	assert.Zero(number)
 }

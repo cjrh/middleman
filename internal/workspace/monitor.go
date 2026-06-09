@@ -41,41 +41,75 @@ func (m *PRMonitor) RunOnce(
 			continue
 		}
 
-		prNumber, ok, detectErr := m.detectAssociatedPR(ctx, &ws)
-		if detectErr != nil {
+		update, changed, refreshErr := m.refreshWorkspaceAssociation(ctx, &ws)
+		if refreshErr != nil {
 			slog.Warn(
-				"workspace PR monitor git inspection failed",
+				"workspace PR monitor association refresh failed",
 				"workspace_id", ws.ID,
 				"path", ws.WorktreePath,
-				"err", detectErr,
-			)
-			continue
-		}
-		if !ok {
-			continue
-		}
-
-		changed, err := m.db.SetWorkspaceAssociatedPRNumberIfNull(
-			ctx, ws.ID, prNumber,
-		)
-		if err != nil {
-			slog.Warn(
-				"workspace PR monitor persistence failed",
-				"workspace_id", ws.ID,
-				"pr_number", prNumber,
-				"err", err,
+				"err", refreshErr,
 			)
 			continue
 		}
 		if changed {
-			updates = append(updates, PRAssociationUpdate{
-				WorkspaceID: ws.ID,
-				PRNumber:    prNumber,
-			})
+			updates = append(updates, update)
 		}
 	}
 
 	return updates, nil
+}
+
+// RefreshWorkspaceAssociation refreshes PR association for one workspace and
+// returns errors that would be best-effort in the background monitor loop.
+func (m *PRMonitor) RefreshWorkspaceAssociation(
+	ctx context.Context,
+	workspaceID string,
+) (PRAssociationUpdate, bool, error) {
+	ws, err := m.db.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return PRAssociationUpdate{}, false, fmt.Errorf("get workspace: %w", err)
+	}
+	if ws == nil {
+		return PRAssociationUpdate{}, false, fmt.Errorf(
+			"workspace %q not found", workspaceID,
+		)
+	}
+	return m.refreshWorkspaceAssociation(ctx, ws)
+}
+
+func (m *PRMonitor) refreshWorkspaceAssociation(
+	ctx context.Context,
+	ws *Workspace,
+) (PRAssociationUpdate, bool, error) {
+	if !workspacePRMonitorEligible(ws) {
+		return PRAssociationUpdate{}, false, nil
+	}
+
+	prNumber, ok, err := m.detectAssociatedPR(ctx, ws)
+	if err != nil {
+		return PRAssociationUpdate{}, false, fmt.Errorf(
+			"detect associated PR: %w", err,
+		)
+	}
+	if !ok {
+		return PRAssociationUpdate{}, false, nil
+	}
+
+	changed, err := m.db.SetWorkspaceAssociatedPRNumberIfNull(
+		ctx, ws.ID, prNumber,
+	)
+	if err != nil {
+		return PRAssociationUpdate{}, false, fmt.Errorf(
+			"set associated PR: %w", err,
+		)
+	}
+	if !changed {
+		return PRAssociationUpdate{}, false, nil
+	}
+	return PRAssociationUpdate{
+		WorkspaceID: ws.ID,
+		PRNumber:    prNumber,
+	}, true, nil
 }
 
 func workspacePRMonitorEligible(ws *Workspace) bool {
@@ -87,11 +121,10 @@ func workspacePRMonitorEligible(ws *Workspace) bool {
 }
 
 type upstreamState struct {
-	branchName    string
-	remoteName    string
-	remoteURL     string
-	hasTracking   bool
-	allowFallback bool
+	branchName  string
+	remoteName  string
+	remoteURL   string
+	hasTracking bool
 }
 
 func (m *PRMonitor) detectAssociatedPR(
@@ -105,25 +138,21 @@ func (m *PRMonitor) detectAssociatedPR(
 	if currentBranch == "" {
 		return 0, false, nil
 	}
-	// Skip while the workspace is still on its managed issue branch:
-	// no associated PR can exist yet. The bare-form fallback only
-	// applies when the workspace pre-dates the slug feature (empty
-	// GitHeadRef); otherwise a user who hand-checks-out the legacy
-	// bare branch name on a slug-style workspace would silently
-	// suppress PR detection for an unrelated branch.
-	managedBranch := ws.GitHeadRef
-	if managedBranch == "" {
-		managedBranch = issueWorkspaceBranch(ws.ItemNumber)
+	repo, err := m.db.GetRepoByIdentity(ctx, db.RepoIdentity{
+		Platform:     workspaceProvider(ws),
+		PlatformHost: ws.PlatformHost,
+		Owner:        ws.RepoOwner,
+		Name:         ws.RepoName,
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("get repo: %w", err)
 	}
-	if currentBranch == managedBranch {
+	if repo == nil {
 		return 0, false, nil
 	}
-
 	candidates, err := m.db.ListMergeRequests(ctx, db.ListMergeRequestsOpts{
-		PlatformHost: ws.PlatformHost,
-		RepoOwner:    ws.RepoOwner,
-		RepoName:     ws.RepoName,
-		State:        "open",
+		RepoID: repo.ID,
+		State:  "open",
 	})
 	if err != nil {
 		return 0, false, fmt.Errorf("list merge requests: %w", err)
@@ -137,16 +166,15 @@ func (m *PRMonitor) detectAssociatedPR(
 		if prNumber, ok := selectPRByUpstream(candidates, upstream); ok {
 			return prNumber, true, nil
 		}
-		if !upstream.allowFallback {
-			return 0, false, nil
-		}
 	}
 
 	headSHA, err := gitHeadSHA(ctx, ws.WorktreePath)
 	if err != nil {
 		return 0, false, err
 	}
-	if prNumber, ok := selectPRByLocalBranch(candidates, currentBranch, headSHA); ok {
+	if prNumber, ok := selectPRByLocalBranch(
+		candidates, currentBranch, headSHA, upstream,
+	); ok {
 		return prNumber, true, nil
 	}
 	return 0, false, nil
@@ -187,6 +215,7 @@ func selectPRByUpstream(
 func selectPRByLocalBranch(
 	candidates []db.MergeRequest,
 	currentBranch, currentHeadSHA string,
+	upstream upstreamState,
 ) (int, bool) {
 	currentHeadSHA = strings.TrimSpace(currentHeadSHA)
 	if currentBranch == "" || currentHeadSHA == "" {
@@ -197,7 +226,8 @@ func selectPRByLocalBranch(
 	for i := range candidates {
 		candidate := candidates[i]
 		if candidate.HeadBranch == currentBranch &&
-			strings.EqualFold(candidate.PlatformHeadSHA, currentHeadSHA) {
+			strings.EqualFold(candidate.PlatformHeadSHA, currentHeadSHA) &&
+			localBranchCandidateMatchesUpstream(candidate, upstream) {
 			matches = append(matches, candidate)
 		}
 	}
@@ -205,6 +235,20 @@ func selectPRByLocalBranch(
 		return 0, false
 	}
 	return matches[0].Number, true
+}
+
+func localBranchCandidateMatchesUpstream(
+	candidate db.MergeRequest,
+	upstream upstreamState,
+) bool {
+	if !upstream.hasTracking {
+		return true
+	}
+	remoteRepo := normalizeCloneRepoIdentity(upstream.remoteURL)
+	candidateRepo := normalizeCloneRepoIdentity(candidate.HeadRepoCloneURL)
+	return remoteRepo == "" ||
+		candidateRepo == "" ||
+		candidateRepo == remoteRepo
 }
 
 func gitBranchName(
@@ -241,12 +285,10 @@ func gitUpstreamState(
 		ctx, dir, "branch."+branch+".merge",
 	)
 	if remoteErr != nil || mergeErr != nil {
-		state.allowFallback = true
 		return state, nil
 	}
 
 	state.hasTracking = true
-	state.allowFallback = false
 	state.remoteName = remoteName
 	state.branchName = strings.TrimPrefix(mergeRef, "refs/heads/")
 	remoteURL, err := gitRemoteURL(ctx, dir, remoteName)
