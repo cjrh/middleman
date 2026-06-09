@@ -438,6 +438,11 @@ function treeFileItem(pageOrLocator: Page | ReturnType<Page["locator"]>, path: s
 }
 
 async function clickVisibleTarget(target: Locator): Promise<void> {
+  await expect(target).toBeVisible({ timeout: 10_000 });
+  await target.click({ timeout: 10_000 });
+}
+
+async function activateVisibleTarget(target: Locator): Promise<void> {
   await expect
     .poll(
       async () => {
@@ -464,7 +469,7 @@ async function clickVisibleTarget(target: Locator): Promise<void> {
 
 async function clickTreeFileItem(pageOrLocator: Page | ReturnType<Page["locator"]>, path: string): Promise<void> {
   const item = treeFileItem(pageOrLocator, path);
-  await clickVisibleTarget(item);
+  await activateVisibleTarget(item);
   await expect(item).toHaveAttribute("aria-selected", "true");
 }
 
@@ -617,7 +622,7 @@ async function clickPierreContextExpander(
     .filter({ visible: true })
     .nth(separatorIndex);
   const expander = separator.locator(buttonSelector).filter({ visible: true }).first();
-  await clickVisibleTarget(expander);
+  await activateVisibleTarget(expander);
 }
 
 async function expectPierreDarkBackgroundMatchesAppSurface(file: ReturnType<Page["locator"]>) {
@@ -941,6 +946,32 @@ async function selectPierreReviewLine(file: Locator, line: number, side: "left" 
   const target = file.locator(`.pierre-diff ${selector}`).first();
   await expect(target).toBeVisible({ timeout: 10_000 });
   await clickVisibleTarget(target.locator("[data-middleman-line-comment-button]"));
+}
+
+function inlineComposerFor(textarea: Locator): Locator {
+  return textarea.locator(
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' inline-composer ')][1]",
+  );
+}
+
+type BoundingBox = NonNullable<Awaited<ReturnType<Locator["boundingBox"]>>>;
+
+async function visibleBoundingBox(target: Locator): Promise<BoundingBox> {
+  let box: BoundingBox | null = null;
+  await expect
+    .poll(async () => {
+      box = await target.boundingBox();
+      return box !== null;
+    })
+    .toBe(true);
+  return box!;
+}
+
+async function submitInlineComposer(textarea: Locator): Promise<void> {
+  const composer = inlineComposerFor(textarea);
+  const addButton = composer.getByRole("button", { name: "Add comment" });
+  await expect(addButton).toBeEnabled();
+  await addButton.click();
 }
 
 // --- Functional tests ---
@@ -2649,13 +2680,11 @@ test.describe("diff view (git-backed)", () => {
       await expect(rightComposer).toBeVisible();
       await expect(rightComposer).toBeFocused();
       await expectPierreDiffFirstVisible(cacheFile, diffAdditionsSelector);
-      const cacheContentBox = await cacheFile.locator(".file-content").boundingBox();
-      const composerBox = await cacheFile.locator(".inline-composer").boundingBox();
-      expect(cacheContentBox).not.toBeNull();
-      expect(composerBox).not.toBeNull();
-      expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(cacheContentBox!.x + cacheContentBox!.width + 1);
+      const cacheContentBox = await visibleBoundingBox(cacheFile.locator(".file-content"));
+      const composerBox = await visibleBoundingBox(inlineComposerFor(rightComposer));
+      expect(composerBox.x + composerBox.width).toBeLessThanOrEqual(cacheContentBox.x + cacheContentBox.width + 1);
       await rightComposer.fill("Right-side cache note");
-      await page.getByRole("button", { name: "Add comment" }).click();
+      await submitInlineComposer(rightComposer);
       await expect(
         page.locator(".inline-draft-comment", {
           hasText: "Right-side cache note",
@@ -2669,7 +2698,7 @@ test.describe("diff view (git-backed)", () => {
       await expect(leftComposer).toBeVisible();
       await expect(leftComposer).toBeFocused();
       await leftComposer.fill("Left-side config note");
-      await page.getByRole("button", { name: "Add comment" }).click();
+      await submitInlineComposer(leftComposer);
       await expect(
         page.locator(".inline-draft-comment", {
           hasText: "Left-side config note",

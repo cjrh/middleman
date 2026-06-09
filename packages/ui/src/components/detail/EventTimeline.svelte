@@ -123,10 +123,12 @@
     force_push: "var(--accent-red)",
     assigned: "var(--accent-blue)",
     unassigned: "var(--text-muted)",
-    merged: "var(--accent-green)",
+    merged: "var(--accent-purple)",
     closed: "var(--text-muted)",
     reopened: "var(--accent-blue)",
   };
+
+  const mergedCloseCoalesceWindowMs = 60_000;
 
   function shouldRenderMarkdown(eventType: string): boolean {
     return eventType === "issue_comment" || eventType === "review" || eventType === "review_comment";
@@ -161,6 +163,61 @@
   function eventSortValue(event: PREvent | IssueEvent): number {
     const timestamp = Date.parse(event.CreatedAt);
     return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function lifecyclePreferenceScore(event: PREvent | IssueEvent): number {
+    return (
+      (event.Author ? 4 : 0) +
+      (event.PlatformID != null ? 2 : 0) +
+      (event.PlatformExternalID ? 1 : 0)
+    );
+  }
+
+  function preferredLifecycleEvent(
+    current: PREvent | IssueEvent | null,
+    candidate: PREvent | IssueEvent,
+  ): PREvent | IssueEvent {
+    if (current === null) return candidate;
+    const candidateScore = lifecyclePreferenceScore(candidate);
+    const currentScore = lifecyclePreferenceScore(current);
+    if (candidateScore !== currentScore) {
+      return candidateScore > currentScore ? candidate : current;
+    }
+    const candidateTime = eventSortValue(candidate);
+    const currentTime = eventSortValue(current);
+    if (candidateTime !== currentTime) {
+      return candidateTime > currentTime ? candidate : current;
+    }
+    return candidate.ID > current.ID ? candidate : current;
+  }
+
+  function isCoalescedMergedCloseEvent(
+    event: PREvent | IssueEvent,
+    mergedEvent: PREvent | IssueEvent,
+  ): boolean {
+    const eventTime = eventSortValue(event);
+    const mergedTime = eventSortValue(mergedEvent);
+    if (eventTime === 0 || mergedTime === 0) {
+      return event.CreatedAt === mergedEvent.CreatedAt;
+    }
+    const elapsedAfterMerge = eventTime - mergedTime;
+    return elapsedAfterMerge >= 0 && elapsedAfterMerge < mergedCloseCoalesceWindowMs;
+  }
+
+  function collapseLifecycleTransitions(
+    sourceEvents: Array<PREvent | IssueEvent>,
+  ): Array<PREvent | IssueEvent> {
+    const mergedEvent = sourceEvents
+      .filter((event) => event.EventType === "merged")
+      .reduce<PREvent | IssueEvent | null>(preferredLifecycleEvent, null);
+
+    if (mergedEvent === null) return sourceEvents;
+
+    return sourceEvents.filter((event) => {
+      if (event.EventType === "merged") return event.ID === mergedEvent.ID;
+      if (event.EventType === "closed" && isCoalescedMergedCloseEvent(event, mergedEvent)) return false;
+      return true;
+    });
   }
 
   function compareEventsAscending(a: PREvent | IssueEvent, b: PREvent | IssueEvent): number {
@@ -482,7 +539,9 @@
     return entries;
   }
 
-  const timelineEntries = $derived(buildTimelineEntries(events, orderingEvents));
+  const displayEvents = $derived(collapseLifecycleTransitions(events));
+  const displayOrderingEvents = $derived(collapseLifecycleTransitions(orderingEvents));
+  const timelineEntries = $derived(buildTimelineEntries(displayEvents, displayOrderingEvents));
 
   function isCompactEvent(eventType: string): boolean {
     return (
