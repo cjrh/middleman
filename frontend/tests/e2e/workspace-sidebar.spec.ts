@@ -159,6 +159,12 @@ type RuntimeEvents = {
  * priority (Playwright uses LIFO route matching).
  */
 type WorkspaceFixture = typeof testWorkspace | typeof testIssueWorkspace | typeof testIssueWorkspaceWithAssociatedPR;
+type WorkspaceCommitFixture = {
+  sha: string;
+  message: string;
+  author_name: string;
+  authored_at: string;
+};
 
 async function setupTerminalMocks(
   page: import("@playwright/test").Page,
@@ -179,6 +185,9 @@ async function setupTerminalMocks(
       status: number;
       body?: unknown;
     };
+    diffRequests?: string[];
+    commitRequests?: string[];
+    workspaceCommitResponses?: WorkspaceCommitFixture[][];
     runtime?: WorkspaceRuntime;
     runtimeEvents?: RuntimeEvents;
   },
@@ -189,6 +198,25 @@ async function setupTerminalMocks(
   const rrStatus = opts?.roborevStatus ?? roborevStatus;
   const detailResponses = [...(opts?.workspaceDetailResponses ?? [])];
   const deleteResponses = [...(opts?.workspaceDeleteResponses ?? [])];
+  const commitResponses = [
+    ...(opts?.workspaceCommitResponses ?? [
+      [
+        {
+          sha: "sha2",
+          message: "second commit",
+          author_name: "Alice",
+          authored_at: "2026-01-01T00:00:00Z",
+        },
+        {
+          sha: "sha1",
+          message: "first commit",
+          author_name: "Alice",
+          authored_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    ]),
+  ];
+  let commitResponseIndex = 0;
   const runtime = JSON.parse(JSON.stringify(opts?.runtime ?? workspaceRuntime)) as WorkspaceRuntime;
 
   // Register catch-all first — later routes override.
@@ -227,6 +255,81 @@ async function setupTerminalMocks(
       status: response.status,
       contentType: "application/json",
       body: JSON.stringify(response.body ?? {}),
+    });
+  });
+
+  await page.route(`**/api/v1/workspaces/${ws.id}/refresh`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fulfill({ status: 405 });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ws),
+    });
+  });
+
+  await page.route(`**/api/v1/workspaces/${ws.id}/files*`, async (route) => {
+    opts?.diffRequests?.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        stale: false,
+        whitespace_only_count: 0,
+        files: [
+          {
+            path: "src/auth.go",
+            old_path: "src/auth.go",
+            status: "modified",
+            is_binary: false,
+            is_whitespace_only: false,
+            additions: 1,
+            deletions: 1,
+            hunks: [],
+            patch: "",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/api/v1/workspaces/${ws.id}/diff*`, async (route) => {
+    opts?.diffRequests?.push(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        stale: false,
+        whitespace_only_count: 0,
+        files: [
+          {
+            path: "src/auth.go",
+            old_path: "src/auth.go",
+            status: "modified",
+            is_binary: false,
+            is_whitespace_only: false,
+            additions: 1,
+            deletions: 1,
+            hunks: [],
+            patch: "",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/api/v1/workspaces/${ws.id}/commits`, async (route) => {
+    opts?.commitRequests?.push(route.request().url());
+    const commits = commitResponses[Math.min(commitResponseIndex, commitResponses.length - 1)] ?? [];
+    commitResponseIndex += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        commits,
+      }),
     });
   });
 
@@ -615,6 +718,26 @@ function closedTopDockedTerminalWorkflowLayout() {
   };
 }
 
+function hasWorkspaceDiffRequest(
+  requests: string[],
+  expected: {
+    base: string;
+    commit?: string | null;
+  },
+): boolean {
+  return requests.some((requestURL) => {
+    const url = new URL(requestURL);
+    return (
+      url.pathname === "/api/v1/workspaces/ws-123/diff" &&
+      url.searchParams.get("base") === expected.base &&
+      (expected.commit === undefined ||
+        (expected.commit === null
+          ? !url.searchParams.has("commit") && !url.searchParams.has("from") && !url.searchParams.has("to")
+          : url.searchParams.get("commit") === expected.commit))
+    );
+  });
+}
+
 function shellWorkflowPreset() {
   return {
     id: "preset-shell",
@@ -721,6 +844,87 @@ test.describe("terminal state icons", () => {
     const stateMessage = page.locator(".state-message");
     await expect(stateMessage).toContainText("Setting up workspace...");
     await expect(stateMessage.locator(".spinner")).toBeVisible();
+  });
+
+  test("refresh preserves workspace diff target and commit selection", async ({ page }) => {
+    const diffRequests: string[] = [];
+    const commitRequests: string[] = [];
+    await setupTerminalMocks(page, { diffRequests, commitRequests });
+
+    await page.goto("/terminal/ws-123");
+    await page.locator(".seg-btn", { hasText: "Diff" }).click();
+
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "head" })).toBe(true);
+
+    await page.getByRole("button", { name: "Compare with merge target" }).click();
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "merge-target" })).toBe(true);
+
+    await page.getByRole("button", { name: /Select commit range/ }).click();
+    await page.getByRole("button", { name: /second commit/ }).click();
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "merge-target", commit: "sha2" })).toBe(true);
+
+    diffRequests.length = 0;
+    commitRequests.length = 0;
+    await page.getByRole("button", { name: "Refresh workspace details" }).click();
+
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "merge-target", commit: "sha2" })).toBe(true);
+    await expect.poll(() => commitRequests.length).toBeGreaterThan(0);
+    await expect(page.getByRole("button", { name: "Compare with merge target" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  test("refresh clears workspace diff commit selection when the commit disappears", async ({ page }) => {
+    const diffRequests: string[] = [];
+    const commitRequests: string[] = [];
+    await setupTerminalMocks(page, {
+      diffRequests,
+      commitRequests,
+      workspaceCommitResponses: [
+        [
+          {
+            sha: "sha2",
+            message: "second commit",
+            author_name: "Alice",
+            authored_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        [
+          {
+            sha: "sha3",
+            message: "third commit",
+            author_name: "Alice",
+            authored_at: "2026-01-02T00:00:00Z",
+          },
+        ],
+      ],
+    });
+
+    await page.goto("/terminal/ws-123");
+    await page.locator(".seg-btn", { hasText: "Diff" }).click();
+
+    await page.getByRole("button", { name: "Compare with merge target" }).click();
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "merge-target" })).toBe(true);
+
+    const scopeTrigger = page.getByRole("button", { name: /Select commit range/ });
+    await scopeTrigger.click();
+    await page.getByRole("button", { name: /second commit/ }).click();
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "merge-target", commit: "sha2" })).toBe(true);
+    await expect(scopeTrigger).toHaveAccessibleName(/Select commit range: sha2/);
+
+    diffRequests.length = 0;
+    commitRequests.length = 0;
+    await page.getByRole("button", { name: "Refresh workspace details" }).click();
+
+    await expect.poll(() => commitRequests.length).toBeGreaterThan(0);
+    await expect.poll(() => hasWorkspaceDiffRequest(diffRequests, { base: "merge-target", commit: null })).toBe(true);
+    expect(diffRequests.some((requestURL) => new URL(requestURL).searchParams.get("commit") === "sha2")).toBe(false);
+    await expect(scopeTrigger).toHaveAccessibleName(/Select commit range: HEAD/);
+    await expect(page.getByRole("button", { name: "Compare with merge target" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   test("workspace load failure shows alert icon and retry recovers", async ({ page }) => {

@@ -23,6 +23,14 @@ export type DiffScope =
 export type WorkspaceDiffBase = "head" | "pushed" | "merge-target";
 export type DiffViewMode = "unified" | "split";
 
+export interface LoadWorkspaceDiffOptions {
+  refreshCommits?: boolean;
+}
+
+interface LoadCommitsOptions {
+  force?: boolean;
+}
+
 export type DiffScrollTarget = {
   path: string;
   line?: number | undefined;
@@ -151,6 +159,7 @@ export function createDiffStore(opts?: DiffStoreOptions) {
   let commits = $state<CommitInfo[] | null>(null);
   let commitsLoading = $state(false);
   let commitsError = $state<string | null>(null);
+  let commitsGeneration = 0;
   let scope = $state<DiffScope>({ kind: "head" });
   let filePreviewGeneration = $state(0);
   const filePreviewCache = new Map<string, Promise<FilePreview>>();
@@ -550,6 +559,16 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     commitsError = null;
   }
 
+  function resetScopeIfMissingFromLoadedCommits(): void {
+    if (!commits || scope.kind === "head") return;
+    const hasCommit = (sha: string) => commits?.some((commit) => commit.sha === sha) ?? false;
+    const scopeStillExists =
+      scope.kind === "commit" ? hasCommit(scope.sha) : hasCommit(scope.fromSha) && hasCommit(scope.toSha);
+    if (scopeStillExists) return;
+    scope = { kind: "head" };
+    clearFilePreviewCache();
+  }
+
   function startDiffLoad(): {
     diffAc: AbortController;
     filesAc: AbortController;
@@ -672,8 +691,17 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     await Promise.allSettled([filesPromise, diffPromise]);
   }
 
-  async function loadWorkspaceDiff(workspaceID: string, base: WorkspaceDiffBase, stacked = false): Promise<void> {
+  async function loadWorkspaceDiff(
+    workspaceID: string,
+    base: WorkspaceDiffBase,
+    stacked = false,
+    options: LoadWorkspaceDiffOptions = {},
+  ): Promise<void> {
     const workspaceScopeChanged = workspaceID !== currentWorkspaceID || base !== currentWorkspaceBase;
+    const shouldRefreshCommits =
+      options.refreshCommits === true &&
+      !workspaceScopeChanged &&
+      (commits !== null || commitsLoading || commitsError !== null);
     currentWorkspaceID = workspaceID;
     currentWorkspaceBase = base;
     currentWorkspaceStacked = stacked;
@@ -683,6 +711,11 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     currentCommitSHA = "";
     if (workspaceScopeChanged) {
       resetDiffScopeState();
+    }
+    if (shouldRefreshCommits) {
+      await loadCommits({ force: true });
+      if (currentWorkspaceID !== workspaceID || currentWorkspaceBase !== base) return;
+      resetScopeIfMissingFromLoadedCommits();
     }
 
     const { diffAc, filesAc } = startDiffLoad();
@@ -814,14 +847,22 @@ export function createDiffStore(opts?: DiffStoreOptions) {
     currentRepoPath = "";
   }
 
-  async function loadCommits(): Promise<void> {
-    if (commits || commitsLoading) return;
+  async function loadCommits(options: LoadCommitsOptions = {}): Promise<void> {
+    if (options.force) {
+      commitsGeneration += 1;
+      commits = null;
+      commitsLoading = false;
+      commitsError = null;
+    } else if (commits || commitsLoading) {
+      return;
+    }
     if (!currentWorkspaceID && (!currentOwner || !currentName || !currentNumber)) {
       return;
     }
 
     commitsLoading = true;
     commitsError = null;
+    const generation = commitsGeneration;
     const owner = currentOwner;
     const name = currentName;
     const number = currentNumber;
@@ -839,7 +880,8 @@ export function createDiffStore(opts?: DiffStoreOptions) {
         currentWorkspaceID !== workspaceID ||
         currentOwner !== owner ||
         currentName !== name ||
-        currentNumber !== number
+        currentNumber !== number ||
+        generation !== commitsGeneration
       )
         return;
       if (!data) {
@@ -849,7 +891,8 @@ export function createDiffStore(opts?: DiffStoreOptions) {
         currentWorkspaceID !== workspaceID ||
         currentOwner !== owner ||
         currentName !== name ||
-        currentNumber !== number
+        currentNumber !== number ||
+        generation !== commitsGeneration
       )
         return;
       commits = data.commits ?? [];
@@ -858,7 +901,8 @@ export function createDiffStore(opts?: DiffStoreOptions) {
         currentWorkspaceID !== workspaceID ||
         currentOwner !== owner ||
         currentName !== name ||
-        currentNumber !== number
+        currentNumber !== number ||
+        generation !== commitsGeneration
       )
         return;
       commitsError = err instanceof Error ? err.message : String(err);
@@ -867,7 +911,8 @@ export function createDiffStore(opts?: DiffStoreOptions) {
         currentWorkspaceID === workspaceID &&
         currentOwner === owner &&
         currentName === name &&
-        currentNumber === number
+        currentNumber === number &&
+        generation === commitsGeneration
       ) {
         commitsLoading = false;
       }
