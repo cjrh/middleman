@@ -194,12 +194,20 @@ async function mockDefaultBranchActivity(page: Page): Promise<void> {
     });
   });
   await page.route("**/api/v1/activity**", async (route) => {
+    // Mirror the real API: when a types filter is present, only return
+    // matching activity_type rows (internal/db/queries_activity.go).
+    const url = new URL(route.request().url());
+    const types = url.searchParams.getAll("types").flatMap((value) => value.split(","));
+    const items =
+      types.length > 0
+        ? activityItems.filter((item) => types.includes((item as { activity_type: string }).activity_type))
+        : activityItems;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         capped: false,
-        items: activityItems,
+        items,
       }),
     });
   });
@@ -316,6 +324,62 @@ test.describe("default branch activity", () => {
     await expect(
       page.locator(".activity-row", {
         hasText: "Add browser regression coverage",
+      }),
+    ).toBeVisible();
+  });
+
+  test("deselecting Commits hides default-branch commit rows", async ({ page }) => {
+    await mockDefaultBranchActivity(page);
+    await page.goto("/?view=flat");
+
+    const commitRows = page.locator(".activity-row", {
+      hasText: "Ship direct main commit",
+    });
+    await expect(commitRows).toHaveCount(5);
+
+    await selectActivityFilterItem(page, "Commits");
+
+    await expect(commitRows).toHaveCount(0);
+    // Other activity is unaffected: the force push and the PR comment remain.
+    await expect(page.locator(".activity-row", { hasText: "aaaaaaa -> bbbbbbb" })).toBeVisible();
+    await expect(
+      page.locator(".activity-row", {
+        hasText: "Add browser regression coverage",
+      }),
+    ).toBeVisible();
+  });
+
+  test("legacy URL with stale default-branch commit types hides commit rows on load", async ({ page }) => {
+    await mockDefaultBranchActivity(page);
+    // URLs written before the fix kept default_branch_commit in the types
+    // param even with commit deselected; hydration must normalize it away.
+    await page.goto(
+      "/?view=flat&types=new_pr,new_issue,default_branch_commit,default_branch_force_push,comment,review,force_push",
+    );
+
+    await expect(page.locator(".activity-row", { hasText: "aaaaaaa -> bbbbbbb" })).toBeVisible();
+    await expect(
+      page.locator(".activity-row", {
+        hasText: "Ship direct main commit",
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("deselecting Force pushes hides default-branch force pushes", async ({ page }) => {
+    await mockDefaultBranchActivity(page);
+    await page.goto("/?view=flat");
+
+    const forcePushRow = page.locator(".activity-row", {
+      hasText: "aaaaaaa -> bbbbbbb",
+    });
+    await expect(forcePushRow).toBeVisible();
+
+    await selectActivityFilterItem(page, "Force pushes");
+
+    await expect(forcePushRow).toHaveCount(0);
+    await expect(
+      page.locator(".activity-row", {
+        hasText: "Ship direct main commit 1",
       }),
     ).toBeVisible();
   });
