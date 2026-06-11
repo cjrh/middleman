@@ -92,6 +92,11 @@
   let syncedRouteViewName: KataTaskViewName | null = null;
   let syncedRouteScopeUID: string | null = null;
   let navigationGeneration = 0;
+  // Reactive shadow of navigationGeneration so the issue list can drop
+  // a pending keyboard selection the moment any navigation starts —
+  // the list only remounts after the new view's data arrives, which is
+  // too late for a selection released mid-transition.
+  let navigationEpoch = $state(0);
   let observedRouteSignature = "";
   const layoutStorageKey = "middleman:kata:task-layout/v1";
   const defaultSplitSizes: Record<SplitOrientation, number> = {
@@ -235,6 +240,7 @@
 
   function beginNavigation(): number {
     navigationGeneration += 1;
+    navigationEpoch = navigationGeneration;
     return navigationGeneration;
   }
 
@@ -464,6 +470,9 @@
   async function updateSearchFilters(filters: Partial<KataTaskSearchFilters>): Promise<void> {
     const generation = beginNavigation();
     resetDetailDrafts();
+    // Same rationale as openRoutedProjectScope: a pending detail load is
+    // abandoned by the filter reload, so drop it before awaiting.
+    store.invalidatePendingLoads();
     await runViewTask(() => store.updateSearchFilters(filters));
     if (!isCurrentNavigation(generation)) return;
     const nextScopeUID = scopeUIDFromFilters(store.searchFilters);
@@ -483,9 +492,13 @@
     const generation = beginNavigation();
     resetDetailDrafts();
     store.resetSearchFilters();
+    // Clear (and thereby abort) the abandoned selection before awaiting
+    // the new view: while that fetch is in flight, a still-running
+    // detail load could fail and surface a stale error for a selection
+    // this navigation has already discarded.
+    store.clearSelection();
     await runViewTask(() => store.openView(viewName, { selectFirst: false }));
     if (!isCurrentNavigation(generation)) return;
-    store.clearSelection();
     syncedRouteViewName = viewName;
     syncedRouteScopeUID = null;
     syncedRouteIssueUID = null;
@@ -499,6 +512,12 @@
   async function openRoutedProjectScope(projectUID: string): Promise<void> {
     const generation = beginNavigation();
     resetDetailDrafts();
+    // Scope changes keep a completed selection but abandon an in-flight
+    // one (the scoped reload re-selects from selectedIssue, which a
+    // pending load hasn't populated). Invalidate up front so the doomed
+    // detail request can't fail into a stale workspace error while the
+    // scoped list is still loading.
+    store.invalidatePendingLoads();
     const ok = await runViewTask(() => store.updateSearchFilters({ scope: { kind: "project", project_uid: projectUID } }));
     if (!ok || !isCurrentNavigation(generation)) return;
     syncedRouteViewName = null;
@@ -541,6 +560,11 @@
     switchingDaemon = true;
     resetDetailDrafts();
     resetIssueExpansion();
+    // The switch abandons any in-flight detail load (only a completed
+    // selection is captured for restore above), so drop it before the
+    // daemon reload: its failure mid-switch would otherwise surface a
+    // stale error from the previous daemon.
+    store.invalidatePendingLoads();
     setActiveKataDaemon(id);
     stopEventStream();
     try {
@@ -807,6 +831,7 @@
         selectedIssueUID={store.pendingSelectionUID ?? store.selectedIssue?.issue.uid ?? null}
         loading={viewLoading}
         resetGeneration={listResetGeneration}
+        navigationGeneration={navigationEpoch}
         api={store.api}
         onSelect={(issue) => {
           void selectIssue(issue.uid);

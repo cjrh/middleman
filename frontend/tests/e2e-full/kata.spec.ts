@@ -40,7 +40,17 @@ type BackendState = {
   eventsBarrier?: Promise<void> | undefined;
   issuesBarrier?: Promise<void> | undefined;
   searchBarriers: Map<string, Promise<void>>;
+  issueDetailGates: Map<string, IssueDetailGate>;
   onEventsRequest?: ((state: BackendState, url: URL) => void) | undefined;
+};
+
+// Stalls one issue-detail response until `barrier` resolves; when
+// `status` is set the gated response is that error instead of the
+// normal detail body. Lets tests race navigation against an
+// in-flight detail load.
+type IssueDetailGate = {
+  barrier: Promise<void>;
+  status?: number | undefined;
 };
 
 type MsgvaultBackendState = {
@@ -155,6 +165,7 @@ type KataBackendOptions = {
   eventsBarrier?: Promise<void> | undefined;
   issuesBarrier?: Promise<void> | undefined;
   searchBarriers?: Map<string, Promise<void>> | undefined;
+  issueDetailGates?: Map<string, IssueDetailGate> | undefined;
   onEventsRequest?: ((state: BackendState, url: URL) => void) | undefined;
 };
 
@@ -345,6 +356,7 @@ async function startKataBackend(options: KataBackendOptions = {}): Promise<Backe
     eventsBarrier: options.eventsBarrier,
     issuesBarrier: options.issuesBarrier,
     searchBarriers: options.searchBarriers ?? new Map(),
+    issueDetailGates: options.issueDetailGates ?? new Map(),
     onEventsRequest: options.onEventsRequest,
   };
   const server = createServer((req, res) => {
@@ -506,7 +518,19 @@ async function handleKataRequest(state: BackendState, req: IncomingMessage, res:
 
   const issueDetailRoute = /^\/api\/v1\/issues\/([^/]+)$/.exec(url.pathname);
   if (issueDetailRoute) {
-    writeIssueDetail(state, res, decodeURIComponent(issueDetailRoute[1] ?? ""));
+    const uid = decodeURIComponent(issueDetailRoute[1] ?? "");
+    const gate = state.issueDetailGates.get(uid);
+    if (gate) {
+      state.issueDetailGates.delete(uid);
+      await gate.barrier;
+      if (gate.status !== undefined) {
+        writeJSON(res, gate.status, {
+          error: { code: "internal", message: "kata daemon exploded" },
+        });
+        return;
+      }
+    }
+    writeIssueDetail(state, res, uid);
     return;
   }
 
@@ -2131,6 +2155,444 @@ test("kata task list keyboard navigation moves focus and selection", async ({ pa
     await expect(page.getByRole("region", { name: "Task detail" })).toContainText(
       "Confirm the Q3 project review agenda.",
     );
+  } finally {
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata route change aborts a pending detail load instead of surfacing its late failure", async ({ page }) => {
+  let releaseDetail = () => {};
+  const stalledDetail = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let releaseIssues = () => {};
+  const stalledIssues = new Promise<void>((resolve) => {
+    releaseIssues = resolve;
+  });
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    await page.getByRole("button", { name: /^Today/ }).click();
+    const rentRow = page.getByRole("button", { name: /Pay rent/ });
+    await expect(rentRow).toBeVisible();
+
+    // Stall Pay rent's detail response, then select it so the load hangs.
+    backend.state.issueDetailGates.set("issue-rent", { barrier: stalledDetail, status: 500 });
+    await rentRow.click();
+    await expect.poll(() => backend.state.seenPaths).toContain("GET /api/v1/issues/issue-rent");
+
+    // Navigate back to All Open while the detail load is in flight, and
+    // stall the new view's issues fetch so the route transition stays
+    // mid-flight when the superseded detail request finally fails.
+    backend.state.issuesBarrier = stalledIssues;
+    await page.goBack();
+
+    // The daemon now fails the superseded request. Route invalidation
+    // aborted it, so the failure must not surface as a workspace error.
+    releaseDetail();
+    await page.waitForTimeout(750);
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+
+    releaseIssues();
+    await expect(page.getByRole("heading", { name: "All Open", level: 2 })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+  } finally {
+    releaseDetail();
+    releaseIssues();
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata view change drops a held keyboard selection from the previous view", async ({ page }) => {
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    const rows = page.locator(".issue-list .issue-row");
+    await expect(rows.first()).toContainText("Email Susan re: Q3");
+    await expect(rows.nth(1)).toContainText("Pay rent");
+
+    // Hold j so the pending selection of Pay rent stays parked, then
+    // switch views while it is still held. Pay rent also exists in the
+    // Today view, so a stale commit after the switch would still
+    // resolve and fetch it — the view change must drop the pending
+    // selection instead.
+    await rows.first().focus();
+    await page.keyboard.down("j");
+    await page.getByRole("button", { name: /^Today/ }).click();
+    await expect(page.locator(".issue-list").getByRole("heading", { name: "Today", level: 2 })).toBeVisible();
+    await page.keyboard.up("j");
+
+    await page.waitForTimeout(750);
+    expect(backend.state.seenPaths).not.toContain("GET /api/v1/issues/issue-rent");
+    await expect(page.getByText("Select a task")).toBeVisible();
+  } finally {
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata sidebar view click aborts a pending detail load before the new view arrives", async ({ page }) => {
+  let releaseDetail = () => {};
+  const stalledDetail = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let releaseIssues = () => {};
+  const stalledIssues = new Promise<void>((resolve) => {
+    releaseIssues = resolve;
+  });
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    const rentRow = page.locator(".issue-list .issue-row", { hasText: "Pay rent" });
+    await expect(rentRow).toBeVisible();
+
+    // Select Pay rent with its detail response stalled, then click a
+    // sidebar view whose issues fetch is also stalled. The navigation
+    // abandons the selection, so the doomed detail request must be
+    // aborted at click time — not after the new view's data arrives —
+    // or its failure paints a stale error over the transition.
+    backend.state.issueDetailGates.set("issue-rent", { barrier: stalledDetail, status: 500 });
+    await rentRow.click();
+    await expect.poll(() => backend.state.seenPaths).toContain("GET /api/v1/issues/issue-rent");
+
+    backend.state.issuesBarrier = stalledIssues;
+    await page.getByRole("button", { name: /^Today/ }).click();
+    releaseDetail();
+    await page.waitForTimeout(750);
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+
+    releaseIssues();
+    await expect(page.locator(".issue-list").getByRole("heading", { name: "Today", level: 2 })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+  } finally {
+    releaseDetail();
+    releaseIssues();
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata project scope click drops a pending detail load before the scoped list arrives", async ({ page }) => {
+  let releaseDetail = () => {};
+  const stalledDetail = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let releaseIssues = () => {};
+  const stalledIssues = new Promise<void>((resolve) => {
+    releaseIssues = resolve;
+  });
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    const rentRow = page.locator(".issue-list .issue-row", { hasText: "Pay rent" });
+    await expect(rentRow).toBeVisible();
+
+    // Select Pay rent with its detail stalled, then scope to a project
+    // whose backlog fetch is also stalled. The scoped reload abandons
+    // the in-flight selection, so its failing detail request must be
+    // dropped at click time rather than painting a stale error while
+    // the scoped list loads.
+    backend.state.issueDetailGates.set("issue-rent", { barrier: stalledDetail, status: 500 });
+    await rentRow.click();
+    await expect.poll(() => backend.state.seenPaths).toContain("GET /api/v1/issues/issue-rent");
+
+    backend.state.issuesBarrier = stalledIssues;
+    await page.getByRole("button", { name: "Finances 1", exact: true }).click();
+    releaseDetail();
+    await page.waitForTimeout(750);
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+
+    releaseIssues();
+    await expect(page.locator(".issue-list").getByRole("heading", { name: "Finances", level: 2 })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+  } finally {
+    releaseDetail();
+    releaseIssues();
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata search filter change drops a pending detail load before results arrive", async ({ page }) => {
+  let releaseDetail = () => {};
+  const stalledDetail = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let releaseIssues = () => {};
+  const stalledIssues = new Promise<void>((resolve) => {
+    releaseIssues = resolve;
+  });
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    const rentRow = page.locator(".issue-list .issue-row", { hasText: "Pay rent" });
+    await expect(rentRow).toBeVisible();
+
+    // Select Pay rent with its detail stalled, then type a search query
+    // whose results fetch is also stalled. The filter reload abandons
+    // the in-flight selection, so its failing detail request must be
+    // dropped when the filter changes — not after results arrive.
+    backend.state.issueDetailGates.set("issue-rent", { barrier: stalledDetail, status: 500 });
+    await rentRow.click();
+    await expect.poll(() => backend.state.seenPaths).toContain("GET /api/v1/issues/issue-rent");
+
+    backend.state.issuesBarrier = stalledIssues;
+    await page.getByLabel("Search tasks").fill("susan");
+    releaseDetail();
+    await page.waitForTimeout(750);
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+
+    releaseIssues();
+    await expect(page.locator(".issue-list").getByRole("button", { name: /Email Susan re: Q3/ })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+  } finally {
+    releaseDetail();
+    releaseIssues();
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata daemon switch drops a pending detail load from the previous daemon", async ({ page }) => {
+  let releaseDetail = () => {};
+  const stalledDetail = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let releaseIssues = () => {};
+  const stalledIssues = new Promise<void>((resolve) => {
+    releaseIssues = resolve;
+  });
+  const home = await startKataBackend();
+  const work = await startKataBackend();
+  const kataHome = await configureKataHomeDaemons(
+    [
+      { name: "home", url: home.url },
+      { name: "work", url: work.url },
+    ],
+    "home",
+  );
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    const rentRow = page.locator(".issue-list .issue-row", { hasText: "Pay rent" });
+    await expect(rentRow).toBeVisible();
+
+    // Select Pay rent on the home daemon with its detail stalled, then
+    // switch daemons while the new daemon's issue list is also stalled.
+    // The switch abandons the selection, so the old daemon's failing
+    // detail request must not paint an error over the switch.
+    home.state.issueDetailGates.set("issue-rent", { barrier: stalledDetail, status: 500 });
+    await rentRow.click();
+    await expect.poll(() => home.state.seenPaths).toContain("GET /api/v1/issues/issue-rent");
+
+    work.state.issuesBarrier = stalledIssues;
+    await page.getByTestId("daemon-chip").click();
+    await page.getByTestId("daemon-row-work").click();
+    releaseDetail();
+    await page.waitForTimeout(750);
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+
+    releaseIssues();
+    await expect(page.getByTestId("daemon-chip")).toContainText("work");
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Connection: error" })).toHaveCount(0);
+  } finally {
+    releaseDetail();
+    releaseIssues();
+    await server.stop();
+    kataHome.restore();
+    await home.close();
+    await work.close();
+  }
+});
+
+test("kata key released during a stalled view transition does not commit a stale selection", async ({ page }) => {
+  let releaseIssues = () => {};
+  const stalledIssues = new Promise<void>((resolve) => {
+    releaseIssues = resolve;
+  });
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata?view=all`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    const rows = page.locator(".issue-list .issue-row");
+    await expect(rows.first()).toContainText("Email Susan re: Q3");
+    await expect(rows.nth(1)).toContainText("Pay rent");
+
+    // Hold j (parking a pending selection of Pay rent), then start a
+    // view change whose issues fetch is stalled. The old list is still
+    // mounted while that fetch hangs, so releasing the key here would —
+    // without the navigation-epoch cancel — commit the stale selection,
+    // fetch Pay rent's detail, and supersede the in-flight navigation
+    // so the route never updates.
+    await rows.first().focus();
+    await page.keyboard.down("j");
+    backend.state.issuesBarrier = stalledIssues;
+    await page.getByRole("button", { name: /^Today/ }).click();
+    await page.keyboard.up("j");
+    await page.waitForTimeout(750);
+
+    releaseIssues();
+    await expect(page.locator(".issue-list").getByRole("heading", { name: "Today", level: 2 })).toBeVisible();
+    await expect(page).toHaveURL(/view=today/);
+    await expect(page.getByText("Select a task")).toBeVisible();
+    expect(backend.state.seenPaths).not.toContain("GET /api/v1/issues/issue-rent");
+  } finally {
+    releaseIssues();
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata task list keyboard scrolling only fetches the final settled task", async ({ page }) => {
+  const traversal = [
+    issueSummary({
+      id: 31,
+      uid: "issue-first",
+      project_id: 2,
+      project_uid: "project-kata",
+      project_name: "Kata",
+      short_id: "kat-31",
+      qualified_id: "Kata#kat-31",
+      title: "First task",
+      body: "First task body.",
+      labels: [],
+    }),
+    {
+      ...issueSummary({
+        id: 32,
+        uid: "issue-skipped",
+        project_id: 2,
+        project_uid: "project-kata",
+        project_name: "Kata",
+        short_id: "kat-32",
+        qualified_id: "Kata#kat-32",
+        title: "Skipped task",
+        body: "Skipped task body.",
+        labels: [],
+      }),
+      updated_at: "2026-05-15T09:00:00Z",
+    },
+    {
+      ...issueSummary({
+        id: 33,
+        uid: "issue-settled",
+        project_id: 2,
+        project_uid: "project-kata",
+        project_name: "Kata",
+        short_id: "kat-33",
+        qualified_id: "Kata#kat-33",
+        title: "Settled task",
+        body: "Settled task body.",
+        labels: [],
+      }),
+      updated_at: "2026-05-15T08:00:00Z",
+    },
+  ];
+  const backend = await startKataBackend({ issues: traversal });
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    await page.getByRole("button", { name: "All Open" }).click();
+    const rows = page.locator(".issue-list .issue-row");
+    await expect(rows.first()).toContainText("First task");
+    await expect(rows.nth(1)).toContainText("Skipped task");
+    await expect(rows.nth(2)).toContainText("Settled task");
+
+    // Hold j across the first two rows: keydowns move focus immediately,
+    // but the selection must not commit until the key is released. The
+    // waits between steps deliberately exceed the 50ms debounce — a
+    // timer-only debounce (no held-key gate) commits each traversed row
+    // whenever the OS key-repeat interval outlasts the debounce window,
+    // which is the regression this test pins.
+    await rows.first().focus();
+    await page.keyboard.down("j");
+    await expect(rows.nth(1)).toBeFocused();
+    await page.waitForTimeout(150);
+    expect(backend.state.seenPaths).not.toContain("GET /api/v1/issues/issue-skipped");
+
+    await page.keyboard.down("j");
+    await expect(rows.nth(2)).toBeFocused();
+    await page.waitForTimeout(150);
+    expect(backend.state.seenPaths).not.toContain("GET /api/v1/issues/issue-settled");
+
+    await page.keyboard.up("j");
+    await expect(page.getByRole("region", { name: "Task detail" })).toContainText("Settled task body.");
+    await expect.poll(() => backend.state.seenPaths).toContain("GET /api/v1/issues/issue-settled");
+    const detailFetches = backend.state.seenPaths.filter((path) => path.startsWith("GET /api/v1/issues/"));
+    expect(detailFetches).toEqual(["GET /api/v1/issues/issue-settled"]);
+  } finally {
+    await server.stop();
+    kataHome.restore();
+    await backend.close();
+  }
+});
+
+test("kata task list selection settles when Shift is released before G", async ({ page }) => {
+  const backend = await startKataBackend();
+  const kataHome = await configureKataHome(backend.url);
+  const server = await startIsolatedE2EServer();
+
+  try {
+    await page.goto(`${server.info.base_url}/kata`);
+    await expect(page.getByRole("status", { name: "Connection: online" })).toBeVisible();
+    await page.getByRole("button", { name: "All Open" }).click();
+    const rows = page.locator(".issue-list .issue-row");
+    await expect(rows.first()).toContainText("Email Susan re: Q3");
+    await expect(rows.nth(1)).toContainText("Pay rent");
+
+    // Shift+g jumps to the end. The keydown reports key "G", but
+    // releasing Shift first makes the keyup report "g" — held-key
+    // tracking must survive the modifier release order or the pending
+    // selection strands until the window blurs. The physical "KeyG"
+    // descriptor makes Playwright resolve the event key against the
+    // modifier state at each step, like a real keyboard.
+    await rows.first().focus();
+    await page.keyboard.down("Shift");
+    await page.keyboard.down("KeyG");
+    await page.keyboard.up("Shift");
+    await page.keyboard.up("KeyG");
+
+    await expect(rows.nth(1)).toBeFocused();
+    await expect(page.getByRole("region", { name: "Task detail" })).toContainText("Send June rent from checking.");
+    await expect.poll(() => backend.state.seenPaths).toContain("GET /api/v1/issues/issue-rent");
   } finally {
     await server.stop();
     kataHome.restore();

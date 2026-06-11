@@ -68,6 +68,7 @@ describe("KataIssueList", () => {
     cleanup();
     window.localStorage.clear();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("renders the heading, table columns, and the selected row metadata", () => {
@@ -246,8 +247,11 @@ describe("KataIssueList", () => {
 
     parentRow.focus();
     await fireEvent.keyDown(parentRow, { key: "j" });
+    await fireEvent.keyUp(childRow, { key: "j" });
     expect(document.activeElement).toBe(childRow);
-    expect(selected[selected.length - 1]).toBe("issue-child");
+    await waitFor(() => {
+      expect(selected[selected.length - 1]).toBe("issue-child");
+    });
 
     await fireEvent.keyDown(parentRow, { key: "ArrowLeft" });
     await waitFor(() => {
@@ -270,12 +274,101 @@ describe("KataIssueList", () => {
     const rows = visibleRows();
     rows[0]!.focus();
     await fireEvent.keyDown(rows[0]!, { key: "j" });
+    await fireEvent.keyUp(rows[1]!, { key: "j" });
     expect(document.activeElement).toBe(rows[1]);
-    expect(selected[selected.length - 1]).toBe(rows[1]!.dataset.uid);
+    await waitFor(() => {
+      expect(selected[selected.length - 1]).toBe(rows[1]!.dataset.uid);
+    });
 
     await fireEvent.keyDown(rows[1]!, { key: "k" });
+    await fireEvent.keyUp(rows[0]!, { key: "k" });
     expect(document.activeElement).toBe(rows[0]);
-    expect(selected[selected.length - 1]).toBe(rows[0]!.dataset.uid);
+    await waitFor(() => {
+      expect(selected[selected.length - 1]).toBe(rows[0]!.dataset.uid);
+    });
+  });
+
+  it("debounces keyboard navigation so only the final row is selected", async () => {
+    const { selected, rows } = renderKeyboardList(viewWithIssues([...baseIssues, thirdIssue()]));
+    await fireEvent.keyDown(rows[0]!, { key: "j" });
+    await fireEvent.keyDown(rows[1]!, { key: "j", repeat: true });
+    await fireEvent.keyUp(rows[2]!, { key: "j" });
+    expect(document.activeElement).toBe(rows[2]);
+    expect(selected).toEqual([]);
+
+    vi.advanceTimersByTime(50);
+    expect(selected).toEqual([rows[2]!.dataset.uid]);
+  });
+
+  it("holds selection while a navigation key repeats slower than the debounce", async () => {
+    const { selected, rows } = renderKeyboardList(viewWithIssues([...baseIssues, thirdIssue()]));
+    // OS key-repeat slower than the 50ms debounce: each repeat arrives
+    // after the timer has already expired. The held key must keep the
+    // selection pending so intermediate rows never commit.
+    await fireEvent.keyDown(rows[0]!, { key: "j" });
+    vi.advanceTimersByTime(100);
+    expect(selected).toEqual([]);
+
+    await fireEvent.keyDown(rows[1]!, { key: "j", repeat: true });
+    vi.advanceTimersByTime(100);
+    expect(selected).toEqual([]);
+
+    await fireEvent.keyUp(rows[2]!, { key: "j" });
+    vi.advanceTimersByTime(50);
+    expect(selected).toEqual([rows[2]!.dataset.uid]);
+  });
+
+  it("commits the selection when Shift is released before the navigation key", async () => {
+    const { selected, rows } = renderKeyboardList();
+    // Shift+g jumps to the end; the keydown reports key "G" but releasing
+    // Shift first makes the keyup report key "g". The physical code is
+    // stable across both, so the held entry must still clear.
+    await fireEvent.keyDown(rows[0]!, { key: "G", code: "KeyG", shiftKey: true });
+    expect(document.activeElement).toBe(rows[rows.length - 1]);
+    vi.advanceTimersByTime(50);
+    expect(selected).toEqual([]);
+
+    await fireEvent.keyUp(rows[rows.length - 1]!, { key: "g", code: "KeyG" });
+    vi.advanceTimersByTime(50);
+    expect(selected).toEqual([rows[rows.length - 1]!.dataset.uid]);
+  });
+
+  it("drops a pending keyboard selection when workspace navigation begins", async () => {
+    vi.useFakeTimers();
+    const selected: string[] = [];
+    const props = {
+      currentView,
+      selectedIssueUID: null,
+      loading: false,
+      navigationGeneration: 0,
+      onSelect: (issue: KataTaskSummary) => selected.push(issue.uid),
+    };
+    const { rerender } = render(KataIssueList, { props });
+
+    const rows = visibleRows();
+    rows[0]!.focus();
+    await fireEvent.keyDown(rows[0]!, { key: "j" });
+
+    // Navigation starts while the key is still held: the view data has
+    // not arrived yet (same currentView, no remount), so only the
+    // generation bump can stop the release from committing stale.
+    await rerender({ ...props, navigationGeneration: 1 });
+    await fireEvent.keyUp(rows[1]!, { key: "j" });
+    vi.advanceTimersByTime(100);
+    expect(selected).toEqual([]);
+  });
+
+  it("clicking a row selects immediately and cancels a pending keyboard selection", async () => {
+    const { selected, rows } = renderKeyboardList();
+    await fireEvent.keyDown(rows[0]!, { key: "j" });
+    expect(selected).toEqual([]);
+
+    await fireEvent.click(rows[0]!);
+    expect(selected).toEqual([rows[0]!.dataset.uid]);
+
+    await fireEvent.keyUp(rows[0]!, { key: "j" });
+    vi.advanceTimersByTime(100);
+    expect(selected).toEqual([rows[0]!.dataset.uid]);
   });
 
   it("Home and End jump to first and last rows", async () => {
@@ -453,6 +546,35 @@ describe("KataIssueList", () => {
     expect(screen.queryByRole("button", { name: /Stale child/ })).toBeNull();
   });
 });
+
+// Shared setup for the fake-timer keyboard tests: renders the list,
+// records selections, and focuses the first row ready for key events.
+function renderKeyboardList(view: KataCurrentView = currentView) {
+  vi.useFakeTimers();
+  const selected: string[] = [];
+  render(KataIssueList, {
+    props: {
+      currentView: view,
+      selectedIssueUID: null,
+      loading: false,
+      onSelect: (issue: KataTaskSummary) => selected.push(issue.uid),
+    },
+  });
+  const rows = visibleRows();
+  rows[0]!.focus();
+  return { selected, rows };
+}
+
+function thirdIssue(): KataTaskSummary {
+  return task({
+    id: 103,
+    uid: "issue-water-plants",
+    short_id: "water-plants",
+    qualified_id: "Home#water-plants",
+    title: "Water plants",
+    updated_at: "2026-05-13T08:00:00Z",
+  });
+}
 
 function visibleRows(): HTMLElement[] {
   return screen

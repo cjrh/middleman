@@ -144,7 +144,10 @@ describe("KataWorkspace", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(api.issue).not.toHaveBeenCalledWith("issue-email-susan");
+    // Match on the first argument only: issue() also receives a
+    // { signal } options argument, so a full-arguments matcher would
+    // pass vacuously even if the stale selection fired.
+    expect(vi.mocked(api.issue).mock.calls.map((call) => call[0])).not.toContain("issue-email-susan");
     expect(screen.queryByRole("heading", { name: "Email Susan re: Q3" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Pay rent" })).toBeNull();
     const taskList = document.querySelector(".issue-list");
@@ -174,7 +177,7 @@ describe("KataWorkspace", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Email Susan re: Q3" })).toBeTruthy();
     });
-    expect(api.issue).toHaveBeenCalledWith("issue-email-susan");
+    expect(api.issue).toHaveBeenCalledWith("issue-email-susan", { signal: expect.any(AbortSignal) });
   });
 
   it("selects the routed task after bootstrap when it is outside the initial view", async () => {
@@ -202,7 +205,7 @@ describe("KataWorkspace", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Later review" })).toBeTruthy();
     });
-    expect(issueMock).toHaveBeenCalledWith("issue-later-review");
+    expect(issueMock).toHaveBeenCalledWith("issue-later-review", { signal: expect.any(AbortSignal) });
   });
 
   it("updates the selection when the routed task changes", async () => {
