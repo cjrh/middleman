@@ -36,6 +36,27 @@ type SyncStatus struct {
 	LastError   string    `json:"last_error,omitempty"`
 }
 
+func formatRateLimitWait(wait time.Duration) string {
+	if wait <= 0 {
+		return "0s"
+	}
+	if wait < time.Minute {
+		seconds := int((wait + time.Second - time.Nanosecond) / time.Second)
+		return fmt.Sprintf("%ds", seconds)
+	}
+
+	minutes := int((wait + time.Minute - time.Nanosecond) / time.Minute)
+	hours := minutes / 60
+	remainingMinutes := minutes % 60
+	if hours == 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	if remainingMinutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh%dm", hours, remainingMinutes)
+}
+
 // DiffSyncErrorCode categorizes the reason a diff sync failed. The frontend
 // uses this category to render a user-facing message that does not leak local
 // clone paths, refs, SHAs, or git stderr.
@@ -2454,7 +2475,7 @@ func (s *Syncer) runWorker(
 				s.publishStatus(&SyncStatus{
 					Running: true,
 					Progress: fmt.Sprintf(
-						"rate limited, waiting %s", wait,
+						"rate limited, waiting %s", formatRateLimitWait(wait),
 					),
 				})
 				select {

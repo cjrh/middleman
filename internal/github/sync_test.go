@@ -6457,6 +6457,86 @@ func TestSyncer_OnStatusChangeCallback(t *testing.T) {
 		"last callback should be running=false")
 }
 
+func TestFormatRateLimitWaitUsesSecondsOnlyBelowOneMinute(t *testing.T) {
+	assert := Assert.New(t)
+
+	tests := []struct {
+		name string
+		wait time.Duration
+		want string
+	}{
+		{name: "sub-second waits round up to one second", wait: 364 * time.Millisecond, want: "1s"},
+		{name: "sub-minute waits show seconds", wait: 38*time.Second + 364*time.Millisecond, want: "39s"},
+		{name: "minute-scale waits hide seconds", wait: 25*time.Minute + 38*time.Second + 364*time.Millisecond, want: "26m"},
+		{name: "hour-scale waits hide seconds", wait: 2*time.Hour + time.Minute + time.Second, want: "2h2m"},
+		{name: "exact hours hide zero minutes", wait: 2 * time.Hour, want: "2h"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(tt.want, formatRateLimitWait(tt.wait))
+		})
+	}
+}
+
+func TestSyncerRateLimitProgressUsesMinuteScaleWaits(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+
+	rt := NewRateTracker(d, "github.com", "rest")
+	rt.UpdateFromRate(Rate{
+		Remaining: 0,
+		Reset:     time.Now().Add(25*time.Minute + 38*time.Second + 364*time.Millisecond),
+	})
+
+	s := NewSyncer(
+		map[string]Client{"github.com": &mockClient{}},
+		d, nil,
+		[]RepoRef{{Owner: "o", Name: "n", PlatformHost: "github.com"}},
+		time.Hour,
+		map[string]*RateTracker{"github.com": rt},
+		nil,
+	)
+
+	progress := make(chan string, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s.SetOnStatusChange(func(status *SyncStatus) {
+		if strings.Contains(status.Progress, "rate limited, waiting") {
+			select {
+			case progress <- status.Progress:
+			default:
+			}
+			cancel()
+		}
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.RunOnce(ctx)
+		close(done)
+	}()
+
+	var got string
+	select {
+	case got = <-progress:
+	case <-time.After(2 * time.Second):
+		require.FailNow("RunOnce did not publish rate-limit progress")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		require.FailNow("RunOnce did not return after cancel")
+	}
+
+	assert.Contains(got, "rate limited, waiting ")
+	assert.NotContains(got, ".")
+	assert.NotContains(got, "s")
+	assert.Regexp(`rate limited, waiting \d+m$`, got)
+}
+
 // notModifiedErr returns the error shape go-github surfaces when the
 // HTTP transport receives a 304 Not Modified response. The etag
 // transport intercepts list-endpoint requests and adds If-None-Match
