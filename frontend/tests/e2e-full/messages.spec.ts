@@ -9,7 +9,11 @@ import { createDocsFixture } from "./support/docsFixture";
 import { startIsolatedE2EServerWithOptions } from "./support/e2eServer";
 
 async function startIsolatedE2EServer() {
-  return startIsolatedE2EServerWithOptions({ visibleImportedModes: true });
+  // freshProcess: these tests steer the server through process env
+  // (KATA_HOME, MIDDLEMAN_MESSAGES_SAVED_SEARCHES_PATH), which only a
+  // process spawned after the env is set can inherit — pooled
+  // servers cannot.
+  return startIsolatedE2EServerWithOptions({ visibleImportedModes: true, freshProcess: true });
 }
 
 type BackendState = {

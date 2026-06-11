@@ -244,7 +244,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T | PromiseLike<
 
 test.describe("docs markdown editor autocomplete", () => {
   test("typing wikilink prefix opens the menu and inserts the chosen doc", async ({ page }) => {
-    const server = await startDocsServer(page);
+    const server = await startDocsServer(page, { freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url);
       await clearEditor(page, editor);
@@ -264,7 +264,7 @@ test.describe("docs markdown editor autocomplete", () => {
   });
 
   test("wikilink menu matches nested docs by basename prefix", async ({ page }) => {
-    const server = await startDocsServer(page);
+    const server = await startDocsServer(page, { freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url);
       await clearEditor(page, editor);
@@ -281,7 +281,7 @@ test.describe("docs markdown editor autocomplete", () => {
   });
 
   test("wikilink menu matches nested docs by path prefix and inserts the chosen doc", async ({ page }) => {
-    const server = await startDocsServer(page);
+    const server = await startDocsServer(page, { freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url);
       await clearEditor(page, editor);
@@ -303,7 +303,7 @@ test.describe("docs markdown editor autocomplete", () => {
   test("typing bare issue references opens the task menu and inserts the chosen task", async ({ page }) => {
     const backend = await startTaskBackend();
     const kataHome = await configureKataHome(backend.url);
-    const server = await startDocsServer(page);
+    const server = await startDocsServer(page, { freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url);
       await clearEditor(page, editor);
@@ -356,7 +356,7 @@ test.describe("docs markdown editor autocomplete", () => {
       ],
       "home",
     );
-    const server = await startDocsServer(page, { folder: { daemon: "work" } });
+    const server = await startDocsServer(page, { folder: { daemon: "work" }, freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url, "/docs?folder=notes&doc=README.md");
       await clearEditor(page, editor);
@@ -391,7 +391,7 @@ test.describe("docs markdown editor autocomplete", () => {
       }),
     ]);
     const kataHome = await configureKataHomeDaemons([{ name: "home", url: backend.url }], "home");
-    const server = await startDocsServer(page, { folder: { daemon: "gone" } });
+    const server = await startDocsServer(page, { folder: { daemon: "gone" }, freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url, "/docs?folder=notes&doc=README.md");
       const warning = page.locator(".folder-daemon-warning");
@@ -430,7 +430,7 @@ test.describe("docs markdown editor autocomplete", () => {
       { waitForInstance: instanceGate.promise },
     );
     const kataHome = await configureKataHomeDaemons([{ name: "docs", url: backend.url }], "docs");
-    const server = await startDocsServer(page, { folder: { daemon: "docs" } });
+    const server = await startDocsServer(page, { folder: { daemon: "docs" }, freshProcess: true });
     try {
       const rosterResponse = page.waitForResponse(
         (response) => new URL(response.url()).pathname === "/api/v1/kata/daemons" && response.status() === 200,
@@ -456,7 +456,7 @@ test.describe("docs markdown editor autocomplete", () => {
   test("qualified task references scope suggestions to the named project", async ({ page }) => {
     const backend = await startTaskBackend();
     const kataHome = await configureKataHome(backend.url);
-    const server = await startDocsServer(page);
+    const server = await startDocsServer(page, { freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url);
       await clearEditor(page, editor);
@@ -477,7 +477,7 @@ test.describe("docs markdown editor autocomplete", () => {
   test("no-match task references leave the editor text unchanged", async ({ page }) => {
     const backend = await startTaskBackend();
     const kataHome = await configureKataHome(backend.url);
-    const server = await startDocsServer(page);
+    const server = await startDocsServer(page, { freshProcess: true });
     try {
       const editor = await openDocsEditor(page, server.info.base_url);
       await clearEditor(page, editor);

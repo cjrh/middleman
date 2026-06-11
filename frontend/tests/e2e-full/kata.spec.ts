@@ -5,14 +5,19 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import {
-  startIsolatedE2EServer as startDefaultIsolatedE2EServer,
-  startIsolatedE2EServerWithOptions,
-} from "./support/e2eServer";
+import { startIsolatedE2EServerWithOptions } from "./support/e2eServer";
 import { createDocsFixture } from "./support/docsFixture";
 
+// freshProcess everywhere in this file: kata tests point the server
+// at per-test daemon catalogs via process.env.KATA_HOME, which only
+// a process spawned after the env is set can inherit — pooled
+// servers cannot.
 async function startIsolatedE2EServer() {
-  return startIsolatedE2EServerWithOptions({ visibleImportedModes: true });
+  return startIsolatedE2EServerWithOptions({ visibleImportedModes: true, freshProcess: true });
+}
+
+async function startDefaultIsolatedE2EServer() {
+  return startIsolatedE2EServerWithOptions({ freshProcess: true });
 }
 
 type BackendState = {

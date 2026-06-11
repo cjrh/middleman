@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { expect, type Locator, type Page } from "@playwright/test";
-import { startIsolatedE2EServer, type IsolatedE2EServer } from "./e2eServer";
+import { startIsolatedE2EServer, startIsolatedE2EServerWithOptions, type IsolatedE2EServer } from "./e2eServer";
 
 export class DocsPane {
   constructor(private readonly page: Page) {}
@@ -106,10 +106,18 @@ export async function createDocsFixture(): Promise<string> {
 
 export async function startDocsServer(
   page: Page,
-  options: { folder?: { id?: string; name?: string; daemon?: string | undefined } } = {},
+  options: {
+    folder?: { id?: string; name?: string; daemon?: string | undefined };
+    // Spawn a dedicated process for tests that steer the server via
+    // process env (e.g. KATA_HOME); pooled servers cannot inherit
+    // env set after they were spawned.
+    freshProcess?: boolean;
+  } = {},
 ): Promise<IsolatedE2EServer> {
   const docsRoot = await createDocsFixture();
-  const server = await startIsolatedE2EServer();
+  const server = options.freshProcess
+    ? await startIsolatedE2EServerWithOptions({ freshProcess: true })
+    : await startIsolatedE2EServer();
   const res = await page.request.post(`${server.info.base_url}/api/v1/docs/folders`, {
     data: {
       id: options.folder?.id ?? "notes",
