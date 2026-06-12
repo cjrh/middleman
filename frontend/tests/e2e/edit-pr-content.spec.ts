@@ -95,6 +95,35 @@ test("edit body: cancel preserves original", async ({ page }) => {
   await expect(page.locator(".markdown-body")).toContainText("Adds Playwright smoke tests");
 });
 
+test("markdown mermaid fences render as diagrams", async ({ page }) => {
+  await page.goto("/pulls/github/acme/widgets/42");
+  await page.locator(".edit-body-btn").click();
+
+  await page.locator(".body-edit-textarea").fill("```mermaid\ngraph TD\n  A --> B\n```");
+  await page.locator(".body-edit .title-edit-save").click();
+
+  await expect(page.locator(".markdown-body code.language-mermaid")).toHaveCount(0);
+  await expect(page.locator(".markdown-body pre.mermaid.mermaid-viewer svg")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zoom in diagram" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Zoom out diagram" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy Mermaid source" })).toBeVisible();
+
+  const diagramViewport = page.locator(".markdown-body .mermaid-viewer__viewport");
+  const diagramPan = page.locator(".markdown-body .mermaid-viewer__pan");
+  const initialTransform = await diagramPan.evaluate((element) => getComputedStyle(element).transform);
+  await diagramViewport.hover();
+  await page.mouse.wheel(0, -240);
+  await expect
+    .poll(async () => diagramPan.evaluate((element) => getComputedStyle(element).transform))
+    .not.toBe(initialTransform);
+
+  await page.getByRole("button", { name: "Open diagram in expanded view" }).click();
+  await expect(page.getByRole("dialog", { name: "Expanded Mermaid diagram" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close expanded diagram" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Expanded Mermaid diagram" })).toBeHidden();
+});
+
 test("markdown tables keep compact columns readable", async ({ page }) => {
   await page.route("**/api/v1/pulls/github/acme/widgets/42", async (route) => {
     if (route.request().method() !== "GET") {
