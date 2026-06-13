@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -370,16 +371,116 @@ func run(opts serve.Options) error {
 		}
 	}()
 
-	database, err := db.Open(cfg.DBPath())
+	ctx, stopSignals := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	stopSignalsOnce := sync.OnceFunc(stopSignals)
+	defer stopSignalsOnce()
+
+	assets, err := web.Assets()
+	if err != nil {
+		return fmt.Errorf("load frontend assets: %w", err)
+	}
+
+	addr := cfg.ListenAddr()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+
+	if err := writeRuntimeMetadata(lockHandle, ln); err != nil {
+		slog.Warn("write runtime metadata", "err", err)
+	}
+
+	startupHandler := server.NewStartupHandler(
+		assets, cfg, server.ServerOptions{}, ln,
+	)
+	switcher := server.NewSwitchHandler(startupHandler)
+	httpSrv := &http.Server{
+		Handler:     switcher,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is 0 (disabled) because SSE and proxy
+		// responses are long-lived by design.
+		IdleTimeout: 60 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		if serveErr := httpSrv.Serve(ln); !errors.Is(serveErr, http.ErrServerClosed) {
+			errCh <- serveErr
+		}
+	}()
+
+	slog.Info(fmt.Sprintf("starting server at http://%s", ln.Addr().String()))
+
+	var database *db.DB
+	var srv *server.Server
+	var syncer *ghclient.Syncer
+	var telemetryReporter *telemetry.Reporter
+	var profilerSrv *profiler.Server
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(
+			context.Background(), 10*time.Second,
+		)
+		defer cancel()
+		for _, shutdownErr := range runMainShutdown(
+			shutdownCtx,
+			mainShutdownCallbacks{
+				StopSignals: stopSignalsOnce,
+				ShutdownPrimaryHTTP: func(ctx context.Context) error {
+					if srv != nil {
+						return srv.Shutdown(ctx)
+					}
+					return httpSrv.Shutdown(ctx)
+				},
+				StopSyncer: func() {
+					if syncer != nil {
+						syncer.Stop()
+					}
+				},
+				ShutdownProfiler: func(context.Context) error {
+					if profilerSrv != nil {
+						profilerCtx, profilerCancel := context.WithTimeout(
+							context.Background(), 5*time.Second,
+						)
+						defer profilerCancel()
+						return profilerSrv.Shutdown(profilerCtx)
+					}
+					return nil
+				},
+				CloseTelemetry: func() error {
+					if telemetryReporter != nil {
+						return telemetryReporter.Close()
+					}
+					return nil
+				},
+				CloseDatabase: func() error {
+					if database != nil {
+						return database.Close()
+					}
+					return nil
+				},
+			},
+		) {
+			slog.Warn(shutdownErr.message, "err", shutdownErr.err)
+		}
+	}()
+
+	if ctx.Err() != nil {
+		slog.Info("shutting down")
+		return nil
+	}
+
+	database, err = db.Open(cfg.DBPath())
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer database.Close()
 
 	tokenSources := tokenauth.NewSourceSet(tokenauth.Options{
 		GitHubCLI: config.GitHubCLITokenForHost,
 	})
-	providerSources, err := collectProviderTokenSources(context.Background(), cfg, tokenSources)
+	providerSources, err := collectProviderTokenSources(ctx, cfg, tokenSources)
 	if err != nil {
 		return err
 	}
@@ -392,15 +493,20 @@ func run(opts serve.Options) error {
 	}
 
 	repos := resolveStartupRepos(
-		context.Background(), cfg, startup.registry, database,
+		ctx, cfg, startup.registry, database,
 	)
 	slog.Debug("startup repos resolved", "count", len(repos))
+
+	if ctx.Err() != nil {
+		slog.Info("shutting down")
+		return nil
+	}
 
 	cloneMgr := gitclone.New(
 		filepath.Join(cfg.DataDir, "clones"), startup.cloneAuth,
 	)
 
-	syncer := ghclient.NewSyncerWithRegistry(
+	syncer = ghclient.NewSyncerWithRegistry(
 		startup.registry, database, cloneMgr, repos,
 		cfg.SyncDuration(), startup.rateTrackers, startup.budgets,
 	)
@@ -410,16 +516,11 @@ func run(opts serve.Options) error {
 	)
 	syncer.SetFetchers(startup.fetchers)
 
-	telemetryReporter := telemetry.NewReporterOrDisabled(telemetry.Options{
+	telemetryReporter = telemetry.NewReporterOrDisabled(telemetry.Options{
 		Database: database,
 		Version:  version,
 		Commit:   commit,
 	})
-	defer func() {
-		if err := telemetryReporter.Close(); err != nil {
-			slog.Warn("close telemetry", "err", err)
-		}
-	}()
 	if telemetryReporter.Enabled() {
 		if err := telemetryReporter.Capture("daemon_active", map[string]any{
 			"repo_count": len(repos),
@@ -428,12 +529,7 @@ func run(opts serve.Options) error {
 		}
 	}
 
-	assets, err := web.Assets()
-	if err != nil {
-		return fmt.Errorf("load frontend assets: %w", err)
-	}
-
-	srv := server.NewWithConfig(
+	srv = server.NewWithConfig(
 		database, syncer, cloneMgr, assets,
 		cfg, configPath, server.ServerOptions{
 			WorktreeDir:         filepath.Join(cfg.DataDir, "worktrees"),
@@ -442,6 +538,7 @@ func run(opts serve.Options) error {
 			TokenSources:        tokenSources,
 		},
 	)
+	srv.AttachHTTPServer(httpSrv, ln)
 	slog.Debug(
 		"server initialized",
 		"base_path", cfg.BasePath,
@@ -467,17 +564,10 @@ func run(opts serve.Options) error {
 		Data: syncer.Status(),
 	})
 
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	)
 	syncer.SetOnSyncCompleted(stacks.SyncCompletedHook(ctx, database, nil))
 	syncer.Start(ctx)
-	defer syncer.Stop()
-	defer stop()
 
-	profilerSrv, err := profiler.Start(opts.ProfilerAddr)
+	profilerSrv, err = profiler.Start(opts.ProfilerAddr)
 	if err != nil {
 		return err
 	}
@@ -490,56 +580,14 @@ func run(opts serve.Options) error {
 			"starting profiler listener",
 			"addr", profilerAddr,
 		)
-		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(
-				context.Background(), 5*time.Second,
-			)
-			defer cancel()
-			if err := profilerSrv.Shutdown(shutdownCtx); err != nil {
-				slog.Warn("profiler shutdown", "err", err)
-			}
-		}()
 	}
-
-	// srv.Shutdown MUST be the last-registered defer so LIFO runs
-	// it FIRST on return: close the HTTP listener (and SSE hub)
-	// before syncer.Stop blocks for up to 30 s, otherwise the
-	// process keeps serving requests against a syncer that is
-	// already winding down.
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(
-			context.Background(), 10*time.Second,
-		)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			slog.Warn("server shutdown", "err", err)
-		}
-	}()
 
 	displayVersion := version
 	if version == "dev" && commit != "unknown" {
 		displayVersion = "dev-" + commit
 	}
 	srv.SetVersion(displayVersion)
-
-	addr := cfg.ListenAddr()
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
-	}
-
-	if err := writeRuntimeMetadata(lockHandle, ln); err != nil {
-		slog.Warn("write runtime metadata", "err", err)
-	}
-
-	slog.Info(fmt.Sprintf("starting server at http://%s", ln.Addr().String()))
-
-	errCh := make(chan error, 1)
-	go func() {
-		if serveErr := srv.Serve(ln); !errors.Is(serveErr, http.ErrServerClosed) {
-			errCh <- serveErr
-		}
-	}()
+	switcher.Swap(srv)
 
 	select {
 	case <-ctx.Done():
@@ -550,6 +598,66 @@ func run(opts serve.Options) error {
 	case err := <-errCh:
 		return fmt.Errorf("server: %w", err)
 	}
+}
+
+type mainShutdownCallbacks struct {
+	StopSignals         func()
+	ShutdownPrimaryHTTP func(context.Context) error
+	StopSyncer          func()
+	ShutdownProfiler    func(context.Context) error
+	CloseTelemetry      func() error
+	CloseDatabase       func() error
+}
+
+type mainShutdownError struct {
+	message string
+	err     error
+}
+
+func runMainShutdown(
+	ctx context.Context,
+	callbacks mainShutdownCallbacks,
+) []mainShutdownError {
+	var errs []mainShutdownError
+	if callbacks.StopSignals != nil {
+		callbacks.StopSignals()
+	}
+	if callbacks.ShutdownPrimaryHTTP != nil {
+		if err := callbacks.ShutdownPrimaryHTTP(ctx); err != nil {
+			errs = append(errs, mainShutdownError{
+				message: "server shutdown",
+				err:     err,
+			})
+		}
+	}
+	if callbacks.StopSyncer != nil {
+		callbacks.StopSyncer()
+	}
+	if callbacks.ShutdownProfiler != nil {
+		if err := callbacks.ShutdownProfiler(ctx); err != nil {
+			errs = append(errs, mainShutdownError{
+				message: "profiler shutdown",
+				err:     err,
+			})
+		}
+	}
+	if callbacks.CloseTelemetry != nil {
+		if err := callbacks.CloseTelemetry(); err != nil {
+			errs = append(errs, mainShutdownError{
+				message: "close telemetry",
+				err:     err,
+			})
+		}
+	}
+	if callbacks.CloseDatabase != nil {
+		if err := callbacks.CloseDatabase(); err != nil {
+			errs = append(errs, mainShutdownError{
+				message: "close database",
+				err:     err,
+			})
+		}
+	}
+	return errs
 }
 
 func profilerSrvDone(srv *profiler.Server) <-chan error {

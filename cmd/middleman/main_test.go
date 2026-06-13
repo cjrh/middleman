@@ -11,7 +11,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v84/github"
 	Assert "github.com/stretchr/testify/assert"
@@ -155,6 +157,77 @@ func TestWriteRuntimeMetadataRejectsNonTCPListener(t *testing.T) {
 	err = writeRuntimeMetadata(lockHandle, fakeListener{addr: fakeAddr("not-an-address")})
 	require.Error(t, err)
 	Assert.Contains(t, err.Error(), "non-TCP")
+}
+
+func TestRunMainShutdownStopsSignalsBeforeLongCleanup(t *testing.T) {
+	var order []string
+	record := func(name string) {
+		order = append(order, name)
+	}
+
+	errs := runMainShutdown(t.Context(), mainShutdownCallbacks{
+		StopSignals: func() {
+			record("signals")
+		},
+		ShutdownPrimaryHTTP: func(context.Context) error {
+			record("primary-http")
+			return nil
+		},
+		StopSyncer: func() {
+			record("syncer")
+		},
+		ShutdownProfiler: func(context.Context) error {
+			record("profiler")
+			return nil
+		},
+		CloseTelemetry: func() error {
+			record("telemetry")
+			return nil
+		},
+		CloseDatabase: func() error {
+			record("database")
+			return nil
+		},
+	})
+
+	Assert.Empty(t, errs)
+	Assert.Equal(t, []string{
+		"signals",
+		"primary-http",
+		"syncer",
+		"profiler",
+		"telemetry",
+		"database",
+	}, order)
+}
+
+func TestRunClosesPrimaryListenerWhenProfilerStartFails(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	require.NoError(os.MkdirAll(dataDir, 0o700))
+	cfgPath := filepath.Join(root, "config.toml")
+	appPort := reserveFreePort(t)
+	writeMinimalConfig(t, cfgPath, dataDir, appPort)
+	t.Setenv("MIDDLEMAN_GITHUB_TOKEN_UNSET_FOR_LOCK_E2E", "")
+
+	err := run(serve.Options{
+		ConfigPath:   cfgPath,
+		ProfilerAddr: "0.0.0.0:0",
+	})
+	require.Error(err)
+	assert.Contains(err.Error(), "profiler address")
+
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(appPort))
+	assert.Eventually(func() bool {
+		ln, listenErr := net.Listen("tcp", addr)
+		if listenErr != nil {
+			return false
+		}
+		return ln.Close() == nil
+	}, 2*time.Second, 25*time.Millisecond)
 }
 
 func TestResolveStartupReposExpandsConfiguredGlobs(t *testing.T) {
