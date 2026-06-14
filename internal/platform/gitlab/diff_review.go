@@ -38,9 +38,9 @@ func (c *Client) PublishDiffReviewDraft(
 		)
 		if err != nil {
 			if cleanupErr := c.deleteDraftNotes(ctx, pid, int64(number), createdDraftIDs); cleanupErr != nil {
-				return nil, fmt.Errorf("%w; cleanup failed: %v", mapGitLabError("create_draft_note", err), cleanupErr)
+				return nil, fmt.Errorf("%w; cleanup failed: %v", c.mapGitLabError("create_draft_note", err), cleanupErr)
 			}
-			return nil, mapGitLabError("create_draft_note", err)
+			return nil, c.mapGitLabError("create_draft_note", err)
 		}
 		if draftNote != nil && draftNote.ID > 0 {
 			createdDraftIDs = append(createdDraftIDs, draftNote.ID)
@@ -50,7 +50,7 @@ func (c *Client) PublishDiffReviewDraft(
 	for i, draftID := range createdDraftIDs {
 		if _, err := c.api.DraftNotes.PublishDraftNote(pid, int64(number), draftID, gitlab.WithContext(ctx)); err != nil {
 			if publishedAnyDraft {
-				mappedErr := mapGitLabError("publish_draft_note", err)
+				mappedErr := c.mapGitLabError("publish_draft_note", err)
 				if cleanupErr := c.deleteDraftNotes(ctx, pid, int64(number), createdDraftIDs[i:]); cleanupErr != nil {
 					mappedErr = fmt.Errorf("%w; cleanup failed: %v", mappedErr, cleanupErr)
 				}
@@ -60,9 +60,9 @@ func (c *Client) PublishDiffReviewDraft(
 				}
 			}
 			if cleanupErr := c.deleteDraftNotes(ctx, pid, int64(number), createdDraftIDs); cleanupErr != nil {
-				return nil, fmt.Errorf("%w; cleanup failed: %v", mapGitLabError("publish_draft_note", err), cleanupErr)
+				return nil, fmt.Errorf("%w; cleanup failed: %v", c.mapGitLabError("publish_draft_note", err), cleanupErr)
 			}
-			return nil, mapGitLabError("publish_draft_note", err)
+			return nil, c.mapGitLabError("publish_draft_note", err)
 		}
 		publishedAnyDraft = true
 		if i < len(input.Comments) && input.Comments[i].ID > 0 {
@@ -70,6 +70,7 @@ func (c *Client) PublishDiffReviewDraft(
 		}
 	}
 	publishedAny := publishedAnyDraft
+	publishedSummary := false
 	if body := strings.TrimSpace(input.Body); body != "" {
 		if _, _, err := c.api.Notes.CreateMergeRequestNote(
 			pid,
@@ -77,9 +78,10 @@ func (c *Client) PublishDiffReviewDraft(
 			&gitlab.CreateMergeRequestNoteOptions{Body: &body},
 			gitlab.WithContext(ctx),
 		); err != nil {
-			return gitlabPublishFailure(submittedAt, publishedAny, publishedCommentIDs, mapGitLabError("create_merge_request_note", err))
+			return gitlabPublishFailure(submittedAt, publishedAny, publishedCommentIDs, c.mapGitLabError("create_merge_request_note", err))
 		}
 		publishedAny = true
+		publishedSummary = true
 	}
 	if input.Action == platform.ReviewActionApprove {
 		sha := reviewHeadSHA(input)
@@ -93,7 +95,14 @@ func (c *Client) PublishDiffReviewDraft(
 			gitlab.WithContext(ctx),
 		)
 		if err != nil {
-			return gitlabPublishFailure(submittedAt, publishedAny, publishedCommentIDs, mapGitLabError("approve_merge_request", err))
+			mappedErr := mapGitLabMutationError(c.host, "approve_merge_request", sha, err)
+			var platformErr *platform.Error
+			if publishedSummary &&
+				errors.As(mappedErr, &platformErr) &&
+				platformErr.Code == platform.ErrCodeStaleState {
+				platformErr.Hint = "the review summary was already posted; retrying will repeat it"
+			}
+			return gitlabPublishFailure(submittedAt, publishedAny, publishedCommentIDs, mappedErr)
 		}
 	}
 	return &platform.PublishedDiffReview{SubmittedAt: submittedAt}, nil
@@ -118,7 +127,7 @@ func (c *Client) deleteDraftNotes(ctx context.Context, pid any, number int64, dr
 	errs := make([]error, 0)
 	for _, draftID := range draftIDs {
 		if _, err := c.api.DraftNotes.DeleteDraftNote(pid, number, draftID, gitlab.WithContext(ctx)); err != nil {
-			errs = append(errs, mapGitLabError("delete_draft_note", err))
+			errs = append(errs, c.mapGitLabError("delete_draft_note", err))
 		}
 	}
 	return errors.Join(errs...)
@@ -145,7 +154,7 @@ func (c *Client) ListMergeRequestReviewThreads(
 			gitlab.WithContext(ctx),
 		)
 		if err != nil {
-			return nil, mapGitLabError("list_merge_request_discussions", err)
+			return nil, c.mapGitLabError("list_merge_request_discussions", err)
 		}
 		for _, discussion := range discussions {
 			out = append(out, gitlabReviewThreads(discussion)...)

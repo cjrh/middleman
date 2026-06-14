@@ -80,8 +80,9 @@ func (c *Client) MergeMergeRequest(
 	commitTitle string,
 	commitMessage string,
 	method string,
+	expectedHeadSHA string,
 ) (platform.MergeResult, error) {
-	return c.provider.MergeMergeRequest(ctx, ref, number, commitTitle, commitMessage, method)
+	return c.provider.MergeMergeRequest(ctx, ref, number, commitTitle, commitMessage, method, expectedHeadSHA)
 }
 
 func (c *Client) ApproveMergeRequest(
@@ -89,8 +90,9 @@ func (c *Client) ApproveMergeRequest(
 	ref platform.RepoRef,
 	number int,
 	body string,
+	expectedHeadSHA string,
 ) (platform.MergeRequestEvent, error) {
-	return c.provider.ApproveMergeRequest(ctx, ref, number, body)
+	return c.provider.ApproveMergeRequest(ctx, ref, number, body, expectedHeadSHA)
 }
 
 func (c *Client) EditMergeRequestContent(
@@ -287,41 +289,40 @@ func (t *transport) MergePullRequest(
 ) (gitealike.MergeResultDTO, error) {
 	var merged bool
 	var resp *forgejosdk.Response
+	var rejection *gitealike.MergeRejection
 	err := t.withRequestContext(ctx, func() error {
+		// The capture slot is shared per client, so the clear/request/
+		// read sequence stays inside the serialized request section: a
+		// concurrent merge must not drop or consume this call's
+		// rejection.
+		t.mergeRejections.Take()
 		var err error
 		merged, resp, err = t.api.MergePullRequest(ref.Owner, ref.Name, int64(number), forgejosdk.MergePullRequestOption{
-			Style:   forgejoMergeStyle(opts.Method),
-			Title:   opts.CommitTitle,
-			Message: opts.CommitMessage,
+			Style:        forgejoMergeStyle(opts.Method),
+			Title:        opts.CommitTitle,
+			Message:      opts.CommitMessage,
+			HeadCommitId: opts.ExpectedHeadSHA,
 		})
+		if err == nil && !merged {
+			rejection = t.mergeRejections.Take()
+		}
 		return err
 	})
 	if err != nil {
 		return gitealike.MergeResultDTO{}, forgejoHTTPError(resp, err)
 	}
-	return gitealike.MergeResultDTO{Merged: merged}, nil
-}
-
-func (t *transport) CreatePullReview(
-	ctx context.Context,
-	ref platform.RepoRef,
-	number int,
-	body string,
-) (gitealike.ReviewDTO, error) {
-	var review *forgejosdk.PullReview
-	var resp *forgejosdk.Response
-	err := t.withRequestContext(ctx, func() error {
-		var err error
-		review, resp, err = t.api.CreatePullReview(ref.Owner, ref.Name, int64(number), forgejosdk.CreatePullReviewOptions{
-			State: forgejosdk.ReviewStateApproved,
-			Body:  body,
-		})
-		return err
-	})
-	if err != nil {
-		return gitealike.ReviewDTO{}, forgejoHTTPError(resp, err)
+	if !merged {
+		// The SDK reports any non-2xx merge response as merged=false
+		// with a nil error; the captured rejection restores the real
+		// status and provider message so the failure classifies
+		// instead of being recorded as a successful merge.
+		statusCode := 0
+		if resp != nil && resp.Response != nil {
+			statusCode = resp.StatusCode
+		}
+		return gitealike.MergeResultDTO{}, gitealike.MergeRejectionError(rejection, statusCode)
 	}
-	return convertReview(review), nil
+	return gitealike.MergeResultDTO{Merged: merged}, nil
 }
 
 func (t *transport) ReplaceIssueLabels(

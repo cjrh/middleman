@@ -784,11 +784,17 @@
     const workflowApprovalReady = Boolean(
       capabilities.workflow_approval && wfa?.checked && wfa.required,
     );
+    // Same rendered-head source as PullDetail: the detail envelope's
+    // verified reviewed_head_sha, not the mutable platform_head_sha.
+    const renderedHeadSha = detail.reviewed_head_sha ?? "";
+    // TS cannot carry the !stores narrowing into the closure below.
+    const appStores = stores;
     return {
       pr: {
         State: pr.State,
         IsDraft: pr.IsDraft,
         MergeableState: pr.MergeableState,
+        platform_head_sha: renderedHeadSha,
       },
       ref: {
         provider: sel.provider,
@@ -811,7 +817,20 @@
       stale: false,
       stores: { pulls: stores.pulls, detail: stores.detail },
       client,
+      requireHeadPin: capabilities.mutation_head_binding,
+      ...(renderedHeadSha !== "" && { expectedHeadSha: renderedHeadSha }),
       approveCommentBody: "",
+      // A head-pin conflict means the rendered head moved or was never
+      // synced; reload the detail (a sync-enabled load) so the user
+      // re-reviews current state, mirroring PullDetail's own handler.
+      // The flash from onError carries the explanation.
+      onHeadConflict: () => {
+        void appStores.detail.loadDetail(sel.owner, sel.name, sel.number, {
+          provider: sel.provider,
+          platformHost: sel.platformHost,
+          repoPath: sel.repoPath,
+        });
+      },
       onError: (msg: string) => showFlash(msg),
     };
 

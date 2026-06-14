@@ -64,6 +64,38 @@ export function problemCapability(problem: ProblemBody): string | undefined {
   return typeof cap === "string" ? cap : undefined;
 }
 
+// ConflictReason is the details.reason subtype carried by conflict
+// problems on head-bound mutations (merge, approve), per the head
+// binding contract in context/provider-architecture.md.
+export type ConflictReason = "stale_state" | "head_unknown" | "conflict";
+
+// problemConflictReason reads details.reason from a conflict problem.
+// Non-conflict problems return undefined; a conflict with a missing or
+// unrecognized reason collapses to the generic "conflict" so callers
+// can branch on a closed union.
+export function problemConflictReason(problem: ProblemBody): ConflictReason | undefined {
+  if (problem.code !== ProblemCodes.conflict) {
+    return undefined;
+  }
+  const reason = problem.details?.["reason"];
+  if (reason === "stale_state" || reason === "head_unknown") {
+    return reason;
+  }
+  return "conflict";
+}
+
+// problemConflictContext reads details.context from a conflict
+// problem: provider side-effect context that must reach the user — an
+// approval that could not be revoked, posted review text a retry would
+// repeat — per the stale-approval contract in context/error-handling.md.
+export function problemConflictContext(problem: ProblemBody): string | undefined {
+  if (problem.code !== ProblemCodes.conflict) {
+    return undefined;
+  }
+  const context = problem.details?.["context"];
+  return typeof context === "string" && context !== "" ? context : undefined;
+}
+
 // problemRetryAfter reads details.retryAfter from a rateLimited problem
 // and returns it parsed as a Date. Returns undefined when the field is
 // missing or not a valid RFC 3339 string.

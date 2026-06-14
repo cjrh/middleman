@@ -79,6 +79,34 @@ func TestPublishDiffReviewDraftCreatesForgejoReview(t *testing.T) {
 	assert.Equal(submitted, result.SubmittedAt)
 }
 
+func TestPublishDiffReviewDraftApproveUnsupported(t *testing.T) {
+	assert := Assert.New(t)
+	require := Require.New(t)
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client, err := NewClient("codeberg.test", testTokenSource("token"), WithBaseURLForTesting(server.URL))
+	require.NoError(err)
+	_, err = client.PublishDiffReviewDraft(context.Background(), platform.RepoRef{
+		Owner: "acme",
+		Name:  "widgets",
+	}, 42, platform.PublishDiffReviewDraftInput{
+		Body:    "ship it",
+		Action:  platform.ReviewActionApprove,
+		HeadSHA: "reviewed-head",
+	})
+
+	var platformErr *platform.Error
+	require.ErrorAs(err, &platformErr)
+	assert.Equal(platform.ErrCodeUnsupportedCapability, platformErr.Code)
+	assert.Equal("approve_merge_request", platformErr.Capability)
+	assert.False(sawRequest)
+}
+
 func TestListMergeRequestReviewThreadsReadsForgejoReviewComments(t *testing.T) {
 	assert := Assert.New(t)
 	require := Require.New(t)

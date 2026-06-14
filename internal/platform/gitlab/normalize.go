@@ -54,11 +54,21 @@ func NormalizeProject(host string, p *gitlab.Project) (platform.Repository, erro
 		Private:            p.Visibility == gitlab.PrivateVisibility,
 		Archived:           p.Archived,
 		ViewerCanMerge:     gitLabViewerCanMerge(p.Permissions),
-		DefaultBranch:      p.DefaultBranch,
-		WebURL:             p.WebURL,
-		CloneURL:           p.HTTPURLToRepo,
-		CreatedAt:          timeValue(p.CreatedAt),
-		UpdatedAt:          timeValue(p.UpdatedAt),
+		// GitLab accepts MRs under the project's configured merge method
+		// with squash as a per-merge flag; there is no per-merge rebase,
+		// so clients must not offer "Rebase and merge". squash_option
+		// bounds the per-merge squash flag in both directions: "never"
+		// forbids squashing and "always" forbids accepting without it.
+		MergeSettings: &platform.RepositoryMergeSettings{
+			AllowSquashMerge: p.SquashOption != gitlab.SquashOptionNever,
+			AllowMergeCommit: p.SquashOption != gitlab.SquashOptionAlways,
+			AllowRebaseMerge: false,
+		},
+		DefaultBranch: p.DefaultBranch,
+		WebURL:        p.WebURL,
+		CloneURL:      p.HTTPURLToRepo,
+		CreatedAt:     timeValue(p.CreatedAt),
+		UpdatedAt:     timeValue(p.UpdatedAt),
 	}, nil
 }
 
@@ -120,7 +130,15 @@ func NormalizeDetailedMergeRequest(repo platform.RepoRef, mr *gitlab.MergeReques
 	if mr == nil {
 		return platform.MergeRequest{}
 	}
-	return normalizeMergeRequest(repo, &mr.BasicMergeRequest, pipelineInfo(mr), detailedMRWorkInProgress(mr))
+	out := normalizeMergeRequest(repo, &mr.BasicMergeRequest, pipelineInfo(mr), detailedMRWorkInProgress(mr))
+	// Only the detail payload carries diff_refs. BaseSHA feeds the
+	// reviewed diff snapshot (merge-base + head pin); without it
+	// head-bound mutations stay disabled with 409 head_unknown.
+	if out.HeadSHA == "" {
+		out.HeadSHA = mr.DiffRefs.HeadSha
+	}
+	out.BaseSHA = mr.DiffRefs.BaseSha
+	return out
 }
 
 func detailedMRWorkInProgress(mr *gitlab.MergeRequest) bool {
@@ -319,6 +337,9 @@ func NormalizeMergeRequestDiscussions(
 				if ok {
 					events = append(events, event)
 				}
+				continue
+			}
+			if note.Position != nil {
 				continue
 			}
 			events = append(events, platform.MergeRequestEvent{

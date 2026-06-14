@@ -117,6 +117,7 @@
     review_thread_resolution: false,
     read_review_threads: false,
     native_multiline_ranges: false,
+    mutation_head_binding: false,
     supported_review_actions: [],
   };
 
@@ -398,9 +399,15 @@
   // Clear modal/edit state on route change so PR A's open modal
   // can't reappear for PR B once `stalePR` clears.
   $effect(() => {
+    // Full provider-aware PR identity: the same owner/name/number can
+    // exist on another provider or host, and stale head-conflict state
+    // must not leak across that navigation either.
     void owner;
     void name;
     void number;
+    void provider;
+    void platformHost;
+    void repoPath;
     const keepStackExpanded = untrack(() => {
       const keepExpanded = keepStackExpandedOnRouteChange &&
         expandedPanel === "stack";
@@ -408,6 +415,8 @@
       return keepExpanded;
     });
     showMergeModal = false;
+    headConflict = null;
+    headConflictContext = null;
     expandedPanel = keepStackExpanded ? "stack" : null;
     editingTitle = false;
     editingBody = false;
@@ -623,6 +632,54 @@
   let repoSettingsRequestID = 0;
   let showMergeModal = $state(false);
 
+  // Head-pinning conflict state (context/provider-architecture.md
+  // "Head binding"). Merge and approve echo the rendered head as
+  // expected_head_sha; a 409 conflict with reason stale_state or
+  // head_unknown lands here.
+  let headConflict = $state<"stale_state" | "head_unknown" | null>(null);
+  // Provider side-effect context from the conflict response (an
+  // approval that could not be revoked, posted review text a retry
+  // would repeat); rendered with the stale banner so the consequence
+  // is not hidden behind the generic re-review prompt.
+  let headConflictContext = $state<string | null>(null);
+  const detailHeadSha = $derived(
+    detailStore.getDetail()?.reviewed_head_sha ?? "",
+  );
+  // After head_unknown the reviewed head stays unbound until diff sync
+  // records a current snapshot,
+  // so head-bound actions (approve, merge) are disabled until the
+  // refreshed detail carries a reviewed head SHA again. Once the SHA arrives
+  // this clears on its own; the stale_state prompt instead stays until
+  // the user completes a head-bound action or navigates away.
+  const headActionsBlocked = $derived(
+    headConflict === "head_unknown" && detailHeadSha === "",
+  );
+  // Preflight guard: a head-binding provider must never fire an unbound
+  // mutation, so head-bound actions stay disabled until diff sync proves
+  // the rendered code matches the current head — no request, no 409
+  // round trip.
+  const headPinMissing = $derived(
+    (detailStore.getDetail()?.repo?.capabilities?.mutation_head_binding ?? false)
+      && detailHeadSha === "",
+  );
+
+  function handleHeadConflict(
+    reason: "stale_state" | "head_unknown",
+    context?: string,
+  ): void {
+    headConflict = reason;
+    headConflictContext = context ?? null;
+    showMergeModal = false;
+    // loadDetail's default sync mode pulls fresh provider state, which
+    // is what re-binds the head (stale_state) or populates a missing
+    // one (head_unknown).
+    void detailStore.loadDetail(owner, name, number, {
+      provider,
+      platformHost,
+      repoPath,
+    });
+  }
+
   $effect(() => {
     const requestID = ++repoSettingsRequestID;
     repoSettings = null;
@@ -696,7 +753,7 @@
   }
 
   function buildOpenMergeInput(
-    pr: Pick<PullRequest, "State" | "IsDraft" | "MergeableState">,
+    pr: Pick<PullRequest, "State" | "IsDraft" | "MergeableState" | "platform_head_sha">,
     capabilities: ProviderCapabilities,
   ): PRDetailActionInput {
     return {
@@ -704,6 +761,10 @@
         State: pr.State,
         IsDraft: pr.IsDraft,
         MergeableState: pr.MergeableState,
+        // Same rendered-head source as the button gating and MergeModal:
+        // the detail envelope's reviewed_head_sha. The raw platform head
+        // can advance before diff sync proves the new code was reviewed.
+        platform_head_sha: detailHeadSha,
       },
       ref: routeRef,
       number,
@@ -714,9 +775,13 @@
         approveWorkflows: false,
       },
       repoSettings,
-      stale: stalePR,
+      // Treat a blocked head as stale for gating: the merge modal must
+      // not open while the reviewed head is unknown.
+      stale: stalePR || headActionsBlocked,
       stores: { detail: detailStore, pulls },
       client,
+      requireHeadPin: capabilities.mutation_head_binding,
+      ...(detailHeadSha !== "" && { expectedHeadSha: detailHeadSha }),
       setMergeModalOpen: (open: boolean) => { showMergeModal = open; },
       onAfterOpenMerge: closeActionMenu,
     };
@@ -1637,7 +1702,11 @@
               {platformHost}
               {repoPath}
               size="sm"
-              disabled={stalePR}
+              disabled={stalePR || headActionsBlocked}
+              expectedHeadSha={detailHeadSha}
+              requireHeadPin={capabilities.mutation_head_binding}
+              onheadconflict={handleHeadConflict}
+              oncompleted={() => { headConflict = null; headConflictContext = null; }}
             />
           {/if}
           {#if capabilities.workflow_approval && workflowApproval?.checked && workflowApproval.required}
@@ -1662,15 +1731,17 @@
             {@const mergeDisabledByConflicts = hasMergeConflicts(pr)}
             {@const mergeTitle = mergeDisabledByConflicts
               ? "Resolve merge conflicts before merging"
-              : mergeOpUnavailable
-                ? mergeOp?.unavailable_reason ?? ""
-                : ""}
+              : headPinMissing
+                ? "The reviewed head commit has not been synced yet; merging is disabled until the next sync records it"
+                : mergeOpUnavailable
+                  ? mergeOp?.unavailable_reason ?? ""
+                  : ""}
             <ActionButton
               class="btn--merge"
-              disabled={stalePR || mergeDisabledByConflicts || mergeOpUnavailable}
+              disabled={stalePR || mergeDisabledByConflicts || mergeOpUnavailable || headActionsBlocked || headPinMissing}
               title={mergeTitle}
               onclick={() => {
-                if (stalePR || mergeOpUnavailable) return;
+                if (stalePR || mergeOpUnavailable || headActionsBlocked || headPinMissing) return;
                 runOpenMerge(buildOpenMergeInput(pr, capabilities));
               }}
               tone="success"
@@ -1808,6 +1879,18 @@
           {#if stateError}
             <span class="action-error action-error--state">{stateError}</span>
           {/if}
+          {#if headConflict === "stale_state"}
+            <span class="action-error action-error--state" role="status">
+              The head commit changed since this pull request was reviewed. Re-review the latest changes before approving or merging.
+              {#if headConflictContext}
+                {" "}{headConflictContext}.
+              {/if}
+            </span>
+          {:else if headActionsBlocked}
+            <span class="action-error action-error--state" role="status">
+              The head commit has not been synced yet. Approve and merge are unavailable until the next sync records it.
+            </span>
+          {/if}
         </div>
       {/if}
 
@@ -1901,9 +1984,14 @@
           allowSquash={repoSettings.allowSquash}
           allowMerge={repoSettings.allowMerge}
           allowRebase={repoSettings.allowRebase}
+          expectedHeadSha={detailHeadSha}
+          requireHeadPin={capabilities.mutation_head_binding}
+          onheadconflict={handleHeadConflict}
           onclose={() => { showMergeModal = false; }}
           onmerged={() => {
             showMergeModal = false;
+            headConflict = null;
+            headConflictContext = null;
             void detailStore.loadDetail(owner, name, number, {
               provider,
               platformHost,

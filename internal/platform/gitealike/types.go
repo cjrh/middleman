@@ -48,7 +48,6 @@ type MutationTransport interface {
 	EditIssue(ctx context.Context, ref platform.RepoRef, number int, opts IssueMutationOptions) (IssueDTO, error)
 	EditPullRequest(ctx context.Context, ref platform.RepoRef, number int, opts PullRequestMutationOptions) (PullRequestDTO, error)
 	MergePullRequest(ctx context.Context, ref platform.RepoRef, number int, opts MergeOptions) (MergeResultDTO, error)
-	CreatePullReview(ctx context.Context, ref platform.RepoRef, number int, body string) (ReviewDTO, error)
 }
 
 // ReviewRequestTransport is the optional transport surface for adding
@@ -242,6 +241,10 @@ type MergeOptions struct {
 	CommitTitle   string
 	CommitMessage string
 	Method        string
+	// ExpectedHeadSHA, when set, is sent as head_commit_id so the
+	// provider rejects the merge if the PR head moved past the
+	// reviewed commit.
+	ExpectedHeadSHA string
 }
 
 type MergeResultDTO struct {

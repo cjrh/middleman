@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,17 +256,16 @@ func TestClientProviderIdentityExposesReadCapabilities(t *testing.T) {
 		CommentMutation:       true,
 		StateMutation:         true,
 		MergeMutation:         true,
-		ReviewMutation:        true,
 		IssueMutation:         true,
 		LabelMutation:         true,
 		AssigneeMutation:      true,
 		ReviewerMutation:      true,
+		MutationHeadBinding:   true,
 		ReviewDraftMutation:   true,
 		ReadReviewThreads:     true,
 		NativeMultilineRanges: false,
 		SupportedReviewActions: []platform.ReviewAction{
 			platform.ReviewActionComment,
-			platform.ReviewActionApprove,
 			platform.ReviewActionRequestChanges,
 		},
 	}, client.Capabilities())
@@ -443,9 +443,7 @@ func TestClientMutationCapabilityUsesForgejoEndpoints(t *testing.T) {
 	prBody := "body"
 	_, err = client.EditMergeRequestContent(context.Background(), ref, 7, &prTitle, &prBody)
 	require.NoError(err)
-	_, err = client.MergeMergeRequest(context.Background(), ref, 7, "title", "message", "squash")
-	require.NoError(err)
-	_, err = client.ApproveMergeRequest(context.Background(), ref, 7, "ship it")
+	_, err = client.MergeMergeRequest(context.Background(), ref, 7, "title", "message", "squash", "")
 	require.NoError(err)
 
 	assert.Equal([]string{
@@ -456,8 +454,34 @@ func TestClientMutationCapabilityUsesForgejoEndpoints(t *testing.T) {
 		"PATCH /api/v1/repos/owner/repo/pulls/7",
 		"PATCH /api/v1/repos/owner/repo/pulls/7",
 		"POST /api/v1/repos/owner/repo/pulls/7/merge",
-		"POST /api/v1/repos/owner/repo/pulls/7/reviews",
 	}, seen)
+}
+
+func TestClientApproveMergeRequestUnsupported(t *testing.T) {
+	assert := Assert.New(t)
+	require := Require.New(t)
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client, err := NewClient("codeberg.test", testTokenSource("forgejo-token"), WithBaseURLForTesting(server.URL))
+	require.NoError(err)
+
+	_, err = client.ApproveMergeRequest(
+		context.Background(),
+		platform.RepoRef{Owner: "owner", Name: "repo"},
+		7,
+		"ship it",
+		"reviewed-head",
+	)
+	var platformErr *platform.Error
+	require.ErrorAs(err, &platformErr)
+	assert.Equal(platform.ErrCodeUnsupportedCapability, platformErr.Code)
+	assert.Equal("approve_merge_request", platformErr.Capability)
+	assert.False(sawRequest)
 }
 
 func TestClientMapsNotFoundResponsesToPlatformError(t *testing.T) {
@@ -481,4 +505,100 @@ func TestClientMapsNotFoundResponsesToPlatformError(t *testing.T) {
 	)
 	require.Error(err)
 	assert.ErrorIs(err, platform.ErrNotFound)
+}
+
+// The Forgejo SDK reports any non-2xx merge response as merged=false
+// with a nil error and an unread body. The client must restore the
+// provider's status and message so a rejected merge fails (and a head
+// mismatch classifies as stale) instead of recording a merge that
+// never happened.
+func TestClientMergeRejectionSurfacesProviderStatusAndMessage(t *testing.T) {
+	assert := Assert.New(t)
+	require := Require.New(t)
+	message := "head out of date"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/pulls/7/merge" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			assert.NoError(json.NewEncoder(w).Encode(map[string]any{"message": message}))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client, err := NewClient("codeberg.test", testTokenSource("forgejo-token"), WithBaseURLForTesting(server.URL))
+	require.NoError(err)
+	ref := platform.RepoRef{Owner: "owner", Name: "repo"}
+
+	_, err = client.MergeMergeRequest(context.Background(), ref, 7, "t", "m", "merge", "reviewed-head")
+	require.Error(err, "a rejected merge must not report success")
+	var platformErr *platform.Error
+	require.ErrorAs(err, &platformErr)
+	assert.Equal(platform.ErrCodeStaleState, platformErr.Code,
+		"the live head-mismatch message must classify as stale")
+
+	message = "merge conflict detected"
+	_, err = client.MergeMergeRequest(context.Background(), ref, 7, "t", "m", "merge", "reviewed-head")
+	require.Error(err)
+	require.NotErrorIs(err, platform.ErrStaleState,
+		"an unrelated 409 must stay a generic conflict")
+	var httpErr *gitealike.HTTPError
+	require.ErrorAs(err, &httpErr)
+	assert.Equal(http.StatusConflict, httpErr.StatusCode)
+	assert.Contains(httpErr.Error(), "merge conflict detected")
+}
+
+// Two merges on the same client share one rejection capture slot; the
+// clear/request/read sequence is serialized inside the request
+// section, so concurrent rejected merges must each surface their own
+// status, message, and stale classification without cross-talk.
+func TestClientConcurrentMergeRejectionsDoNotCrossTalk(t *testing.T) {
+	assert := Assert.New(t)
+	require := Require.New(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/repos/owner/repo/pulls/7/merge":
+			w.WriteHeader(http.StatusConflict)
+			assert.NoError(json.NewEncoder(w).Encode(map[string]any{"message": "head out of date"}))
+		case "/api/v1/repos/owner/repo/pulls/8/merge":
+			w.WriteHeader(http.StatusConflict)
+			assert.NoError(json.NewEncoder(w).Encode(map[string]any{"message": "merge conflict on 8"}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient("codeberg.test", testTokenSource("forgejo-token"), WithBaseURLForTesting(server.URL))
+	require.NoError(err)
+	ref := platform.RepoRef{Owner: "owner", Name: "repo"}
+
+	var wg sync.WaitGroup
+	var errStale, errGeneric error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, errStale = client.MergeMergeRequest(context.Background(), ref, 7, "t", "m", "merge", "reviewed-head")
+	}()
+	go func() {
+		defer wg.Done()
+		_, errGeneric = client.MergeMergeRequest(context.Background(), ref, 8, "t", "m", "merge", "reviewed-head")
+	}()
+	wg.Wait()
+
+	require.ErrorIs(errStale, platform.ErrStaleState,
+		"the head-mismatch rejection must keep its stale classification under concurrency")
+	require.NotErrorIs(errGeneric, platform.ErrStaleState,
+		"the unrelated conflict must not pick up the other call's classification")
+	var httpErr *gitealike.HTTPError
+	require.ErrorAs(errGeneric, &httpErr)
+	assert.Equal(http.StatusConflict, httpErr.StatusCode)
+	assert.Contains(httpErr.Error(), "merge conflict on 8",
+		"each call must surface its own provider message")
 }

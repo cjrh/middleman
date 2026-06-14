@@ -28,6 +28,7 @@ const baseCapabilities = {
   review_thread_resolution: true,
   read_review_threads: true,
   native_multiline_ranges: true,
+  mutation_head_binding: false,
   supported_review_actions: ["comment", "approve", "request_changes"],
 };
 
@@ -110,6 +111,7 @@ function pullDetail(
     repo_name: "widgets",
     platform_host: platformHost,
     platform_head_sha: "diff-head",
+    reviewed_head_sha: "diff-head",
     platform_base_sha: "base",
     diff_head_sha: "diff-head",
     merge_base_sha: "merge-base",

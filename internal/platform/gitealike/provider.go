@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.kenn.io/middleman/internal/platform"
 )
@@ -77,8 +78,8 @@ func (p *Provider) Capabilities() platform.Capabilities {
 		caps.CommentMutation = true
 		caps.StateMutation = true
 		caps.MergeMutation = true
-		caps.ReviewMutation = true
 		caps.IssueMutation = true
+		caps.MutationHeadBinding = true
 		caps.LabelMutation = hasLabels
 		caps.AssigneeMutation = true
 		if _, ok := p.transport.(ReviewRequestTransport); ok {
@@ -522,6 +523,10 @@ func (p *Provider) SetIssueState(
 	return NormalizeIssue(ref, issue), nil
 }
 
+// MergeMergeRequest sends expectedHeadSHA as the Gitea/Forgejo merge
+// head_commit_id: the provider rejects the merge when the PR head moved
+// past the reviewed commit, and that rejection is classified as
+// stale_state.
 func (p *Provider) MergeMergeRequest(
 	ctx context.Context,
 	ref platform.RepoRef,
@@ -529,37 +534,45 @@ func (p *Provider) MergeMergeRequest(
 	commitTitle string,
 	commitMessage string,
 	method string,
+	expectedHeadSHA string,
 ) (platform.MergeResult, error) {
 	transport, err := p.mutationTransport("merge_mutation")
 	if err != nil {
 		return platform.MergeResult{}, err
 	}
 	result, err := transport.MergePullRequest(ctx, ref, number, MergeOptions{
-		CommitTitle:   commitTitle,
-		CommitMessage: commitMessage,
-		Method:        method,
+		CommitTitle:     commitTitle,
+		CommitMessage:   commitMessage,
+		Method:          method,
+		ExpectedHeadSHA: expectedHeadSHA,
 	})
 	if err != nil {
+		if expectedHeadSHA != "" && isHeadMismatchConflict(err) {
+			return platform.MergeResult{}, &platform.Error{
+				Code:         platform.ErrCodeStaleState,
+				Provider:     p.kind,
+				PlatformHost: p.host,
+				Capability:   "merge_merge_request",
+				Err:          err,
+			}
+		}
 		return platform.MergeResult{}, p.mapError(err)
 	}
 	return platform.MergeResult{Merged: result.Merged, SHA: result.SHA, Message: result.Message}, nil
 }
 
+// ApproveMergeRequest is intentionally unsupported because Gitea-like
+// approvals cannot be submitted atomically against the expected pull request
+// head.
 func (p *Provider) ApproveMergeRequest(
 	ctx context.Context,
 	ref platform.RepoRef,
 	number int,
 	body string,
+	expectedHeadSHA string,
 ) (platform.MergeRequestEvent, error) {
-	transport, err := p.mutationTransport("review_mutation")
-	if err != nil {
-		return platform.MergeRequestEvent{}, err
-	}
-	review, err := transport.CreatePullReview(ctx, ref, number, body)
-	if err != nil {
-		return platform.MergeRequestEvent{}, p.mapError(err)
-	}
-	return NormalizeMergeRequestEvents(p.kind, ref, number, nil, []ReviewDTO{review}, nil)[0], nil
+	return platform.MergeRequestEvent{},
+		platform.UnsupportedCapability(p.kind, p.host, "approve_merge_request")
 }
 
 func (p *Provider) EditMergeRequestContent(
@@ -767,6 +780,36 @@ func (p *Provider) mutationTransport(capability string) (MutationTransport, erro
 		return nil, platform.UnsupportedCapability(p.kind, p.host, capability)
 	}
 	return transport, nil
+}
+
+// headMismatchPhrases are the messages the Gitea and Forgejo merge
+// endpoints return when head_commit_id no longer matches the PR head
+// (the IsErrSHADoesNotMatch branch in routers/api/v1/repo/pull.go).
+// Current Gitea and Forgejo lines say "head out of date"; older Gitea
+// releases said "head target does not match". Validated live against
+// the container fixtures.
+var headMismatchPhrases = []string{
+	"head out of date",
+	"head target does not match",
+}
+
+// isHeadMismatchConflict reports whether a transport error is the
+// Gitea/Forgejo 409 returned when head_commit_id no longer matches the
+// PR head. The merge endpoints also answer 409 for ordinary merge
+// conflicts and out-of-date pushes, so the status alone is not enough:
+// only the head-mismatch messages classify as stale.
+func isHeadMismatchConflict(err error) bool {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr == nil || httpErr.StatusCode != 409 {
+		return false
+	}
+	text := strings.ToLower(httpErr.Error())
+	for _, phrase := range headMismatchPhrases {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) mapError(err error) error {

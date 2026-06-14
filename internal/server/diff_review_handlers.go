@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -182,7 +183,7 @@ func (s *Server) publishDiffReviewDraft(
 	}
 	caps := s.capabilitiesForRepo(*repo)
 	if !reviewActionSupported(caps, action) {
-		return nil, huma.Error400BadRequest("unsupported review action")
+		return nil, problemUnsupportedCapability(*repo, "review_action_"+string(action))
 	}
 	draft, err := s.db.GetMRReviewDraft(ctx, mr.ID)
 	if err != nil {
@@ -194,6 +195,19 @@ func (s *Server) publishDiffReviewDraft(
 	reviewHeadSHA := mr.DiffHeadSHA
 	if reviewHeadSHA == "" {
 		reviewHeadSHA = mr.PlatformHeadSHA
+	}
+	// Approve publishes are head-bound: on providers that enforce head
+	// binding they must clear the same reviewedHeadSHA gate as /approve
+	// and /merge, which fails closed on a missing or stale reviewed diff
+	// snapshot — including a moved base SHA with an unchanged head. The
+	// per-comment head check below only compares DiffHeadSHA, so a stale
+	// base would otherwise let an approval land on an out-of-date diff.
+	if action == platform.ReviewActionApprove && caps.MutationHeadBinding {
+		gatedHead, gateErr := s.reviewedHeadSHA(repo, mr)
+		if gateErr != nil {
+			return nil, gateErr
+		}
+		reviewHeadSHA = gatedHead
 	}
 	if reviewHeadSHA == "" {
 		return nil, huma.Error409Conflict("review diff is unavailable")
@@ -241,9 +255,23 @@ func (s *Server) publishDiffReviewDraft(
 			if capabilityEnabled(s.capabilitiesForRepo(*repo), capabilityReadReviewThreads) {
 				_ = s.ingestDiffReviewThreads(ctx, *repo, *mr)
 			}
+			if errors.Is(partialErr, platform.ErrStaleState) {
+				s.syncAfterStaleReviewDraftPublish(*repo, input.Number)
+			}
+			if mapped := diffReviewPartialPublishProblem(partialErr, *repo); mapped != nil {
+				return nil, mapped
+			}
 			return &actionStatusOutput{Body: actionStatusBody{Status: "partially_published"}}, nil
 		}
-		return nil, huma.Error502BadGateway("publish review draft on provider failed")
+		if errors.Is(err, platform.ErrStaleState) {
+			s.syncAfterStaleReviewDraftPublish(*repo, input.Number)
+		}
+		return nil, providerCallProblemWithDetail(
+			err,
+			string(repoProviderKind(*repo)),
+			repoProviderHost(*repo),
+			"publish review draft on provider failed",
+		)
 	}
 	if err := s.db.DeleteMRReviewDraft(ctx, mr.ID); err != nil {
 		return nil, huma.Error500InternalServerError("discard published review draft failed")
@@ -252,6 +280,43 @@ func (s *Server) publishDiffReviewDraft(
 		_ = s.ingestDiffReviewThreads(ctx, *repo, *mr)
 	}
 	return &actionStatusOutput{Body: actionStatusBody{Status: "published"}}, nil
+}
+
+func (s *Server) syncAfterStaleReviewDraftPublish(repo db.Repo, number int) {
+	s.runBackground(func(bgCtx context.Context) {
+		if syncErr := s.syncer.SyncMROnProvider(
+			bgCtx,
+			repoProviderKind(repo), repoProviderHost(repo),
+			repo.Owner, repo.Name, number,
+		); syncErr != nil {
+			slog.Warn("background sync after stale review draft publish", "err", syncErr)
+		}
+	})
+}
+
+func diffReviewPartialPublishProblem(
+	err *platform.DiffReviewPublishPartialError,
+	repo db.Repo,
+) huma.StatusError {
+	if err == nil || err.Err == nil {
+		return nil
+	}
+	var platformErr *platform.Error
+	if !errors.As(err.Err, &platformErr) {
+		return nil
+	}
+	if platformErr.Code != platform.ErrCodeStaleState {
+		return nil
+	}
+	mapped := providerCallProblem(err.Err, string(repoProviderKind(repo)), repoProviderHost(repo))
+	if problem, ok := mapped.(*ProblemError); ok {
+		if problem.Details == nil {
+			problem.Details = map[string]any{}
+		}
+		problem.Details["partialPublish"] = true
+		problem.Details["publishedCommentCount"] = len(err.PublishedCommentIDs)
+	}
+	return mapped
 }
 
 func (s *Server) deletePublishedReviewDraftComments(

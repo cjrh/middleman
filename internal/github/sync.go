@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
@@ -655,7 +656,7 @@ func (p gitHubClientProvider) Capabilities() platform.Capabilities {
 		CommentMutation:       true,
 		StateMutation:         true,
 		MergeMutation:         true,
-		ReviewMutation:        true,
+		MutationHeadBinding:   true,
 		WorkflowApproval:      true,
 		ReadyForReview:        true,
 		IssueMutation:         true,
@@ -668,7 +669,6 @@ func (p gitHubClientProvider) Capabilities() platform.Capabilities {
 		NativeMultilineRanges: true,
 		SupportedReviewActions: []platform.ReviewAction{
 			platform.ReviewActionComment,
-			platform.ReviewActionApprove,
 			platform.ReviewActionRequestChanges,
 		},
 	}
@@ -1110,6 +1110,9 @@ func (p gitHubClientProvider) SetIssueState(
 	return platformgithub.NormalizeIssue(ref, ghIssue)
 }
 
+// MergeMergeRequest passes expectedHeadSHA as the GitHub merge sha
+// parameter: GitHub rejects the merge when the PR head moved past the
+// reviewed commit, and that rejection is classified as stale_state.
 func (p gitHubClientProvider) MergeMergeRequest(
 	ctx context.Context,
 	ref platform.RepoRef,
@@ -1117,11 +1120,21 @@ func (p gitHubClientProvider) MergeMergeRequest(
 	commitTitle string,
 	commitMessage string,
 	method string,
+	expectedHeadSHA string,
 ) (platform.MergeResult, error) {
 	result, err := p.client.MergePullRequest(
-		ctx, ref.Owner, ref.Name, number, commitTitle, commitMessage, method,
+		ctx, ref.Owner, ref.Name, number, commitTitle, commitMessage, method, expectedHeadSHA,
 	)
 	if err != nil {
+		if expectedHeadSHA != "" && isGitHubHeadModified(err) {
+			return platform.MergeResult{}, &platform.Error{
+				Code:         platform.ErrCodeStaleState,
+				Provider:     platform.KindGitHub,
+				PlatformHost: p.host,
+				Capability:   "merge_merge_request",
+				Err:          err,
+			}
+		}
 		return platform.MergeResult{}, err
 	}
 	if result == nil {
@@ -1132,6 +1145,21 @@ func (p gitHubClientProvider) MergeMergeRequest(
 		SHA:     result.GetSHA(),
 		Message: result.GetMessage(),
 	}, nil
+}
+
+// isGitHubHeadModified reports whether a GitHub merge rejection is the
+// sha-mismatch refusal ("Head branch was modified. Review and try the
+// merge again.").
+func isGitHubHeadModified(err error) bool {
+	var ghErr *gh.ErrorResponse
+	if !errors.As(err, &ghErr) || ghErr == nil || ghErr.Response == nil {
+		return false
+	}
+	if ghErr.Response.StatusCode != http.StatusConflict &&
+		ghErr.Response.StatusCode != http.StatusMethodNotAllowed {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ghErr.Message), "head branch was modified")
 }
 
 func (p gitHubClientProvider) ApproveWorkflow(
@@ -1323,20 +1351,17 @@ func githubRequestedReviewerLogins(pr *gh.PullRequest) []string {
 	return logins
 }
 
+// ApproveMergeRequest is intentionally unsupported because GitHub approvals
+// cannot be submitted atomically against the expected pull request head.
 func (p gitHubClientProvider) ApproveMergeRequest(
 	ctx context.Context,
 	ref platform.RepoRef,
 	number int,
 	body string,
+	expectedHeadSHA string,
 ) (platform.MergeRequestEvent, error) {
-	review, err := p.client.CreateReview(ctx, ref.Owner, ref.Name, number, "APPROVE", body)
-	if err != nil {
-		return platform.MergeRequestEvent{}, err
-	}
-	if review == nil {
-		return platform.MergeRequestEvent{}, fmt.Errorf("provider returned no review")
-	}
-	return platformgithub.NormalizeReviewEvent(ref, number, review), nil
+	return platform.MergeRequestEvent{},
+		platform.UnsupportedCapability(platform.KindGitHub, p.host, "approve_merge_request")
 }
 
 func (p gitHubClientProvider) ListMergeRequestReviewThreads(
@@ -1467,6 +1492,9 @@ func (p gitHubClientProvider) PublishDiffReviewDraft(
 	number int,
 	input platform.PublishDiffReviewDraftInput,
 ) (*platform.PublishedDiffReview, error) {
+	if input.Action == platform.ReviewActionApprove {
+		return nil, platform.UnsupportedCapability(platform.KindGitHub, p.host, "approve_merge_request")
+	}
 	event, err := githubReviewEvent(input.Action)
 	if err != nil {
 		return nil, err
@@ -1475,6 +1503,7 @@ func (p gitHubClientProvider) PublishDiffReviewDraft(
 	for _, comment := range input.Comments {
 		comments = append(comments, githubDraftReviewComment(comment))
 	}
+	headSHA := githubReviewHeadSHA(input)
 	review, err := p.client.CreateReviewWithComments(
 		ctx,
 		ref.Owner,
@@ -1482,7 +1511,7 @@ func (p gitHubClientProvider) PublishDiffReviewDraft(
 		number,
 		event,
 		input.Body,
-		githubReviewHeadSHA(input),
+		headSHA,
 		comments,
 	)
 	if err != nil {
@@ -1502,8 +1531,6 @@ func githubReviewEvent(action platform.ReviewAction) (string, error) {
 	switch action {
 	case platform.ReviewActionComment:
 		return "COMMENT", nil
-	case platform.ReviewActionApprove:
-		return "APPROVE", nil
 	case platform.ReviewActionRequestChanges:
 		return "REQUEST_CHANGES", nil
 	default:
@@ -3919,7 +3946,7 @@ func (s *Syncer) syncMergeRequestsFromList(
 	var hadItemFailure bool
 	progress := newMergeRequestSyncProgressLogger(repo, "provider", len(mrs))
 	for i, mr := range mrs {
-		if err := s.indexUpsertMergeRequest(ctx, repo, repoID, mr); err != nil {
+		if err := s.indexUpsertMergeRequest(ctx, repo, repoID, mr, cloneFetchOK); err != nil {
 			slog.Error("index upsert MR failed",
 				"repo", repo.Owner+"/"+repo.Name,
 				"number", mr.Number,
@@ -4016,6 +4043,7 @@ func (s *Syncer) indexUpsertMergeRequest(
 	repo RepoRef,
 	repoID int64,
 	mr platform.MergeRequest,
+	cloneFetchOK bool,
 ) error {
 	normalized := platform.DBMergeRequest(repoID, mr)
 
@@ -4033,6 +4061,7 @@ func (s *Syncer) indexUpsertMergeRequest(
 	if existing != nil {
 		normalized.Additions = existing.Additions
 		normalized.Deletions = existing.Deletions
+		preservePlatformBaseSHAIfOmitted(normalized, existing)
 		preserveReviewDecisionIfOmitted(normalized, existing)
 		preserveMergeableStateIfOmitted(normalized, existing)
 		needsCIDetailRefresh = preserveCIStateIfOmitted(normalized, existing)
@@ -4078,6 +4107,27 @@ func (s *Syncer) indexUpsertMergeRequest(
 		)
 	}
 
+	// Record the reviewed diff snapshot so head-binding providers can
+	// pin mutations after a plain list sync — without it the head
+	// stays unreviewable and head-bound actions 409 with head_unknown.
+	// Skipped when the stored snapshot already covers this head/base
+	// pair: recomputing the merge-base for every open MR on every
+	// cycle would add unbounded git work to large repos. Non-fatal
+	// like the bulk GitHub path: a missed snapshot only delays
+	// head-bound actions until the next successful sync.
+	snapshotCurrent := existing != nil &&
+		existing.DiffHeadSHA == normalized.PlatformHeadSHA &&
+		existing.DiffBaseSHA == normalized.PlatformBaseSHA &&
+		existing.MergeBaseSHA != ""
+	if s.clones != nil && cloneFetchOK && !snapshotCurrent {
+		if err := s.syncProviderMRDiff(ctx, repo, repoID, mr.Number, normalized, false); err != nil {
+			slog.Warn("provider diff snapshot failed",
+				"repo", repo.Owner+"/"+repo.Name,
+				"number", mr.Number, "err", err,
+			)
+		}
+	}
+
 	if existing != nil &&
 		existing.DetailFetchedAt != nil &&
 		existing.UpdatedAt.Equal(normalized.UpdatedAt) {
@@ -4117,6 +4167,7 @@ func (s *Syncer) indexUpsertMR(
 	if existing != nil {
 		normalized.Additions = existing.Additions
 		normalized.Deletions = existing.Deletions
+		preservePlatformBaseSHAIfOmitted(normalized, existing)
 		preserveReviewDecisionIfOmitted(normalized, existing)
 		preserveMergeableStateIfOmitted(normalized, existing)
 		needsCIDetailRefresh = preserveCIStateIfOmitted(normalized, existing)
@@ -7368,6 +7419,13 @@ func (s *Syncer) syncMRForRepo(
 			_ = s.updateMRDetailFetchedByRepoID(ctx, repoID, number, pending)
 		}
 	} else {
+		// Record the reviewed diff snapshot for non-GitHub providers
+		// too: head-binding providers refuse merge/approve until
+		// DiffHeadSHA matches the platform head, so a sync that never
+		// writes it would leave head-bound actions permanently
+		// disabled with 409 head_unknown.
+		diffErr = s.syncProviderMRDiff(ctx, repo, repoID, number, normalized, true)
+
 		pending := false
 		_, pending, err = s.syncProviderMRDetailExtras(
 			ctx, mrReader, repo, repoID, mrID, number, normalized.PlatformHeadSHA,
@@ -7397,6 +7455,30 @@ func (s *Syncer) syncMRForRepo(
 		return diffErr
 	}
 	return nil
+}
+
+// preservePlatformBaseSHAIfOmitted keeps the stored base SHA when the
+// list endpoint omits it but the head is unchanged. GitLab list
+// payloads carry no diff_refs, so a bare list-driven upsert would
+// blank the base SHA that a prior detail sync recorded — invalidating
+// the reviewed diff snapshot (diff_base_sha != platform_base_sha) and
+// dropping reviewed_head_sha back to 409 head_unknown.
+func preservePlatformBaseSHAIfOmitted(
+	normalized *db.MergeRequest,
+	existing *db.MergeRequest,
+) {
+	if normalized == nil || existing == nil {
+		return
+	}
+	if normalized.PlatformBaseSHA != "" || existing.PlatformBaseSHA == "" {
+		return
+	}
+	if normalized.PlatformHeadSHA == "" ||
+		existing.PlatformHeadSHA == "" ||
+		normalized.PlatformHeadSHA != existing.PlatformHeadSHA {
+		return
+	}
+	normalized.PlatformBaseSHA = existing.PlatformBaseSHA
 }
 
 func preserveMergeableStateIfOmitted(
@@ -7493,6 +7575,55 @@ func (s *Syncer) syncMRDiff(
 
 	if normalized.PlatformHeadSHA == "" || normalized.PlatformBaseSHA == "" {
 		return nil
+	}
+	mb, err := s.clones.MergeBase(ctx, host, repo.Owner, repo.Name, normalized.PlatformBaseSHA, normalized.PlatformHeadSHA)
+	if err != nil {
+		return &DiffSyncError{
+			Code: DiffSyncCodeMergeBaseFailed,
+			Err:  fmt.Errorf("merge-base for #%d: %w", number, err),
+		}
+	}
+	if err := s.db.UpdateDiffSHAs(ctx, repoID, number, normalized.PlatformHeadSHA, normalized.PlatformBaseSHA, mb); err != nil {
+		return &DiffSyncError{
+			Code: DiffSyncCodeInternal,
+			Err:  fmt.Errorf("update diff SHAs for #%d: %w", number, err),
+		}
+	}
+	return nil
+}
+
+// syncProviderMRDiff records the reviewed diff snapshot for a
+// non-GitHub MR: the locally verified head/base SHAs plus merge-base.
+// Head-binding providers gate merge/approve on this snapshot matching
+// the platform head, so it must be written by the same sync that
+// refreshed the MR row. Only open MRs are snapshotted — head pins are
+// meaningless once merged/closed, and the merged-MR merge-base repair
+// logic is GitHub-specific.
+func (s *Syncer) syncProviderMRDiff(
+	ctx context.Context, repo RepoRef, repoID int64, number int,
+	normalized *db.MergeRequest, ensureClone bool,
+) error {
+	if s.clones == nil {
+		return nil
+	}
+	if normalized.State != db.MergeRequestStateOpen {
+		return nil
+	}
+	if normalized.PlatformHeadSHA == "" || normalized.PlatformBaseSHA == "" {
+		return nil
+	}
+	host := repoHost(repo)
+	// List sync already fetched the repo clone once for this cycle;
+	// refetching per MR would turn one repo sync into N network
+	// round-trips. Per-MR detail syncs have no prior fetch and pass
+	// ensureClone.
+	if ensureClone {
+		if err := s.clones.EnsureClone(ctx, host, repo.Owner, repo.Name, cloneRemoteURL(repo)); err != nil {
+			return &DiffSyncError{
+				Code: DiffSyncCodeCloneUnavailable,
+				Err:  fmt.Errorf("ensure bare clone for #%d: %w", number, err),
+			}
+		}
 	}
 	mb, err := s.clones.MergeBase(ctx, host, repo.Owner, repo.Name, normalized.PlatformBaseSHA, normalized.PlatformHeadSHA)
 	if err != nil {

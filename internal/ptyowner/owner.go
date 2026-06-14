@@ -42,24 +42,25 @@ type owner struct {
 	pty   gopty.Pty
 	cmd   *gopty.Cmd
 
-	mu                     sync.Mutex
-	outputBuffer           []byte
-	title                  string
-	titleParser            terminalTitleParser
-	subscribers            map[chan []byte]struct{}
-	activeAttachments      int
-	exitCode               int
-	exited                 bool
-	done                   chan struct{}
-	drainDone              chan struct{}
-	stopRequested          chan struct{}
-	activeAttachmentsDone  chan struct{}
-	postExitAttachmentDone chan struct{}
-	stopOnce               sync.Once
-	activeDoneOnce         sync.Once
-	postExitDoneOnce       sync.Once
-	closePtyOnce           sync.Once
-	connSem                chan struct{}
+	mu                      sync.Mutex
+	outputBuffer            []byte
+	title                   string
+	titleParser             terminalTitleParser
+	subscribers             map[chan []byte]struct{}
+	activeAttachments       int
+	activeAttachmentsAtExit bool
+	exitCode                int
+	exited                  bool
+	done                    chan struct{}
+	drainDone               chan struct{}
+	stopRequested           chan struct{}
+	activeAttachmentsDone   chan struct{}
+	postExitAttachmentDone  chan struct{}
+	stopOnce                sync.Once
+	activeDoneOnce          sync.Once
+	postExitDoneOnce        sync.Once
+	closePtyOnce            sync.Once
+	connSem                 chan struct{}
 }
 
 func RunOwner(ctx context.Context, opts Options) error {
@@ -182,7 +183,7 @@ func RunOwner(ctx context.Context, opts Options) error {
 		<-o.done
 		return ctx.Err()
 	case <-o.done:
-		return o.waitAfterNaturalExit(ctx, acceptErr, o.exitRetentionDone())
+		return o.waitAfterNaturalExit(ctx, acceptErr)
 	case err := <-acceptErr:
 		if errors.Is(err, net.ErrClosed) {
 			return nil
@@ -193,28 +194,38 @@ func RunOwner(ctx context.Context, opts Options) error {
 	}
 }
 
-func (o *owner) exitRetentionDone() <-chan struct{} {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.activeAttachments > 0 {
-		return o.activeAttachmentsDone
-	}
-	return o.postExitAttachmentDone
-}
-
 func (o *owner) waitAfterNaturalExit(
 	ctx context.Context,
 	acceptErr <-chan error,
-	retained <-chan struct{},
 ) error {
 	timer := time.NewTimer(ownerFirstRequestTimeout)
 	defer timer.Stop()
+	if o.hadActiveAttachmentsAtExit() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-o.stopRequested:
+			return nil
+		case <-o.activeAttachmentsDone:
+			return nil
+		case <-timer.C:
+			return nil
+		case err := <-acceptErr:
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return err
+		}
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-o.stopRequested:
 		return nil
-	case <-retained:
+	case <-o.activeAttachmentsDone:
+		return nil
+	case <-o.postExitAttachmentDone:
 		return nil
 	case <-timer.C:
 		return nil
@@ -393,6 +404,12 @@ func (o *owner) endAttach(startedAfterExit bool) {
 	}
 }
 
+func (o *owner) hadActiveAttachmentsAtExit() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.activeAttachmentsAtExit
+}
+
 type initialRequest struct {
 	Type  string `json:"type"`
 	Token string `json:"token,omitempty"`
@@ -449,6 +466,7 @@ func (o *owner) wait() {
 	o.mu.Lock()
 	o.exitCode = code
 	o.exited = true
+	o.activeAttachmentsAtExit = o.activeAttachments > 0
 	for ch := range o.subscribers {
 		delete(o.subscribers, ch)
 		close(ch)

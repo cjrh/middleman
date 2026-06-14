@@ -16,7 +16,7 @@ func (c *Client) PublishDiffReviewDraft(
 	number int,
 	input platform.PublishDiffReviewDraftInput,
 ) (*platform.PublishedDiffReview, error) {
-	return c.transport.PublishDiffReviewDraft(ctx, ref, number, input)
+	return c.transport.PublishDiffReviewDraft(ctx, c.host, ref, number, input)
 }
 
 func (c *Client) ListMergeRequestReviewThreads(
@@ -29,12 +29,16 @@ func (c *Client) ListMergeRequestReviewThreads(
 
 func (t *transport) PublishDiffReviewDraft(
 	ctx context.Context,
+	host string,
 	ref platform.RepoRef,
 	number int,
 	input platform.PublishDiffReviewDraftInput,
 ) (*platform.PublishedDiffReview, error) {
+	if input.Action == platform.ReviewActionApprove {
+		return nil, platform.UnsupportedCapability(platform.KindForgejo, host, "approve_merge_request")
+	}
 	comments := make([]forgejosdk.CreatePullReviewComment, 0, len(input.Comments))
-	commitID := ""
+	commitID := input.HeadSHA
 	for _, comment := range input.Comments {
 		if commitID == "" {
 			commitID = comment.Range.CommitSHA
@@ -44,7 +48,6 @@ func (t *transport) PublishDiffReviewDraft(
 		}
 		comments = append(comments, forgejoReviewComments(comment)...)
 	}
-
 	var review *forgejosdk.PullReview
 	var resp *forgejosdk.Response
 	err := t.withRequestContext(ctx, func() error {
@@ -63,10 +66,11 @@ func (t *transport) PublishDiffReviewDraft(
 	if review == nil {
 		return nil, fmt.Errorf("forgejo create pull review returned nil review")
 	}
-	return &platform.PublishedDiffReview{
+	published := &platform.PublishedDiffReview{
 		ProviderReviewID: strconv.FormatInt(review.ID, 10),
 		SubmittedAt:      review.Submitted.UTC(),
-	}, nil
+	}
+	return published, nil
 }
 
 func (t *transport) ListMergeRequestReviewThreads(
@@ -142,8 +146,6 @@ func (t *transport) listPullReviewComments(
 
 func forgejoReviewState(action platform.ReviewAction) forgejosdk.ReviewStateType {
 	switch action {
-	case platform.ReviewActionApprove:
-		return forgejosdk.ReviewStateApproved
 	case platform.ReviewActionRequestChanges:
 		return forgejosdk.ReviewStateRequestChanges
 	default:

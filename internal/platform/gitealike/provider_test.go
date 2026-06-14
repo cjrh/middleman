@@ -33,18 +33,18 @@ func TestProviderCapabilitiesEnableProvenMutations(t *testing.T) {
 	)
 
 	Assert.Equal(t, platform.Capabilities{
-		ReadRepositories:  true,
-		ReadMergeRequests: true,
-		ReadIssues:        true,
-		ReadComments:      true,
-		ReadReleases:      true,
-		ReadCI:            true,
-		CommentMutation:   true,
-		StateMutation:     true,
-		MergeMutation:     true,
-		ReviewMutation:    true,
-		IssueMutation:     true,
-		AssigneeMutation:  true,
+		ReadRepositories:    true,
+		ReadMergeRequests:   true,
+		ReadIssues:          true,
+		ReadComments:        true,
+		ReadReleases:        true,
+		ReadCI:              true,
+		CommentMutation:     true,
+		StateMutation:       true,
+		MergeMutation:       true,
+		IssueMutation:       true,
+		AssigneeMutation:    true,
+		MutationHeadBinding: true,
 		// ReviewerMutation stays false: fakeTransport does not
 		// implement ReviewRequestTransport.
 	}, provider.Capabilities())
@@ -80,9 +80,8 @@ func TestProviderMutationsNormalizeTransportResponses(t *testing.T) {
 			ID: 11, Index: 7, Title: "edited", User: UserDTO{UserName: "bob"}, State: "open",
 			Created: base, Updated: base,
 		},
-		issue:  IssueDTO{ID: 12, Index: 8, Title: "issue", User: UserDTO{UserName: "carol"}, State: "closed", Created: base, Updated: base},
-		review: ReviewDTO{ID: 13, User: UserDTO{UserName: "dana"}, State: "APPROVED", Body: "ship it", Submitted: base},
-		merge:  MergeResultDTO{Merged: true, SHA: "abc", Message: "merged"},
+		issue: IssueDTO{ID: 12, Index: 8, Title: "issue", User: UserDTO{UserName: "carol"}, State: "closed", Created: base, Updated: base},
+		merge: MergeResultDTO{Merged: true, SHA: "abc", Message: "merged"},
 	}
 	provider := NewProvider(platform.KindForgejo, "codeberg.org", transport, WithMutations())
 
@@ -98,9 +97,7 @@ func TestProviderMutationsNormalizeTransportResponses(t *testing.T) {
 	require.NoError(err)
 	closedIssue, err := provider.SetIssueState(context.Background(), ref, 8, "closed")
 	require.NoError(err)
-	merged, err := provider.MergeMergeRequest(context.Background(), ref, 7, "title", "body", "squash")
-	require.NoError(err)
-	review, err := provider.ApproveMergeRequest(context.Background(), ref, 7, "ship it")
+	merged, err := provider.MergeMergeRequest(context.Background(), ref, 7, "title", "body", "squash", "")
 	require.NoError(err)
 	prTitle := "new title"
 	prBody := "new body"
@@ -118,11 +115,10 @@ func TestProviderMutationsNormalizeTransportResponses(t *testing.T) {
 	assert.Equal("closed", closedIssue.State)
 	assert.True(merged.Merged)
 	assert.Equal("abc", merged.SHA)
-	assert.Equal("APPROVED", review.Summary)
 	assert.Equal("edited", editedPR.Title)
 	assert.Equal([]string{
 		"create_pr_comment", "create_issue_comment", "edit_issue_comment", "create_issue",
-		"edit_pull:closed", "edit_issue:closed", "merge:squash", "review", "edit_pull:",
+		"edit_pull:closed", "edit_issue:closed", "merge:squash", "edit_pull:",
 	}, transport.mutationCalls)
 }
 
@@ -360,10 +356,13 @@ type fakeTransport struct {
 	tags        [][]TagDTO
 	statuses    [][]StatusDTO
 	actionRuns  [][]ActionRunDTO
+	mergeOpts   MergeOptions
+	mergeErr    error
 	comment     CommentDTO
 	pr          PullRequestDTO
+	prSequence  []PullRequestDTO
+	prErrSeq    []error
 	issue       IssueDTO
-	review      ReviewDTO
 	merge       MergeResultDTO
 
 	userRepoPages []int
@@ -411,7 +410,19 @@ func (t *fakeTransport) ListOpenPullRequests(
 }
 
 func (t *fakeTransport) GetPullRequest(context.Context, platform.RepoRef, int) (PullRequestDTO, error) {
-	return PullRequestDTO{}, nil
+	if len(t.prErrSeq) > 0 {
+		err := t.prErrSeq[0]
+		t.prErrSeq = t.prErrSeq[1:]
+		if err != nil {
+			return PullRequestDTO{}, err
+		}
+	}
+	if len(t.prSequence) > 0 {
+		pr := t.prSequence[0]
+		t.prSequence = t.prSequence[1:]
+		return pr, nil
+	}
+	return t.pr, nil
 }
 
 func (t *fakeTransport) ListPullRequestComments(context.Context, platform.RepoRef, int, PageOptions) ([]CommentDTO, Page, error) {
@@ -496,12 +507,11 @@ func (t *fakeTransport) EditPullRequest(_ context.Context, _ platform.RepoRef, _
 
 func (t *fakeTransport) MergePullRequest(_ context.Context, _ platform.RepoRef, _ int, opts MergeOptions) (MergeResultDTO, error) {
 	t.mutationCalls = append(t.mutationCalls, "merge:"+opts.Method)
+	t.mergeOpts = opts
+	if t.mergeErr != nil {
+		return MergeResultDTO{}, t.mergeErr
+	}
 	return t.merge, nil
-}
-
-func (t *fakeTransport) CreatePullReview(context.Context, platform.RepoRef, int, string) (ReviewDTO, error) {
-	t.mutationCalls = append(t.mutationCalls, "review")
-	return t.review, nil
 }
 
 func pageFor[T any](pages [][]T, page int) ([]T, Page, error) {
@@ -513,4 +523,56 @@ func pageFor[T any](pages [][]T, page int) ([]T, Page, error) {
 		next = page + 1
 	}
 	return pages[page-1], Page{Next: next}, nil
+}
+
+func TestProviderMergePinsExpectedHeadAndClassifiesConflict(t *testing.T) {
+	require := Require.New(t)
+	assert := Assert.New(t)
+	ref := platform.RepoRef{Owner: "acme", Name: "widget"}
+
+	transport := &fakeTransport{merge: MergeResultDTO{Merged: true}}
+	provider := NewProvider(platform.KindGitea, "gitea.example.com", transport, WithMutations())
+
+	_, err := provider.MergeMergeRequest(context.Background(), ref, 7, "t", "m", "squash", "reviewed-head")
+	require.NoError(err)
+	assert.Equal("reviewed-head", transport.mergeOpts.ExpectedHeadSHA,
+		"merge must send the reviewed head as head_commit_id")
+
+	// Current Gitea/Forgejo reject with "head out of date"; older Gitea
+	// releases said "head target does not match". Both must classify.
+	for _, message := range []string{"head out of date", "Head target does not match. Please try again."} {
+		transport.mergeErr = &HTTPError{StatusCode: 409, Message: message}
+		_, err = provider.MergeMergeRequest(context.Background(), ref, 7, "t", "m", "squash", "reviewed-head")
+		var platformErr *platform.Error
+		require.ErrorAs(err, &platformErr)
+		assert.Equal(platform.ErrCodeStaleState, platformErr.Code, message)
+	}
+
+	// The merge endpoint answers 409 for ordinary merge conflicts too;
+	// those must stay generic so the UI shows the provider message
+	// instead of a stale-head re-review flow.
+	transport.mergeErr = &HTTPError{StatusCode: 409, Message: "merge conflict detected"}
+	_, err = provider.MergeMergeRequest(context.Background(), ref, 7, "t", "m", "squash", "reviewed-head")
+	require.NotErrorIs(err, platform.ErrStaleState,
+		"a non-head-mismatch 409 must not classify as stale_state")
+	var conflictErr *HTTPError
+	require.ErrorAs(err, &conflictErr)
+	assert.Equal(409, conflictErr.StatusCode)
+}
+
+func TestProviderApproveUnsupported(t *testing.T) {
+	require := Require.New(t)
+	assert := Assert.New(t)
+	ref := platform.RepoRef{Owner: "acme", Name: "widget"}
+
+	transport := &fakeTransport{}
+	provider := NewProvider(platform.KindGitea, "gitea.example.com", transport, WithMutations())
+
+	_, err := provider.ApproveMergeRequest(context.Background(), ref, 7, "ship it", "reviewed-head")
+	var platformErr *platform.Error
+	require.ErrorAs(err, &platformErr)
+	assert.Equal(platform.ErrCodeUnsupportedCapability, platformErr.Code)
+	assert.Equal("approve_merge_request", platformErr.Capability)
+	assert.NotContains(transport.mutationCalls, "review",
+		"unsupported approval must not reach the review API")
 }

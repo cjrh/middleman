@@ -522,6 +522,10 @@ type mockClient struct {
 	createdReviewBody               string
 	createdReviewCommitID           string
 	createdReviewComments           []*gh.DraftReviewComment
+	dismissReviewErr                error
+	dismissedReviewID               int64
+	dismissedReviewMessage          string
+	dismissReviewCalls              atomic.Int32
 }
 
 type rateLimitSnapshotMockClient struct {
@@ -1086,14 +1090,38 @@ func TestGitHubProviderPublishDiffReviewDraftMapsReviewComments(t *testing.T) {
 	assert.Equal(12, comment.GetLine())
 }
 
+func TestGitHubProviderPublishDiffReviewDraftApproveUnsupported(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	mock := &mockClient{}
+	provider := gitHubClientProvider{client: mock, host: "github.com"}
+
+	_, err := provider.PublishDiffReviewDraft(t.Context(), platform.RepoRef{
+		Owner: "acme",
+		Name:  "widget",
+	}, 7, platform.PublishDiffReviewDraftInput{
+		Action:  platform.ReviewActionApprove,
+		HeadSHA: "reviewed-head",
+	})
+
+	var platformErr *platform.Error
+	require.ErrorAs(err, &platformErr)
+	assert.Equal(platform.ErrCodeUnsupportedCapability, platformErr.Code)
+	assert.Equal("approve_merge_request", platformErr.Capability)
+	assert.Empty(mock.createdReviewEvent, "unsupported approval must not reach the review API")
+}
+
 func TestGitHubProviderCapabilitiesExposeReviewThreadReads(t *testing.T) {
+	require := require.New(t)
 	provider := gitHubClientProvider{client: &mockClient{}, host: "github.com"}
 
 	caps := provider.Capabilities()
 
-	require.True(t, caps.ReadReviewThreads)
-	require.True(t, caps.ReviewDraftMutation)
-	require.False(t, caps.ReviewThreadResolution)
+	require.True(caps.ReadReviewThreads)
+	require.True(caps.ReviewDraftMutation)
+	require.False(caps.ReviewThreadResolution)
+	require.False(caps.ReviewMutation)
+	require.NotContains(caps.SupportedReviewActions, platform.ReviewActionApprove)
 }
 
 func TestGitHubProviderListMergeRequestReviewThreadsMapsGraphQLThreads(t *testing.T) {
@@ -1249,8 +1277,21 @@ func (m *mockClient) MarkPullRequestReadyForReview(
 	return &gh.PullRequest{Number: &number, Draft: &draft}, nil
 }
 
+func (m *mockClient) DismissReview(
+	_ context.Context, _, _ string, _ int, reviewID int64, message string,
+) (*gh.PullRequestReview, error) {
+	m.trackCall()
+	m.dismissReviewCalls.Add(1)
+	m.dismissedReviewID = reviewID
+	m.dismissedReviewMessage = message
+	if m.dismissReviewErr != nil {
+		return nil, m.dismissReviewErr
+	}
+	return &gh.PullRequestReview{ID: &reviewID}, nil
+}
+
 func (m *mockClient) MergePullRequest(
-	_ context.Context, _, _ string, _ int, _, _, _ string,
+	_ context.Context, _, _ string, _ int, _, _, _, _ string,
 ) (*gh.PullRequestMergeResult, error) {
 	m.trackCall()
 	merged := true
@@ -2355,6 +2396,7 @@ func TestIndexUpsertMergeRequestUpdatesKnownMergeableState(t *testing.T) {
 		RepoRef{Owner: "owner", Name: "repo", PlatformHost: "github.com"},
 		repoID,
 		incoming,
+		false,
 	)
 	require.NoError(err)
 
@@ -2410,6 +2452,7 @@ func TestIndexUpsertMergeRequestPreservesCachedCIForSameHead(t *testing.T) {
 			UpdatedAt:      now.Add(time.Minute),
 			LastActivityAt: now.Add(time.Minute),
 		},
+		false,
 	)
 	require.NoError(err)
 
@@ -2465,6 +2508,7 @@ func TestIndexUpsertMergeRequestPreservesReviewDecisionWhenOmitted(t *testing.T)
 			UpdatedAt:      now.Add(time.Minute),
 			LastActivityAt: now.Add(time.Minute),
 		},
+		false,
 	)
 	require.NoError(err)
 
@@ -10390,3 +10434,37 @@ func TestResolveDisplayName_StaleWhileErrorBacksOff(t *testing.T) {
 	assert.True(ok)
 	assert.Equal(4, callCount)
 }
+
+func TestGitHubProviderApproveUnsupported(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	mock := &mockClient{}
+	provider := gitHubClientProvider{client: mock, host: "github.com"}
+
+	_, err := provider.ApproveMergeRequest(
+		t.Context(), platform.RepoRef{Owner: "acme", Name: "widget"}, 7,
+		"ship it", "reviewed-head",
+	)
+	var platformErr *platform.Error
+	require.ErrorAs(err, &platformErr)
+	assert.Equal(platform.ErrCodeUnsupportedCapability, platformErr.Code)
+	assert.Equal("approve_merge_request", platformErr.Capability)
+	assert.Empty(mock.createdReviewEvent, "unsupported approval must not reach the review API")
+}
+
+func TestIsGitHubHeadModified(t *testing.T) {
+	assert := Assert.New(t)
+	mismatch := func(status int, message string) error {
+		return &gh.ErrorResponse{
+			Response: &http.Response{StatusCode: status},
+			Message:  message,
+		}
+	}
+	assert.True(isGitHubHeadModified(mismatch(405, "Head branch was modified. Review and try the merge again.")))
+	assert.True(isGitHubHeadModified(mismatch(409, "Head branch was modified.")))
+	assert.False(isGitHubHeadModified(mismatch(405, "Pull Request is not mergeable")))
+	assert.False(isGitHubHeadModified(mismatch(422, "Head branch was modified.")))
+	assert.False(isGitHubHeadModified(errOther))
+}
+
+var errOther = fmt.Errorf("transport down")
