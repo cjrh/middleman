@@ -20,7 +20,7 @@
     parsePierreFileDiffWithContents,
     pierreFileContents,
   } from "./pierre-diff.js";
-  import { getPierreDiffWorkerPool } from "./pierre-worker-pool.js";
+  import { diffTokenizeMaxLineLength, getPierreDiffWorkerPool } from "./pierre-worker-pool.js";
 
   interface Props {
     file: DiffFile | null | undefined;
@@ -115,7 +115,6 @@
   const renderFile = $derived(file ? diffFileWithPatch(file) : emptyFile);
   const fileKey = $derived(`${renderFile.path}\0${renderFile.old_path}\0${renderFile.patch}`);
   const fileHunks = $derived(renderFile.hunks ?? []);
-  const emptyTextualDiff = $derived(!renderFile.patch.trim() || fileHunks.length === 0);
   const pierreFile = $derived.by<FileDiffMetadata | undefined>(() => {
     return parsePierreFileDiff(renderFile, {
       // Pierre marks patch-only diffs as partial and hides expansion controls.
@@ -124,6 +123,13 @@
       enableDemandContextExpansion: Boolean(loadFileText) && hasCollapsedContext(renderFile),
     });
   });
+  const hasRenderablePierreDiff = $derived(
+    Boolean(
+      pierreFile &&
+        (pierreFile.hunks.length > 0 || pierreFile.additionLines.length > 0 || pierreFile.deletionLines.length > 0),
+    ),
+  );
+  const emptyTextualDiff = $derived(!renderFile.patch.trim() || !hasRenderablePierreDiff);
 
   const pierreOptions = $derived.by<FileDiffOptions<unknown>>(() => ({
     diffStyle: viewMode,
@@ -138,7 +144,7 @@
     theme: { dark: "pierre-dark", light: "pierre-light" },
     themeType,
     expansionLineCount: 40,
-    tokenizeMaxLineLength: 2_000,
+    tokenizeMaxLineLength: diffTokenizeMaxLineLength,
     onPostRender: () => {
       removeStalePlaceholderPres();
       applyLineTargetAttributes();

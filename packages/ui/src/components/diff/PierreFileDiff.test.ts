@@ -1,7 +1,33 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type { DiffLineAnnotation, FileDiffOptions } from "@pierre/diffs";
 import type { DiffFile } from "../../api/types.js";
+
+type GlobalWithCSSStyleSheet = {
+  CSSStyleSheet?: {
+    prototype: CSSStyleSheet & { replaceSync?: (text: string) => void };
+  };
+};
+
+let originalReplaceSync: unknown;
+
+beforeAll(() => {
+  originalReplaceSync = (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype.replaceSync;
+  if ((globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) {
+    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync ??= function replaceSync(): void {};
+  }
+});
+
+afterAll(() => {
+  if (!(globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet?.prototype) return;
+  if (originalReplaceSync) {
+    (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync = originalReplaceSync as (
+      text: string,
+    ) => void;
+  } else {
+    delete (globalThis as GlobalWithCSSStyleSheet).CSSStyleSheet.prototype.replaceSync;
+  }
+});
 
 const pierre = (() => {
   const counts = {
@@ -50,6 +76,7 @@ const pierre = (() => {
       },
     ],
   };
+  let parsedMetadata = metadata;
   class FileDiff {
     constructor(options?: FileDiffOptions<unknown>) {
       lastOptions = options;
@@ -85,8 +112,8 @@ const pierre = (() => {
     lastOptions: () => lastOptions,
     lastVirtualizer: () => lastVirtualizer,
     metadata,
-    parsePatchFiles: () => [{ files: [metadata] }],
-    processFile: () => metadata,
+    parsePatchFiles: () => [{ files: [parsedMetadata] }],
+    processFile: () => parsedMetadata,
     renderDiff,
     renderCount: () => counts.render,
     reset: () => {
@@ -99,6 +126,10 @@ const pierre = (() => {
       renderResults = [];
       lastOptions = undefined;
       lastVirtualizer = undefined;
+      parsedMetadata = metadata;
+    },
+    setMetadata: (next: typeof metadata) => {
+      parsedMetadata = next;
     },
     setRenderResults: (results: boolean[]) => {
       renderResults = [...results];
@@ -108,12 +139,16 @@ const pierre = (() => {
   };
 })();
 
-vi.doMock("@pierre/diffs", () => ({
-  FileDiff: pierre.FileDiff,
-  parsePatchFiles: pierre.parsePatchFiles,
-  processFile: pierre.processFile,
-  VirtualizedFileDiff: pierre.VirtualizedFileDiff,
-}));
+vi.doMock("@pierre/diffs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@pierre/diffs")>();
+  return {
+    ...actual,
+    FileDiff: pierre.FileDiff,
+    parsePatchFiles: pierre.parsePatchFiles,
+    processFile: pierre.processFile,
+    VirtualizedFileDiff: pierre.VirtualizedFileDiff,
+  };
+});
 
 function makeFile(): DiffFile {
   return {
@@ -153,6 +188,36 @@ function makeFile(): DiffFile {
   };
 }
 
+function makePatchOnlyFile(): DiffFile {
+  return {
+    ...makeFile(),
+    status: "added",
+    old_path: "",
+    deletions: 0,
+    patch: "@@ -0,0 +1,1 @@\n+export const patchOnly = true;\n",
+    hunks: [],
+  };
+}
+
+function makeMetadataOnlyFile(): DiffFile {
+  return {
+    ...makeFile(),
+    path: "src/new.ts",
+    old_path: "src/old.ts",
+    status: "renamed",
+    additions: 0,
+    deletions: 0,
+    patch: [
+      "diff --git a/src/old.ts b/src/new.ts",
+      "similarity index 100%",
+      "rename from src/old.ts",
+      "rename to src/new.ts",
+      "",
+    ].join("\n"),
+    hunks: [],
+  };
+}
+
 describe("PierreFileDiff", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -187,6 +252,40 @@ describe("PierreFileDiff", () => {
     await waitFor(() => {
       expect(pierre.renderCount()).toBe(2);
     });
+  });
+
+  it("renders patch text even when structured hunks are absent", async () => {
+    const { default: PierreFileDiff } = await import("./PierreFileDiff.svelte");
+
+    render(PierreFileDiff, {
+      props: { file: makePatchOnlyFile() },
+    });
+
+    await waitFor(() => {
+      expect(pierre.renderCount()).toBe(1);
+    });
+
+    expect(document.querySelector(".empty-textual-diff")).toBeNull();
+  });
+
+  it("shows the empty textual state for metadata-only patches", async () => {
+    const { default: PierreFileDiff } = await import("./PierreFileDiff.svelte");
+    pierre.setMetadata({
+      ...pierre.metadata,
+      additionLines: [],
+      deletionLines: [],
+      hunks: [],
+    });
+
+    render(PierreFileDiff, {
+      props: { file: makeMetadataOnlyFile() },
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector(".empty-textual-diff")).not.toBeNull();
+    });
+
+    expect(pierre.renderCount()).toBe(0);
   });
 
   it("replays context expansion after a deferred full-context render", async () => {
@@ -269,6 +368,21 @@ describe("PierreFileDiff", () => {
     });
 
     expect(pierre.lastOptions()?.diffStyle).toBe("split");
+  });
+
+  it("caps syntax tokenization line length for Pierre renders", async () => {
+    const { default: PierreFileDiff } = await import("./PierreFileDiff.svelte");
+    const { diffTokenizeMaxLineLength } = await import("./pierre-worker-pool.js");
+
+    render(PierreFileDiff, {
+      props: { file: makeFile() },
+    });
+
+    await waitFor(() => {
+      expect(pierre.renderCount()).toBe(1);
+    });
+
+    expect(pierre.lastOptions()?.tokenizeMaxLineLength).toBe(diffTokenizeMaxLineLength);
   });
 
   it("rerenders when annotation metadata changes without moving lines", async () => {

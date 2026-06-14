@@ -5,17 +5,17 @@
   "license": "Elastic-2.0",
   "type": "module",
   "scripts": {
-    "dev": "vp dev",
-    "build": "vp build --logLevel warn",
-    "preview": "vp preview",
-    "check": "vp check --no-error-on-unmatched-pattern && vp run -w svelte-check:frontend",
-    "lint": "vp lint . --no-error-on-unmatched-pattern",
-    "lint:fix": "vp lint . --fix --no-error-on-unmatched-pattern",
-    "typecheck": "vp check --no-fmt --no-lint --no-error-on-unmatched-pattern && vp run -w svelte-check:frontend",
-    "test": "vp test run",
-    "test:e2e": "bun ./scripts/run-e2e-to-file.ts",
-    "test:e2e:mock": "playwright test --config=playwright.config.ts",
-    "demo-workspace": "playwright test --config tests/demo/playwright-demo.config.ts"
+    "dev": "node ../node_modules/vite-plus/bin/vp dev",
+    "build": "node ../node_modules/vite-plus/bin/vp build --logLevel warn",
+    "preview": "node ../node_modules/vite-plus/bin/vp preview",
+    "check": "cd .. && node node_modules/vite-plus/bin/vp run frontend-package-check",
+    "lint": "node ../node_modules/vite-plus/bin/vp lint . --no-error-on-unmatched-pattern",
+    "lint:fix": "node ../node_modules/vite-plus/bin/vp lint . --fix --no-error-on-unmatched-pattern",
+    "typecheck": "cd .. && node node_modules/vite-plus/bin/vp lint frontend '!frontend/dist/**' '!frontend/test-results/**' --no-error-on-unmatched-pattern --threads=1 && cd frontend && node ../node_modules/vite-plus/bin/vp exec -- svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "node ../node_modules/vite-plus/bin/vp test run",
+    "test:e2e": "node ./scripts/run-e2e-to-file.ts",
+    "test:e2e:mock": "node node_modules/.bin/playwright test --config=playwright.config.ts",
+    "demo-workspace": "node node_modules/.bin/playwright test --config tests/demo/playwright-demo.config.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.2",
@@ -48,9 +48,19 @@
     "openapi-typescript": "^7.13.0",
     "playwright": "1.60.0",
     "svelte": "5.56.2",
-    "svelte-check": "4.6.0",
     "vite": "8.0.16",
     "vite-plus": "0.1.24"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "onFail": "download"
+    },
+    "runtime": {
+      "name": "node",
+      "version": ">=24.0.0",
+      "onFail": "download"
+    }
   },
   "packageManager": "bun@1.3.11"
 }

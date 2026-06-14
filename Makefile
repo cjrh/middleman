@@ -22,9 +22,12 @@ AIR_BIN := $(shell if command -v air >/dev/null 2>&1; then command -v air; \
 	fi)
 DEV_LOG_DIR ?= tmp/logs
 DEV_BACKEND_LOG ?= $(DEV_LOG_DIR)/backend-dev.log
+VITE_PLUS_VERSION := 0.1.24
+VITE_PLUS_BIN := node ./node_modules/vite-plus/bin/vp
+VITE_PLUS_FRONTEND_BIN := node ../node_modules/vite-plus/bin/vp
 
 .PHONY: ensure-embed-dir ensure-tmp-dir check-air air-install build build-release install \
-        rust-pty-manager rust-test frontend-deps frontend frontend-dev frontend-dev-bun frontend-check api-generate roborev-api-generate \
+        rust-pty-manager rust-test vite-plus-install frontend-deps check-vite-plus-bin frontend frontend-dev frontend-dev-bun frontend-check api-generate roborev-api-generate \
         dev dev-ephemeral dev-ephemeral-stop test test-short test-integration test-e2e test-e2e-roborev test-gitlab-container gitlab-fixture-bake vet lint nilaway testify-helper-check \
         frontend-api-client-check font-size-token-check huma-route-check script-tests guardrail-check race-times tidy svelte-skills svelte-skills-sync clean install-hooks help
 
@@ -77,10 +80,22 @@ install: build-release
 frontend-deps:
 	bun install
 
+check-vite-plus-bin:
+	@test -f node_modules/vite-plus/bin/vp || { echo "vite-plus is not installed; run make frontend-deps" >&2; exit 1; }
+
+# Install the global Vite+ launcher when it is not already on PATH.
+vite-plus-install:
+	@if command -v vp >/dev/null 2>&1; then \
+		vp --version | head -n 1; \
+	else \
+		echo "vp not found; installing vite-plus@$(VITE_PLUS_VERSION) with Bun"; \
+		bun install -g vite-plus@$(VITE_PLUS_VERSION); \
+	fi
+
 # Build frontend SPA and copy into embed directory
 frontend: frontend-deps
-	cd frontend && ../node_modules/.bin/vp build --logLevel warn
-	bun scripts/check-asset-base-paths.mjs
+	cd frontend && $(VITE_PLUS_FRONTEND_BIN) build --logLevel warn
+	node scripts/check-asset-base-paths.mjs
 	rm -rf internal/web/dist
 	cp -r frontend/dist internal/web/dist
 	printf 'ok\n' > internal/web/dist/stub.html
@@ -89,40 +104,41 @@ frontend: frontend-deps
 frontend-dev:
 	./scripts/frontend-dev.sh $(ARGS)
 
-# Run Vite+ dev server after installing dependencies with Bun (use alongside `make dev`)
+# Run Vite+ dev server after installing dependencies with Bun; Node launches Vite+ (use alongside `make dev`)
 frontend-dev-bun: frontend-deps
-	cd frontend && ../node_modules/.bin/vp dev
+	cd frontend && $(VITE_PLUS_FRONTEND_BIN) dev
 
 # Run TypeScript/Svelte lint and type checks
 frontend-check: frontend-deps
-	./node_modules/.bin/vp run -w check '!frontend/dist/**'
+	$(VITE_PLUS_BIN) run frontend-check
 
 # Prevent production frontend code from bypassing generated API clients
-frontend-api-client-check:
-	bun scripts/lint-api-urls.mjs
+frontend-api-client-check: check-vite-plus-bin
+	$(VITE_PLUS_BIN) exec -- node scripts/lint-api-urls.mjs
 
 # Ensure frontend font sizes use design tokens
-font-size-token-check:
-	bun scripts/check-font-size-tokens.ts
+font-size-token-check: check-vite-plus-bin
+	$(VITE_PLUS_BIN) exec -- node scripts/check-font-size-tokens.ts
 
 # Prevent application HTTP routes from bypassing Huma registration
 huma-route-check:
 	GOFLAGS="$${GOFLAGS:+$$GOFLAGS }-buildvcs=false" go run ./tools/nohttpmux ./...
 
 # Run lightweight script regression tests
-script-tests:
-	bun test scripts/*.test.mjs scripts/*.test.ts
+script-tests: check-vite-plus-bin
+	$(VITE_PLUS_BIN) exec -- node --test scripts/*.test.mjs scripts/*.test.ts
 
 # Run lightweight generated-client/Huma guardrails
-guardrail-check: frontend-api-client-check font-size-token-check huma-route-check script-tests
+guardrail-check: frontend-deps
+	$(MAKE) frontend-api-client-check font-size-token-check huma-route-check script-tests
 
 
 # Regenerate the checked-in OpenAPI document and generated clients
-api-generate:
+api-generate: frontend-deps
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; GOCACHE="$${GOCACHE:-/tmp/middleman-gocache}" go run ./cmd/middleman-openapi -out "$$tmp" -format yaml; if [ -f frontend/openapi/openapi.yaml ] && cmp -s "$$tmp" frontend/openapi/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" frontend/openapi/openapi.yaml; fi; trap - EXIT
 	mkdir -p internal/apiclient/spec
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; GOCACHE="$${GOCACHE:-/tmp/middleman-gocache}" go run ./cmd/middleman-openapi -out "$$tmp" -version 3.0 -format json; if [ -f internal/apiclient/spec/openapi.json ] && cmp -s "$$tmp" internal/apiclient/spec/openapi.json; then rm "$$tmp"; else mv "$$tmp" internal/apiclient/spec/openapi.json; fi; trap - EXIT
-	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; (cd frontend && bun ./node_modules/openapi-typescript/bin/cli.js openapi/openapi.yaml --enum-values -o "$$tmp"); if [ -f packages/ui/src/api/generated/schema.ts ] && cmp -s "$$tmp" packages/ui/src/api/generated/schema.ts; then rm "$$tmp"; else mv "$$tmp" packages/ui/src/api/generated/schema.ts; fi; trap - EXIT
+	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; node frontend/node_modules/openapi-typescript/bin/cli.js frontend/openapi/openapi.yaml --enum-values -o "$$tmp"; if [ -f packages/ui/src/api/generated/schema.ts ] && cmp -s "$$tmp" packages/ui/src/api/generated/schema.ts; then rm "$$tmp"; else mv "$$tmp" packages/ui/src/api/generated/schema.ts; fi; trap - EXIT
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; printf '%s\n' \
 		'/**' \
 		' * This file was auto-generated from frontend/openapi/openapi.yaml.' \
@@ -139,8 +155,8 @@ api-generate:
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; (cd internal/apiclient/generated && GOCACHE="$${GOCACHE:-/tmp/middleman-gocache}" go tool oapi-codegen --config config.yaml -o "$$tmp" ../spec/openapi.json); if [ -f internal/apiclient/generated/client.gen.go ] && cmp -s "$$tmp" internal/apiclient/generated/client.gen.go; then rm "$$tmp"; else mv "$$tmp" internal/apiclient/generated/client.gen.go; fi; trap - EXIT
 
 # Regenerate roborev TypeScript client types from checked-in OpenAPI spec
-roborev-api-generate:
-	cd packages/ui && bunx openapi-typescript src/api/roborev/openapi.json -o src/api/roborev/generated/schema.ts
+roborev-api-generate: frontend-deps
+	node frontend/node_modules/openapi-typescript/bin/cli.js packages/ui/src/api/roborev/openapi.json -o packages/ui/src/api/roborev/generated/schema.ts
 	@echo "Roborev API types generated"
 
 # Ensure air is installed for backend live reload
@@ -203,7 +219,7 @@ race-times: ensure-embed-dir
 # Run full-stack E2E tests (Playwright against real Go server, excludes roborev)
 test-e2e: frontend
 	GOFLAGS="$${GOFLAGS:+$$GOFLAGS }-buildvcs=false" go build -o ./cmd/e2e-server/e2e-server$(EXE_SUFFIX) ./cmd/e2e-server
-	cd frontend && bun run playwright test --config=playwright-e2e.config.ts --project=chromium
+	$(VITE_PLUS_BIN) run middleman-frontend#test:e2e --project=chromium
 
 # Run roborev e2e tests with Docker (ROBOREV_SRC, ROBOREV_REF, ROBOREV_PORT configurable)
 test-e2e-roborev:
@@ -289,6 +305,7 @@ help:
 	@echo "  dev-ephemeral  - Run backend and frontend dev servers on free ports with copied DB state and status JSON"
 	@echo "  dev-ephemeral-stop - Stop the default ephemeral dev stack, or use STATUS=/path/to/dev-ephemeral.json"
 	@echo "  frontend-deps  - Install Bun workspace dependencies for frontend and packages/ui"
+	@echo "  vite-plus-install - Install global Vite+ launcher with Bun when vp is missing"
 	@echo "  frontend       - Build frontend SPA with Vite+"
 	@echo "  frontend-dev   - Install deps and run Vite dev server, logging to tmp/logs/frontend-dev.log (honors MIDDLEMAN_CONFIG)"
 	@echo "  frontend-dev-bun - Install deps with Bun and run Vite+ dev server (honors MIDDLEMAN_CONFIG)"

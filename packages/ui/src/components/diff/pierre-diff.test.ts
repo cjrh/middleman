@@ -131,14 +131,15 @@ ${patchBody}
 }
 
 describe("Pierre diff parsing", () => {
-  it("does not assign reusable cache keys to untrusted patch input", () => {
+  it("uses distinct cache keys for different patch contents", () => {
     const first = parsePierreFileDiff(makeFile("src/foo.ts", "-old line\n+new line"));
     const second = parsePierreFileDiff(makeFile("src/foo.ts", "-other line\n+changed line"));
 
     expect(first).toBeDefined();
     expect(second).toBeDefined();
-    expect((first as { cacheKey?: string } | undefined)?.cacheKey).toBeUndefined();
-    expect((second as { cacheKey?: string } | undefined)?.cacheKey).toBeUndefined();
+    expect(first?.cacheKey).toBeDefined();
+    expect(second?.cacheKey).toBeDefined();
+    expect(first?.cacheKey).not.toBe(second?.cacheKey);
   });
 
   it("uses distinct cache keys for sparse and full context contents", () => {
@@ -195,6 +196,128 @@ describe("Pierre diff parsing", () => {
     expect(parsed).toBeDefined();
     expect(parsed?.deletionLines).toContain("old line\n");
     expect(parsed?.additionLines).toContain("new line\n");
+  });
+
+  it("synthesizes Git new-file metadata for added files", () => {
+    const file: DiffFile = {
+      ...makeFile("src/foo.go", "+package main"),
+      status: "added",
+      old_path: "",
+      deletions: 0,
+      patch: "",
+      hunks: [
+        {
+          old_start: 0,
+          old_count: 0,
+          new_start: 1,
+          new_count: 1,
+          lines: [{ type: "add", content: "package main", new_num: 1 }],
+        },
+      ],
+    };
+
+    const patched = diffFileWithPatch(file);
+    const parsed = parsePierreFileDiff(file);
+
+    expect(patched.patch).toContain("new file mode 100644\n");
+    expect(parsed?.type).toBe("new");
+  });
+
+  it("wraps hunk-only added-file patches with Git file metadata", () => {
+    const file: DiffFile = {
+      ...makeFile("src/foo.go", "+package main"),
+      status: "added",
+      old_path: "",
+      deletions: 0,
+      patch: "@@ -0,0 +1,1 @@\n+package main\n",
+      hunks: [
+        {
+          old_start: 0,
+          old_count: 0,
+          new_start: 1,
+          new_count: 1,
+          lines: [{ type: "add", content: "package main", new_num: 1 }],
+        },
+      ],
+    };
+
+    const patched = diffFileWithPatch(file);
+    const parsed = parsePierreFileDiff(file);
+
+    expect(patched.patch).toContain("new file mode 100644\n");
+    expect(patched.patch).toContain("@@ -0,0 +1,1 @@\n+package main\n");
+    expect(parsed?.type).toBe("new");
+    expect(parsed?.lang).toBe("go");
+    expect(parsed?.additionLines).toContain("package main\n");
+    expect(parsed?.cacheKey).toBeDefined();
+  });
+
+  it("wraps hunk-only patch text when structured hunks are absent", () => {
+    const file: DiffFile = {
+      ...makeFile("src/foo.go", "+package main"),
+      status: "added",
+      old_path: "",
+      deletions: 0,
+      patch: "@@ -0,0 +1,1 @@\n+package main\n",
+      hunks: [],
+    };
+
+    const patched = diffFileWithPatch(file);
+    const parsed = parsePierreFileDiff(file);
+
+    expect(patched.patch).toContain("new file mode 100644\n");
+    expect(patched.patch).toContain("@@ -0,0 +1,1 @@\n+package main\n");
+    expect(parsed?.type).toBe("new");
+    expect(parsed?.additionLines).toContain("package main\n");
+    expect(parsed?.cacheKey).toBeDefined();
+  });
+
+  it("preserves trailing whitespace in hunk-only patch text", () => {
+    const file: DiffFile = {
+      ...makeFile("src/foo.go", "+package main"),
+      status: "added",
+      old_path: "",
+      deletions: 0,
+      patch: "@@ -0,0 +1,2 @@\n+package main\n+const padded = true \t",
+      hunks: [],
+    };
+
+    const parsed = parsePierreFileDiff(file);
+
+    expect(parsed?.type).toBe("new");
+    expect(parsed?.additionLines).toContain("const padded = true \t\n");
+  });
+
+  it("sets language metadata for complete added-file patches", () => {
+    const path = "internal/hosted/roborev/webhook_secret_resolver.go";
+    const file: DiffFile = {
+      ...makeFile(path, "+package roborev"),
+      status: "added",
+      old_path: path,
+      deletions: 0,
+      patch: `diff --git a/${path} b/${path}
+new file mode 100644
+--- /dev/null
++++ b/${path}
+@@ -0,0 +1,1 @@
++package roborev
+`,
+      hunks: [
+        {
+          old_start: 0,
+          old_count: 0,
+          new_start: 1,
+          new_count: 1,
+          lines: [{ type: "add", content: "package roborev", new_num: 1 }],
+        },
+      ],
+    };
+
+    const parsed = parsePierreFileDiff(file);
+
+    expect(parsed?.type).toBe("new");
+    expect(parsed?.lang).toBe("go");
+    expect(parsed?.cacheKey).toBeDefined();
   });
 
   it("quotes synthetic patch paths that can be parsed as patch control text", () => {
