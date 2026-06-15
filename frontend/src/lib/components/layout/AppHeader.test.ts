@@ -519,6 +519,50 @@ describe("AppHeader", () => {
     );
   });
 
+  it("restores the previous Activity view when returning from PRs", async () => {
+    initTheme();
+    navigate("/?selected=pr:1&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets&range=30d");
+    render(AppHeader);
+
+    await fireEvent.click(screen.getByRole("button", { name: "PRs" }));
+    expect(window.location.pathname).toBe("/pulls/github/acme/widgets/1");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+
+    expect(window.location.pathname + window.location.search).toBe(
+      "/?selected=pr:1&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets&range=30d",
+    );
+  });
+
+  it("restores the previous Activity view when returning from the settings gear", async () => {
+    initTheme();
+    navigate("/?selected=pr:1&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets");
+    render(AppHeader);
+
+    // The settings gear leaves Activity without going through navigateTab.
+    await fireEvent.click(screen.getByTitle("Settings"));
+    expect(window.location.pathname).toBe("/settings");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+
+    expect(window.location.pathname + window.location.search).toBe(
+      "/?selected=pr:1&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets",
+    );
+  });
+
+  it("restores the previous Activity view when returning from Repos", async () => {
+    initTheme();
+    navigate("/?range=90d&view=threaded");
+    render(AppHeader);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Repos" }));
+    expect(window.location.pathname).toBe("/repos");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+
+    expect(window.location.pathname + window.location.search).toBe("/?range=90d&view=threaded");
+  });
+
   it("opens Issues list when Activity selection is a PR", async () => {
     initTheme();
     navigate("/?selected=pr:1&provider=github&platform_host=github.com&repo_path=acme%2Fwidgets&selected_tab=files");

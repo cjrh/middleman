@@ -4,6 +4,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import {
     getBasePath,
+    getLastActivityRoute,
     getPage,
     getView,
     navigate,
@@ -179,7 +180,7 @@
   ): void {
     const currentMode = stickyModeForPage(getPage());
     rememberCurrentStickyModeRoute();
-    if (destination === "activity") navigate("/");
+    if (destination === "activity") navigate(getLastActivityRoute());
     else if (destination === "repos") navigate("/repos");
     else if (destination === "kata" || destination === "docs" || destination === "messages") {
       if (currentMode === destination) {

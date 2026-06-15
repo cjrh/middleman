@@ -464,6 +464,39 @@ if (typeof window !== "undefined") {
   queueMicrotask(() => fireRouteChange(route));
 }
 
+// The Activity selection, detail tab, and feed filters all live in the URL
+// query string. Remember the full Activity path so the top-bar Activity tab
+// can restore the previous view instead of resetting to a bare "/". The cache
+// is refreshed at every point the router observes the URL — navigate() (which
+// reads the live location before leaving, so a tab/settings/palette exit keeps
+// even filter-only writes), replaceUrl() (drawer selection changes), direct
+// history.replaceState() writes from the Activity store, popstate (browser
+// Back/Forward), and initial load — so it stays current regardless of how
+// Activity is entered or left.
+let lastActivityRoute = "/";
+
+export function getLastActivityRoute(): string {
+  return lastActivityRoute;
+}
+
+function rememberActivityRoute(): void {
+  const currentPath = currentLocationPath();
+  if (route.page === "activity" && parseRoute(currentPath).page === "activity") {
+    lastActivityRoute = stripBase(currentPath);
+  }
+}
+
+// Seed the cache when the app loads directly on an Activity URL.
+rememberActivityRoute();
+
+if (typeof window !== "undefined") {
+  const originalReplaceState = history.replaceState.bind(history);
+  history.replaceState = ((data: unknown, unused: string, url?: string | URL | null) => {
+    originalReplaceState(data, unused, url);
+    rememberActivityRoute();
+  }) as History["replaceState"];
+}
+
 export function getRoute(): Route {
   return route;
 }
@@ -481,6 +514,8 @@ export function buildItemRoute(ref: RoutableItemRef): string {
 }
 
 export function navigate(path: string, state?: Record<string, unknown>): void {
+  // route still reflects the page being left; capture its live URL first.
+  rememberActivityRoute();
   const fullPath = basePrefix + path;
   history.pushState(state ?? null, "", fullPath);
   route = parseRoute(fullPath);
@@ -610,6 +645,7 @@ export function replaceUrl(path: string): void {
   const fullPath = basePrefix + path;
   history.replaceState(null, "", fullPath);
   route = parseRoute(fullPath);
+  rememberActivityRoute();
   fireRouteChange(route);
 }
 
@@ -617,6 +653,7 @@ export function replaceUrl(path: string): void {
 if (typeof window !== "undefined") {
   window.addEventListener("popstate", () => {
     route = parseRoute(currentLocationPath());
+    rememberActivityRoute();
     fireRouteChange(route);
   });
 }
