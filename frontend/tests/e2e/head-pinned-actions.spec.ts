@@ -3,10 +3,12 @@ import { mockApi } from "./support/mockApi";
 
 // Wire-level coverage for the head-pinning contract
 // (context/provider-architecture.md "Head binding"): the detail view
-// echoes the rendered reviewed_head_sha as expected_head_sha on merge
-// and approve, and branches on the 409 conflict reasons.
+// echoes the rendered reviewed_head_sha as expected_head_sha on merge,
+// sends the latest synced provider head on approve when available, and
+// branches on the 409 conflict reasons.
 
-// Matches the reviewed_head_sha mockApi serves for acme/widgets#42.
+// The default acme/widgets#42 fixture uses the same SHA for platform_head_sha
+// and reviewed_head_sha; the PR #77 cases below cover divergent heads.
 const REVIEWED_SHA = "42aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa42";
 const SYNCED_SHA = "0123456789abcdef0123456789abcdef01234567";
 
@@ -58,9 +60,9 @@ const providerCapabilities = {
   supported_review_actions: [],
 };
 
-// A GitLab-shaped PR whose head has never been synced, for the
-// head_unknown flow. Local fixture so the shared mockApi pulls (which
-// now all carry a head SHA) stay untouched.
+// A PR whose reviewed head has never been synced, for the head_unknown
+// flow. Local fixture so the shared mockApi pulls (which now all carry a
+// reviewed head SHA) stay untouched.
 const unboundPR = {
   ID: 9,
   RepoID: 1,
@@ -116,6 +118,32 @@ function unboundDetailEnvelope(platformHeadSha: string, reviewedHeadSha = platfo
   };
 }
 
+async function mockPull77Detail(page: Page, platformHeadSha: string, reviewedHeadSha: string): Promise<void> {
+  await page.route("**/api/v1/pulls/github/acme/widgets/77", async (route: Route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(unboundDetailEnvelope(platformHeadSha, reviewedHeadSha)),
+    });
+  });
+
+  await page.route("**/api/v1/pulls/github/acme/widgets/77/sync", async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(unboundDetailEnvelope(platformHeadSha, reviewedHeadSha)),
+    });
+  });
+
+  await page.route("**/api/v1/pulls/github/acme/widgets/77/sync/async", async (route: Route) => {
+    await route.fulfill({ status: 202, contentType: "application/json", body: "{}" });
+  });
+}
+
 async function gotoPull42(page: Page): Promise<void> {
   await page.goto("/pulls/github/acme/widgets/42");
   await expect(page.locator(".detail-title")).toContainText("Add browser regression coverage");
@@ -155,7 +183,7 @@ test.describe("head-pinned merge and approve", () => {
     expect(mergeBody!["expected_head_sha"]).toBe(REVIEWED_SHA);
   });
 
-  test("approve echoes the rendered head as expected_head_sha", async ({ page }) => {
+  test("approve sends the latest synced head as expected_head_sha", async ({ page }) => {
     let approveBody: Record<string, unknown> | null = null;
     await page.route(APPROVE_PATH, async (route: Route) => {
       approveBody = JSON.parse(route.request().postData() ?? "{}");
@@ -172,6 +200,38 @@ test.describe("head-pinned merge and approve", () => {
     await expect(page.locator(".approve-popover")).toHaveCount(0);
     expect(approveBody).not.toBeNull();
     expect(approveBody!["expected_head_sha"]).toBe(REVIEWED_SHA);
+  });
+
+  test("merge stays on reviewed head while toolbar approve uses synced head", async ({ page }) => {
+    const platformHead = SYNCED_SHA;
+    const reviewedHead = REVIEWED_SHA;
+    let mergeBody: Record<string, unknown> | null = null;
+    let approveBody: Record<string, unknown> | null = null;
+
+    await mockPull77Detail(page, platformHead, reviewedHead);
+    await page.route("**/api/v1/pulls/github/acme/widgets/77/merge", async (route: Route) => {
+      mergeBody = JSON.parse(route.request().postData() ?? "{}");
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+    await page.route("**/api/v1/pulls/github/acme/widgets/77/approve", async (route: Route) => {
+      approveBody = JSON.parse(route.request().postData() ?? "{}");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "approved" }),
+      });
+    });
+
+    await page.goto("/pulls/github/acme/widgets/77");
+    await expect(page.locator(".detail-title")).toContainText("Unbound head PR");
+
+    await openMergeModalAndConfirm(page);
+    expect(mergeBody).not.toBeNull();
+    expect(mergeBody!["expected_head_sha"]).toBe(reviewedHead);
+
+    await submitApproval(page);
+    expect(approveBody).not.toBeNull();
+    expect(approveBody!["expected_head_sha"]).toBe(platformHead);
   });
 
   test("stale approval renders the provider side-effect context", async ({ page }) => {
@@ -236,6 +296,35 @@ test.describe("head-pinned merge and approve", () => {
 });
 
 test.describe("palette approve head conflict", () => {
+  test("uses the synced head when it differs from the reviewed head", async ({ page }) => {
+    await mockApi(page);
+
+    const platformHead = SYNCED_SHA;
+    const reviewedHead = REVIEWED_SHA;
+    await mockPull77Detail(page, platformHead, reviewedHead);
+    await page.route("**/api/v1/pulls/github/acme/widgets/77/approve", async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "approved" }),
+      });
+    });
+
+    const approveRequest = page.waitForRequest(
+      (req) =>
+        req.method() === "POST" && /\/pulls\/github\/acme\/widgets\/77\/approve$/.test(new URL(req.url()).pathname),
+    );
+    await page.goto("/pulls/github/acme/widgets/77");
+    await expect(page.locator(".detail-title")).toContainText("Unbound head PR");
+    await page.keyboard.press("Meta+K");
+    await page.locator(".palette-input").fill("approve pr");
+    await page.keyboard.press("Enter");
+
+    const request = await approveRequest;
+    const body = request.postDataJSON() as { expected_head_sha?: string };
+    expect(body.expected_head_sha).toBe(platformHead);
+  });
+
   test("stale_state from a palette approval reloads the detail before retry", async ({ page }) => {
     await mockApi(page);
 
@@ -270,8 +359,9 @@ test.describe("palette approve head conflict", () => {
     await page.locator(".palette-input").fill("approve pr");
     await page.keyboard.press("Enter");
 
-    // The pin must be the rendered head, and the conflict must trigger a
-    // detail reload so the user re-reviews current data before retrying.
+    // The approval pin must be the latest synced provider head; in this
+    // fixture it matches the rendered reviewed head. The conflict must
+    // trigger a detail reload so the user re-reviews current data before retrying.
     const request = await approveRequest;
     const body = request.postDataJSON() as { expected_head_sha?: string };
     expect(body.expected_head_sha).toBe(REVIEWED_SHA);
@@ -280,17 +370,19 @@ test.describe("palette approve head conflict", () => {
   });
 });
 
-test.describe("head_unknown approve conflict", () => {
-  test("head-bound actions stay disabled until diff sync records the reviewed head", async ({ page }) => {
+test.describe("head_unknown action gating", () => {
+  test("approve can proceed without a reviewed head while merge waits for diff sync", async ({ page }) => {
     await mockApi(page);
 
-    // On a head-binding provider the UI never fires an unbound
-    // mutation: even with a raw platform head, approve and merge stay
-    // disabled until reviewed_head_sha proves the diff snapshot is
-    // current.
+    // Approval is safe without a locally verified reviewed_head_sha: the
+    // client still sends the latest synced provider head when it has one,
+    // and providers may approve the current head otherwise. Merge remains
+    // blocked until reviewed_head_sha proves the rendered diff snapshot
+    // is current.
     const platformHead = SYNCED_SHA;
     let reviewedHead = "";
     let approveRequested = false;
+    let approveBody: Record<string, unknown> | null = null;
 
     await page.route("**/api/v1/pulls/github/acme/widgets/77", async (route: Route) => {
       if (route.request().method() !== "GET") {
@@ -318,6 +410,7 @@ test.describe("head_unknown approve conflict", () => {
 
     await page.route("**/api/v1/pulls/github/acme/widgets/77/approve", async (route: Route) => {
       approveRequested = true;
+      approveBody = JSON.parse(route.request().postData() ?? "{}");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -328,12 +421,15 @@ test.describe("head_unknown approve conflict", () => {
     await page.goto("/pulls/github/acme/widgets/77");
     await expect(page.locator(".detail-title")).toContainText("Unbound head PR");
 
-    await expect(page.locator(".btn--approve").first()).toBeDisabled();
+    await expect(page.locator(".btn--approve").first()).toBeEnabled();
     await expect(page.locator(".btn--merge").first()).toBeDisabled();
-    expect(approveRequested).toBe(false);
+    await submitApproval(page);
+    expect(approveRequested).toBe(true);
+    expect(approveBody).not.toBeNull();
+    expect(approveBody!["expected_head_sha"]).toBe(platformHead);
 
     // A diff sync verifies the reviewed head; the reloaded detail
-    // re-enables the head-bound actions.
+    // re-enables merge, while approval remains available.
     reviewedHead = SYNCED_SHA;
     await page.reload();
     await expect(page.locator(".detail-title")).toContainText("Unbound head PR");

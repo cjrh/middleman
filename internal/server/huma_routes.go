@@ -334,10 +334,10 @@ type approvePRInput struct {
 	Number       int    `path:"number"`
 	Body         struct {
 		Body string `json:"body"`
-		// ExpectedHeadSHA is the head commit the client rendered when the
-		// user reviewed. When set, the mutation is rejected if the locally
-		// synced head differs, so a sync between render and click cannot
-		// rebind the action to an unreviewed commit.
+		// ExpectedHeadSHA is the provider head the client intends to approve.
+		// Current clients capture platform_head_sha when the approval UI opens;
+		// if omitted, the server falls back to the best stored provider head
+		// for compatibility with older clients.
 		ExpectedHeadSHA string `json:"expected_head_sha,omitempty"`
 	}
 }
@@ -359,8 +359,9 @@ type mergePRInput struct {
 		CommitTitle   string `json:"commit_title"`
 		CommitMessage string `json:"commit_message"`
 		Method        string `json:"method"`
-		// ExpectedHeadSHA: see approvePRInput. Optional client assertion
-		// of the reviewed head commit.
+		// ExpectedHeadSHA is the reviewed diff head the client rendered.
+		// For head-binding providers, merge rejects missing, stale, or
+		// mismatched reviewed-head assertions before provider mutation.
 		ExpectedHeadSHA string `json:"expected_head_sha,omitempty"`
 	}
 }
@@ -2392,28 +2393,7 @@ func (s *Server) approvePR(ctx context.Context, input *approvePRInput) (*actionS
 		return nil, problemNotFound(CodePullNotFound, "pull request not found", nil)
 	}
 
-	// Bind the approval to the head commit the user reviewed locally so a
-	// source-branch push between review and approval is rejected instead
-	// of approving unreviewed code.
-	expectedHeadSHA, err := s.reviewedHeadSHA(repo, mr)
-	if err != nil {
-		return nil, err
-	}
-	// Head-binding providers require the client to pin the head it
-	// rendered: an omitted pin would silently bind to whatever the cache
-	// holds now, which may be newer than what the user reviewed.
-	if strings.TrimSpace(input.Body.ExpectedHeadSHA) == "" &&
-		s.capabilitiesForRepo(*repo).MutationHeadBinding {
-		return nil, problemValidation(
-			"body.expected_head_sha",
-			"required for this provider: echo the platform_head_sha you rendered",
-		)
-	}
-	if err := s.verifyClientReviewedHead(
-		repo, input.Number, input.Body.ExpectedHeadSHA, expectedHeadSHA,
-	); err != nil {
-		return nil, err
-	}
+	expectedHeadSHA := approvalReviewHeadSHA(mr, input.Body.ExpectedHeadSHA)
 
 	platformEvent, err := mutator.ApproveMergeRequest(
 		ctx, platformRepoRefFromDB(*repo), input.Number, input.Body.Body,
@@ -2421,8 +2401,8 @@ func (s *Server) approvePR(ctx context.Context, input *approvePRInput) (*actionS
 	)
 	if err != nil {
 		if errors.Is(err, platform.ErrStaleState) {
-			// The MR head moved past the reviewed commit; refresh local
-			// state so the user re-reviews against the current head.
+			// The MR head moved past the requested approval target; refresh
+			// local state so the user retries against the current head.
 			s.runBackground(func(bgCtx context.Context) {
 				if syncErr := s.syncer.SyncMROnProvider(
 					bgCtx,
@@ -2458,6 +2438,28 @@ func (s *Server) approvePR(ctx context.Context, input *approvePRInput) (*actionS
 	}
 
 	return &actionStatusOutput{Body: actionStatusBody{Status: "approved"}}, nil
+}
+
+// approvalReviewHeadSHA resolves the provider commit to attach a direct
+// approval to. Direct /approve is a provider-head mutation: clients should
+// send the head captured when the approval UI opened, normally
+// platform_head_sha. Omitting the pin is a compatibility path for older
+// clients; in that case middleman binds the approval to the best stored
+// provider head rather than rejecting the request. Stale supplied pins are
+// delegated to provider head-binding where available and mapped through the
+// normal stale_state path. Merge and draft-review publish use reviewedHeadSHA
+// instead because those paths require a verified diff snapshot.
+func approvalReviewHeadSHA(mr *db.MergeRequest, clientSHA string) string {
+	if sha := strings.TrimSpace(clientSHA); sha != "" {
+		return sha
+	}
+	if mr == nil {
+		return ""
+	}
+	if mr.DiffHeadSHA != "" && !diffSnapshotStale(mr) {
+		return mr.DiffHeadSHA
+	}
+	return mr.PlatformHeadSHA
 }
 
 func (s *Server) approveWorkflows(ctx context.Context, input *repoNumberInput) (*actionStatusOutput, error) {
