@@ -146,6 +146,7 @@ type MergeRequestEvent struct {
 	MetadataJSON       string
 	CreatedAt          time.Time
 	DedupeKey          string
+	DirectURL          string
 	// ThreadID groups root comments and replies that belong to the same
 	// provider conversation. GitLab calls this a discussion ID.
 	ThreadID     string
@@ -166,6 +167,7 @@ type IssueEvent struct {
 	MetadataJSON       string
 	CreatedAt          time.Time
 	DedupeKey          string
+	DirectURL          string
 	// ThreadID groups root comments and replies that belong to the same
 	// provider conversation. GitLab calls this a discussion ID.
 	ThreadID string
@@ -281,6 +283,7 @@ type MergeRequestReviewThread struct {
 	ProviderCommentID string
 	Body              string
 	AuthorLogin       string
+	DirectURL         string
 	Range             DiffReviewLineRange
 	Resolved          bool
 	CreatedAt         time.Time
