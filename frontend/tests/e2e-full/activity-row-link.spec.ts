@@ -76,4 +76,50 @@ test.describe("activity row link button", () => {
     // The detail drawer must not have opened (caret/row click suppressed).
     await expect(page.locator(".activity-drawer")).toHaveCount(0);
   });
+
+  test("threaded activity rows remain clickable after the split detail pane opens", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 720 });
+    await page.addInitScript(() => {
+      localStorage.setItem("middleman-activity-pane-width", "1200");
+    });
+    await page.goto("/");
+    const flatRows = page.locator(".activity-table .activity-row");
+    await flatRows.first().waitFor({ state: "visible", timeout: 10_000 });
+    await flatRows.first().click();
+    const detailHeader = page.locator(".activity-detail-header");
+    await expect(detailHeader).toBeVisible();
+    const firstSelection = await detailHeader.textContent();
+    expect(firstSelection).toBeTruthy();
+
+    await selectActivityViewItem(page, "Threaded");
+    await expect(page.locator(".activity-feed .filter-dropdown")).toBeHidden();
+
+    const itemRows = page.locator(".threaded-view .item-row:not(.branch-activity-row)");
+    await expect(itemRows.nth(1)).toBeVisible();
+
+    await itemRows.nth(1).click();
+    await expect(detailHeader).not.toHaveText(firstSelection!);
+  });
+
+  test("grouped threaded compact rows keep the expand chevron separate from the type chip", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 720 });
+    await page.goto("/");
+    const flatRows = page.locator(".activity-table .activity-row");
+    await flatRows.first().waitFor({ state: "visible", timeout: 10_000 });
+    await flatRows.first().click();
+
+    await selectActivityViewItem(page, "Threaded");
+    await expect(page.locator(".activity-feed .filter-dropdown")).toBeHidden();
+
+    const itemRow = page.locator(".threaded-view .item-row:not(.branch-activity-row)").first();
+    const caret = itemRow.locator(".thread-caret");
+    const typeCell = itemRow.locator(".cell--type");
+    await expect(caret).toBeVisible();
+    await expect(typeCell).toBeVisible();
+
+    const [caretBox, typeBox] = await Promise.all([caret.boundingBox(), typeCell.boundingBox()]);
+    expect(caretBox).not.toBeNull();
+    expect(typeBox).not.toBeNull();
+    expect(typeBox!.x - (caretBox!.x + caretBox!.width)).toBeGreaterThanOrEqual(8);
+  });
 });
