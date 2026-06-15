@@ -14,6 +14,7 @@
     "test:e2e": "node node_modules/vite-plus/bin/vp run middleman-frontend#test:e2e"
   },
   "devDependencies": {
+    "@sveltejs/mcp": "0.1.24",
     "svelte-check": "4.6.0",
     "vite-plus": "0.1.24"
   },
