@@ -395,14 +395,14 @@ const previewDiff: DiffResult = withServerDiffData({
       status: "modified",
       is_binary: false,
       is_whitespace_only: false,
-      additions: 4,
-      deletions: 3,
+      additions: 6,
+      deletions: 5,
       hunks: [
         {
           old_start: 1,
-          old_count: 5,
+          old_count: 7,
           new_start: 1,
-          new_count: 6,
+          new_count: 7,
           lines: [
             {
               type: "context",
@@ -428,6 +428,26 @@ const previewDiff: DiffResult = withServerDiffData({
               old_num: 5,
             },
             { type: "add", content: "- [x] Markdown task", new_num: 5 },
+            {
+              type: "delete",
+              content: "<em>alpha</em><strong>beta</strong><code>gamma</code>",
+              old_num: 6,
+            },
+            {
+              type: "add",
+              content: '<a href="/link">link</a><strong>two</strong><code>three</code>',
+              new_num: 6,
+            },
+            {
+              type: "delete",
+              content: "<table><tbody><tr><td>Keep</td></tr></tbody></table>",
+              old_num: 7,
+            },
+            {
+              type: "add",
+              content: "<table><tbody><tr><td>Keep</td><td>Added cell</td></tr></tbody></table>",
+              new_num: 7,
+            },
           ],
         },
       ],
@@ -1011,7 +1031,9 @@ async function mockFilePreviewApi(page: Page): Promise<void> {
           path,
           media_type: "text/markdown; charset=utf-8",
           encoding: "base64",
-          content: btoa("# Rendered preview\n\n- [x] Markdown task\n"),
+          content: btoa(
+            '# Rendered preview\n\nNew paragraph that should be highlighted.\n\n- [x] Markdown task\n<a href="/link">link</a><strong>two</strong><code>three</code>\n<table><tbody><tr><td>Keep</td><td>Added cell</td></tr></tbody></table>\n',
+          ),
         }),
       });
       return;
@@ -1707,20 +1729,20 @@ test.describe("diff view", () => {
 
     await previewToggle.click();
     await expect(previewToggle).toHaveAttribute("aria-checked", "true");
-    await expect(
-      page.getByLabel("After markdown preview").getByRole("heading", { name: "Rendered preview" }),
-    ).toBeVisible();
-    await expect(page.locator(".markdown-rich-diff")).toContainText("Markdown task");
-    await expect(
-      page.locator(".markdown-rich-diff__block--delete", {
-        hasText: "Old paragraph that should be highlighted.",
-      }),
-    ).toContainText("Old paragraph that should be highlighted.");
-    await expect(
-      page.locator(".markdown-rich-diff__block--add", {
-        hasText: "New paragraph that should be highlighted.",
-      }),
-    ).toContainText("New paragraph that should be highlighted.");
+    const markdownPreview = page.locator(".markdown-rich-diff--unified");
+    await expect(markdownPreview.getByRole("heading", { name: "Rendered preview" })).toBeVisible();
+    await expect(markdownPreview).toContainText("Markdown task");
+    await expect(markdownPreview).toContainText("paragraph that should be highlighted.");
+    await expect(markdownPreview.locator("del", { hasText: "Old" })).toBeVisible();
+    await expect(markdownPreview.locator("ins", { hasText: "New" })).toBeVisible();
+    await expect(markdownPreview.locator("del em", { hasText: "alpha" })).toBeVisible();
+    await expect(markdownPreview.locator("ins a", { hasText: "link" })).toBeVisible();
+    await expect(markdownPreview.locator("strong del", { hasText: "beta" })).toBeVisible();
+    await expect(markdownPreview.locator("strong ins", { hasText: "two" })).toBeVisible();
+    await expect(markdownPreview.locator("code del", { hasText: "gamma" })).toBeVisible();
+    await expect(markdownPreview.locator("code ins", { hasText: "three" })).toBeVisible();
+    await expect(markdownPreview.locator("tr > ins")).toHaveCount(0);
+    await expect(markdownPreview.locator('td[data-diff-kind="insert"] ins', { hasText: "Added cell" })).toBeVisible();
 
     const handlerFile = page.locator('[data-file-path="internal/server/handler.go"]');
     await handlerFile.scrollIntoViewIfNeeded();
@@ -2938,10 +2960,9 @@ test.describe("diff view (git-backed)", () => {
       await categoryFilter.getByRole("button", { name: "Plans/docs (2)" }).click();
 
       const planFile = page.locator('[data-file-path="docs/cache-plan.md"]');
-      await expect(planFile.locator(".markdown-rich-diff__block--add")).toContainText("Cache refresh plan");
-      await expect(planFile.locator(".markdown-rich-diff__block--add")).toContainText(
-        "Verify changed-file summaries refresh",
-      );
+      const planPreview = planFile.locator(".markdown-rich-diff--unified");
+      await expect(planPreview.locator("ins", { hasText: "Cache refresh plan" })).toBeVisible();
+      await expect(planPreview.locator("ins", { hasText: "Verify changed-file summaries refresh" })).toBeVisible();
 
       const previewResponse = await page.request.get(
         `${server.info.base_url}/api/v1/pulls/github/acme/widgets/1/file-preview?path=internal/cache.go`,

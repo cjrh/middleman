@@ -173,6 +173,7 @@ function renderDiffFile(
     reviewThreads?: ReviewThread[];
     createComment?: (body: string, range: DiffReviewLineRange) => Promise<boolean>;
     canReplyToThreads?: boolean;
+    viewMode?: "unified" | "split";
     replyToDiscussion?: (
       owner: string,
       name: string,
@@ -184,6 +185,7 @@ function renderDiffFile(
 ) {
   const diff = createDiffStore();
   if (options.richPreview) diff.setRichPreview(true);
+  if (options.viewMode) diff.setViewMode(options.viewMode);
   const diffReviewDraft = {
     getComments: () => options.draftComments ?? [],
     isSubmitting: () => false,
@@ -252,6 +254,8 @@ function textPreview(path: string, text: string): FilePreview {
 describe("DiffFile", () => {
   afterEach(() => {
     cleanup();
+    localStorage.removeItem("diff-rich-preview");
+    localStorage.removeItem("diff-view-mode");
   });
 
   async function expectPierreDiffText(pattern: RegExp): Promise<void> {
@@ -343,6 +347,36 @@ describe("DiffFile", () => {
 
     expect(screen.queryByLabelText("Before markdown preview")).toBeNull();
     await expectPierreDiffText(/old linenew line/);
+  });
+
+  it("renders markdown rich preview as a unified annotated document by default", async () => {
+    renderDiffFile(makeFile({ path: "README.md", old_path: "README.md" }), {
+      richPreview: true,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Before markdown preview")).toBeNull();
+      expect(screen.queryByLabelText("After markdown preview")).toBeNull();
+      expect(document.querySelector(".markdown-rich-diff--unified del")?.textContent).toBe("old");
+      expect(document.querySelector(".markdown-rich-diff--unified ins")?.textContent).toBe("new");
+    });
+  });
+
+  it("keeps markdown rich preview side by side when split diff mode is enabled", async () => {
+    renderDiffFile(makeFile({ path: "README.md", old_path: "README.md" }), {
+      richPreview: true,
+      viewMode: "split",
+    });
+
+    await waitFor(() => {
+      const beforePreview = screen.getByLabelText("Before markdown preview");
+      const afterPreview = screen.getByLabelText("After markdown preview");
+
+      expect(beforePreview.querySelector("del")?.textContent).toBe("old");
+      expect(beforePreview.querySelector("ins")).toBeNull();
+      expect(afterPreview.querySelector("del")).toBeNull();
+      expect(afterPreview.querySelector("ins")?.textContent).toBe("new");
+    });
   });
 
   it("hides content after clicking the header to collapse", async () => {
