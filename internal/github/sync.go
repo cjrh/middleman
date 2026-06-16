@@ -28,6 +28,110 @@ func parseInt64(raw string) (int64, error) {
 	return strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 }
 
+func withCommitOrderMetadata(metadataJSON string, listOrder int, stableOrder int) string {
+	metadata := map[string]any{}
+	if metadataJSON != "" {
+		var existing map[string]any
+		if err := json.Unmarshal([]byte(metadataJSON), &existing); err == nil && existing != nil {
+			metadata = existing
+		}
+	}
+	metadata["commit_order"] = listOrder
+	metadata["commit_order_key"] = stableOrder
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return metadataJSON
+	}
+	return string(encoded)
+}
+
+func commitMetadataOrder(metadataJSON string) int {
+	if metadataJSON == "" {
+		return 0
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return 0
+	}
+	if order := metadataInt(metadata["commit_order_key"]); order > 0 {
+		return order
+	}
+	return metadataInt(metadata["commit_order"])
+}
+
+func metadataInt(value any) int {
+	switch v := value.(type) {
+	case float64:
+		if v > 0 && v == float64(int(v)) {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	case int64:
+		if v > 0 {
+			return int(v)
+		}
+	case json.Number:
+		if n, err := strconv.Atoi(v.String()); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+type commitOrderAssigner struct {
+	bySHA map[string]int
+	next  int
+}
+
+func newCommitOrderAssigner(events []db.MREvent) commitOrderAssigner {
+	assigner := commitOrderAssigner{bySHA: map[string]int{}}
+	for _, event := range events {
+		if event.EventType != "commit" {
+			continue
+		}
+		order := commitMetadataOrder(event.MetadataJSON)
+		if order == 0 && event.ID > 0 {
+			order = int(event.ID)
+		}
+		if order > assigner.next {
+			assigner.next = order
+		}
+		sha := commitOrderSHA(event.Summary)
+		if sha != "" && order > 0 {
+			assigner.bySHA[sha] = order
+		}
+	}
+	return assigner
+}
+
+func (a *commitOrderAssigner) apply(event *db.MREvent, listOrder int) {
+	sha := commitOrderSHA(event.Summary)
+	stableOrder := a.bySHA[sha]
+	if stableOrder == 0 {
+		a.next++
+		stableOrder = a.next
+		if sha != "" {
+			a.bySHA[sha] = stableOrder
+		}
+	}
+	event.MetadataJSON = withCommitOrderMetadata(event.MetadataJSON, listOrder, stableOrder)
+}
+
+func (s *Syncer) commitOrderAssigner(ctx context.Context, mrID int64) (commitOrderAssigner, error) {
+	events, err := s.db.ListMREvents(ctx, mrID)
+	if err != nil {
+		return commitOrderAssigner{}, err
+	}
+	return newCommitOrderAssigner(events), nil
+}
+
+func commitOrderSHA(summary string) string {
+	return strings.ToLower(strings.TrimSpace(summary))
+}
+
 // SyncStatus holds the current state of the sync engine.
 type SyncStatus struct {
 	Running     bool      `json:"running"`
@@ -855,8 +959,10 @@ func (p gitHubClientProvider) ListMergeRequestEvents(
 	for _, review := range reviews {
 		out = append(out, platformgithub.NormalizeReviewEvent(ref, number, review))
 	}
-	for _, commit := range commits {
-		out = append(out, platformgithub.NormalizeCommitEvent(ref, number, commit))
+	for i, commit := range commits {
+		event := platformgithub.NormalizeCommitEvent(ref, number, commit)
+		event.MetadataJSON = withCommitOrderMetadata(event.MetadataJSON, i+1, i+1)
+		out = append(out, event)
 	}
 	for _, timelineEvent := range timelineEvents {
 		event := platformgithub.NormalizeTimelineEvent(ref, number, platformgithub.PullRequestTimelineEvent{
@@ -4853,14 +4959,20 @@ func (s *Syncer) syncOpenMRFromBulk(
 	// Timeline events — comments, reviews, commits, and system events.
 	// Events use ON CONFLICT DO NOTHING, so partial data is safe.
 	var events []db.MREvent
+	commitOrderer, err := s.commitOrderAssigner(ctx, mrID)
+	if err != nil {
+		return fmt.Errorf("load commit order for MR #%d: %w", number, err)
+	}
 	for _, c := range bulk.Comments {
 		events = append(events, NormalizeCommentEvent(mrID, c))
 	}
 	for _, r := range bulk.Reviews {
 		events = append(events, NormalizeReviewEvent(mrID, r))
 	}
-	for _, c := range bulk.Commits {
-		events = append(events, NormalizeCommitEvent(mrID, c))
+	for i, c := range bulk.Commits {
+		event := NormalizeCommitEvent(mrID, c)
+		commitOrderer.apply(&event, i+1)
+		events = append(events, event)
 	}
 	for _, timelineEvent := range bulk.TimelineEvents {
 		if event := NormalizeTimelineEvent(mrID, timelineEvent); event != nil {
@@ -5397,8 +5509,17 @@ func (s *Syncer) syncProviderMRDetailExtras(
 	if err == nil {
 		dbEvents := make([]db.MREvent, 0, len(events))
 		commentDedupeKeys := make([]string, 0, len(events))
+		commitOrderer, orderErr := s.commitOrderAssigner(ctx, mrID)
+		if orderErr != nil {
+			return calls, false, fmt.Errorf("load commit order for MR #%d: %w", number, orderErr)
+		}
+		commitListOrder := 0
 		for _, event := range events {
 			dbEvent := platform.DBMREvent(mrID, event)
+			if dbEvent.EventType == "commit" {
+				commitListOrder++
+				commitOrderer.apply(&dbEvent, commitListOrder)
+			}
 			dbEvents = append(dbEvents, dbEvent)
 			if dbEvent.EventType == "issue_comment" {
 				commentDedupeKeys = append(commentDedupeKeys, dbEvent.DedupeKey)
@@ -5804,14 +5925,20 @@ func (s *Syncer) refreshTimeline(
 	}
 
 	var events []db.MREvent
+	commitOrderer, err := s.commitOrderAssigner(ctx, mrID)
+	if err != nil {
+		return fmt.Errorf("load commit order for MR #%d: %w", number, err)
+	}
 	for _, c := range comments {
 		events = append(events, NormalizeCommentEvent(mrID, c))
 	}
 	for _, r := range reviews {
 		events = append(events, NormalizeReviewEvent(mrID, r))
 	}
-	for _, c := range commits {
-		events = append(events, NormalizeCommitEvent(mrID, c))
+	for i, c := range commits {
+		event := NormalizeCommitEvent(mrID, c)
+		commitOrderer.apply(&event, i+1)
+		events = append(events, event)
 	}
 	for _, timelineEvent := range timelineEvents {
 		event := NormalizeTimelineEvent(mrID, timelineEvent)
