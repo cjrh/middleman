@@ -2250,12 +2250,18 @@
         </div>
       {:else if loadError && !workspace}
         <div class="state-message error">
-          <AlertIcon
-            class="error-icon"
-            size="16"
-            strokeWidth="2"
+          <span
+            class="error-icon-badge"
+            role="img"
             aria-label="Workspace load failed"
-          />
+          >
+            <AlertIcon
+              class="error-icon"
+              size="14"
+              strokeWidth="2.4"
+              aria-hidden="true"
+            />
+          </span>
           <span>{loadError}</span>
           <button
             class="retry-btn"
@@ -2279,12 +2285,18 @@
         </div>
       {:else if workspace.status === "error"}
         <div class="state-message error">
-          <AlertIcon
-            class="error-icon"
-            size="16"
-            strokeWidth="2"
+          <span
+            class="error-icon-badge"
+            role="img"
             aria-label="Workspace setup failed"
-          />
+          >
+            <AlertIcon
+              class="error-icon"
+              size="14"
+              strokeWidth="2.4"
+              aria-hidden="true"
+            />
+          </span>
           <span>
             {workspace.error_message ??
               "Workspace setup failed"}
@@ -2831,7 +2843,7 @@
     color: var(--accent-red);
   }
 
-  :global(.error-icon) {
+  .error-icon-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2843,6 +2855,13 @@
     font-size: var(--font-size-md);
     font-weight: 700;
     flex-shrink: 0;
+  }
+
+  :global(.error-icon) {
+    display: block;
+    width: 14px;
+    height: 14px;
+    overflow: visible;
   }
 
   .retry-btn {
