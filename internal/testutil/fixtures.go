@@ -11,6 +11,7 @@ import (
 	gh "github.com/google/go-github/v84/github"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/middleman/internal/db"
+	ghclient "go.kenn.io/middleman/internal/github"
 )
 
 // SeedResult holds references to seeded data for use in E2E tests.
@@ -937,6 +938,73 @@ func SeedFixtures(ctx context.Context, d *db.DB) (*SeedResult, error) {
 			buildGHReview(5014, "carol", "DISMISSED", w1Created.Add(6*time.Hour)),
 		},
 	}
+	reviewThreads := map[string][]ghclient.PullRequestReviewThread{
+		issueKey("acme", "widgets", 1): {
+			{
+				NodeID:     "PRRT_cache_guard",
+				IsResolved: false,
+				Path:       "src/cache/store.ts",
+				Side:       "RIGHT",
+				Line:       42,
+				Comments: []ghclient.PullRequestReviewThreadComment{
+					{
+						NodeID:           "PRRC_cache_guard",
+						DatabaseID:       6011,
+						ReviewDatabaseID: 5012,
+						SubjectType:      "LINE",
+						Body:             "Guard the cache fallback before returning stale data.\n\nExpanded context explains stale data handling.",
+						AuthorLogin:      "bob",
+						Path:             "src/cache/store.ts",
+						Line:             42,
+						URL:              "https://github.com/acme/widgets/pull/1#discussion_r6011",
+						CommitID:         widgetsPR1HeadSHA,
+						OriginalCommitID: widgetsPR1HeadSHA,
+						CreatedAt:        w1Created.Add(3*time.Hour + 15*time.Minute),
+						UpdatedAt:        w1Created.Add(3*time.Hour + 15*time.Minute),
+					},
+					{
+						NodeID:           "PRRC_cache_guard_followup",
+						DatabaseID:       6012,
+						ReviewDatabaseID: 5012,
+						SubjectType:      "LINE",
+						Body:             "Follow-up compact review context for the same thread.",
+						AuthorLogin:      "bob",
+						Path:             "src/cache/store.ts",
+						Line:             42,
+						URL:              "https://github.com/acme/widgets/pull/1#discussion_r6012",
+						CommitID:         widgetsPR1HeadSHA,
+						OriginalCommitID: widgetsPR1HeadSHA,
+						CreatedAt:        w1Created.Add(3*time.Hour + 20*time.Minute),
+						UpdatedAt:        w1Created.Add(3*time.Hour + 20*time.Minute),
+					},
+				},
+			},
+			{
+				NodeID:     "PRRT_reply_regroup",
+				IsResolved: false,
+				Path:       "src/cache/store.ts",
+				Side:       "RIGHT",
+				Line:       43,
+				Comments: []ghclient.PullRequestReviewThreadComment{
+					{
+						NodeID:           "PRRC_reply_regroup_root",
+						DatabaseID:       6013,
+						ReviewDatabaseID: 5012,
+						SubjectType:      "LINE",
+						Body:             "Regroup root review thread comment.",
+						AuthorLogin:      "bob",
+						Path:             "src/cache/store.ts",
+						Line:             43,
+						URL:              "https://github.com/acme/widgets/pull/1#discussion_r6013",
+						CommitID:         widgetsPR1HeadSHA,
+						OriginalCommitID: widgetsPR1HeadSHA,
+						CreatedAt:        w1Created.Add(3*time.Hour + 25*time.Minute),
+						UpdatedAt:        w1Created.Add(3*time.Hour + 25*time.Minute),
+					},
+				},
+			},
+		},
+	}
 
 	allIssues := map[string][]*gh.Issue{
 		"acme/widgets": {
@@ -957,14 +1025,15 @@ func SeedFixtures(ctx context.Context, d *db.DB) (*SeedResult, error) {
 	result := &SeedResult{
 		FixtureClient: func() *FixtureClient {
 			return &FixtureClient{
-				OpenPRs:    openPRs,
-				PRs:        allPRs,
-				OpenIssues: openIssues,
-				Issues:     allIssues,
-				Comments:   make(map[string][]*gh.IssueComment),
-				Reviews:    reviews,
-				Tags:       make(map[string][]*gh.RepositoryTag),
-				Labels:     make(map[string][]*gh.Label),
+				OpenPRs:       openPRs,
+				PRs:           allPRs,
+				OpenIssues:    openIssues,
+				Issues:        allIssues,
+				Comments:      make(map[string][]*gh.IssueComment),
+				Reviews:       reviews,
+				ReviewThreads: reviewThreads,
+				Tags:          make(map[string][]*gh.RepositoryTag),
+				Labels:        make(map[string][]*gh.Label),
 				CombinedStatuses: map[string]*gh.CombinedStatus{
 					refKey("acme", "widgets", widgetsPR1HeadSHA): {
 						State: new("success"),
