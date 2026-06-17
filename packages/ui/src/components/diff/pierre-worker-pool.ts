@@ -29,7 +29,6 @@ export function getPierreDiffWorkerPool(): WorkerPoolManager | undefined {
       theme: { dark: "pierre-dark", light: "pierre-light" },
       lineDiffType: "word",
       tokenizeMaxLineLength: diffTokenizeMaxLineLength,
-      langs: ["bash", "css", "go", "html", "javascript", "json", "markdown", "sql", "toml", "typescript", "yaml"],
     },
   });
 }

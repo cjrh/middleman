@@ -21,12 +21,14 @@
     parsePierreFileDiffWithContents,
     pierreDiffDebugEnabled,
     pierreFileContents,
+    sparseContextMayDistortSyntax,
   } from "./pierre-diff.js";
   import {
     renderedCodeColumns,
     renderedCodeSide as renderedPierreCodeSide,
   } from "./pierre-dom.js";
   import { diffTokenizeMaxLineLength, getPierreDiffWorkerPool } from "./pierre-worker-pool.js";
+  import type { WorkerPoolManager } from "@pierre/diffs/worker";
 
   interface Props {
     file: DiffFile | null | undefined;
@@ -107,6 +109,7 @@
   let fullContextRendered = false;
   let contextLoadPromise: Promise<{ oldFile: FileContents; newFile: FileContents }> | undefined;
   let contextError: string | null = $state(null);
+  let syntaxContextLoadFailedFileKey = $state("");
   let themeType = $state<ThemeTypes>(appThemeType());
   let rendered = $state(false);
   let renderedFileKey = "";
@@ -122,6 +125,9 @@
   let pendingContextExpansion: PendingContextExpansion | undefined;
   let lineCommentButtonHasPointerSnapshot = false;
   let lineCommentButtonWasSelectedOnPointerDown = false;
+  let syntaxHighlightWorkerActive = false;
+  let syntaxHighlightWorkerPool: WorkerPoolManager | undefined;
+  let unsubscribeWorkerStats: (() => void) | undefined;
   const maxImmediateRenderRetries = 5;
 
   const renderFile = $derived(file ? diffFileWithPatch(file) : emptyFile);
@@ -142,6 +148,9 @@
     ),
   );
   const emptyTextualDiff = $derived(!renderFile.patch.trim() || !hasRenderablePierreDiff);
+  const needsFullContextForSyntax = $derived(
+    Boolean(loadFileText) && hasCollapsedContext(renderFile) && sparseContextMayDistortSyntax(renderFile),
+  );
 
   const pierreOptions = $derived.by<FileDiffOptions<unknown>>(() => ({
     diffStyle: viewMode,
@@ -158,15 +167,7 @@
     expansionLineCount: 40,
     tokenizeMaxLineLength: diffTokenizeMaxLineLength,
     onPostRender: () => {
-      removeStalePlaceholderPres();
-      applyLineTargetAttributes();
-      applyHunkHeaderLabels();
-      applyLineCommentButtons();
-      syncLineAnnotationWrappers();
-      rendered = true;
-      installDemandContextHandler();
-      scheduleSelectedRangesApplication();
-      restoreAnnotationFocus();
+      finalizeRenderedDom();
     },
     unsafeCSS: `
       :host {
@@ -176,8 +177,6 @@
         --diffs-tab-size: ${tabWidth};
         --diffs-light-bg: var(--bg-surface, #fff);
         --diffs-dark-bg: var(--bg-surface, #16161e);
-        --diffs-addition-color-override: var(--accent-green);
-        --diffs-deletion-color-override: var(--accent-red);
         --diffs-bg-addition-override: light-dark(
           color-mix(in srgb, var(--accent-green) 12%, transparent),
           color-mix(in srgb, var(--accent-green) 38%, black)
@@ -186,6 +185,8 @@
           color-mix(in srgb, var(--accent-red) 14%, transparent),
           color-mix(in srgb, var(--accent-red) 54%, black)
         );
+        --diffs-addition-color-override: var(--accent-green);
+        --diffs-deletion-color-override: var(--accent-red);
         --diffs-fg-number-addition-override: var(--accent-green);
         --diffs-bg-addition-number-override: var(--accent-green);
         --diffs-fg-number-deletion-override: var(--accent-red);
@@ -296,6 +297,7 @@
     cleanUpPierreDiff();
     contextLoadPromise = undefined;
     contextError = null;
+    syntaxContextLoadFailedFileKey = "";
     fullContext = undefined;
     fullContextFileDiff = undefined;
     fullContextRendered = false;
@@ -334,6 +336,12 @@
     if (pierreDiff instanceof VirtualizedFileDiff && isHostInScrollViewport()) {
       pierreDiff.setVisibility(true);
     }
+    if (needsFullContextForSyntax && !fullContext && syntaxContextLoadFailedFileKey !== fileKey) {
+      rendered = false;
+      clearRenderedDomState();
+      void loadFullContextForSyntax(fileKey);
+      return;
+    }
     const nextRenderAttemptKey = [
       fileKey,
       viewMode,
@@ -367,15 +375,7 @@
       if (didRender) {
         renderAttemptKey = nextRenderAttemptKey;
         renderRetryCount = 0;
-        removeStalePlaceholderPres();
-        applyLineTargetAttributes();
-        applyHunkHeaderLabels();
-        applyLineCommentButtons();
-        syncLineAnnotationWrappers();
-        rendered = true;
-        installDemandContextHandler();
-        scheduleSelectedRangesApplication();
-        restoreAnnotationFocus();
+        finalizeRenderedDom();
       } else {
         scheduleRenderRetry();
       }
@@ -501,12 +501,27 @@
     clearLineAnnotationWrappers();
     renderedLineRows = new Map();
     fullContextFileDiff = undefined;
+    syntaxHighlightWorkerActive = false;
+    syntaxHighlightWorkerPool = undefined;
+    unsubscribeWorkerStats?.();
+    unsubscribeWorkerStats = undefined;
     pierreDiff?.cleanUp();
     pierreDiff = undefined;
   }
 
   function createPierreDiff(): FileDiff<unknown> | VirtualizedFileDiff<unknown> {
     const workerPool = getPierreDiffWorkerPool();
+    syntaxHighlightWorkerActive = Boolean(workerPool);
+    syntaxHighlightWorkerPool = workerPool;
+    unsubscribeWorkerStats?.();
+    unsubscribeWorkerStats = workerPool?.subscribeToStatChanges(() => {
+      if (rendered) return;
+      queueMicrotask(() => {
+        if (!rendered) {
+          finalizeRenderedDom();
+        }
+      });
+    });
     if (!virtualizer) return new FileDiff<unknown>(pierreOptions, workerPool, true);
     return new VirtualizedFileDiff<unknown>(
       pierreOptions,
@@ -809,16 +824,7 @@
     pierreDiff.setSelectedLines(selectedRange);
     if (didRender) {
       fullContextRendered = true;
-      removeStalePlaceholderPres();
-      applyLineTargetAttributes();
-      applyHunkHeaderLabels();
-      applyLineCommentButtons();
-      syncLineAnnotationWrappers();
-      rendered = true;
-      installDemandContextHandler();
-      scheduleSelectedRangesApplication();
-      restoreAnnotationFocus();
-      replayPendingContextExpansion();
+      finalizeRenderedDom();
     }
     return didRender;
   }
@@ -868,6 +874,37 @@
     return pierreDiff.render(props);
   }
 
+  function finalizeRenderedDom(): boolean {
+    removeStalePlaceholderPres();
+    applyLineTargetAttributes();
+    applyHunkHeaderLabels();
+    applyLineCommentButtons();
+    syncLineAnnotationWrappers();
+
+    const ready = renderedDomReady();
+    rendered = ready;
+    if (!ready) return false;
+
+    installDemandContextHandler();
+    scheduleSelectedRangesApplication();
+    restoreAnnotationFocus();
+    if (fullContextRendered) {
+      replayPendingContextExpansion();
+    }
+    return true;
+  }
+
+  function renderedDomReady(): boolean {
+    if (!syntaxHighlightWorkerActive) return true;
+    if (host?.shadowRoot?.querySelector("[data-line] span[style]") != null) return true;
+    return !syntaxHighlightWorkerHasPendingWork();
+  }
+
+  function syntaxHighlightWorkerHasPendingWork(): boolean {
+    const stats = syntaxHighlightWorkerPool?.getStats();
+    return Boolean(stats && (stats.queuedTasks > 0 || stats.activeTasks > 0));
+  }
+
   async function loadFullContext(
     requestFileKey: string,
   ): Promise<{ oldFile: FileContents; newFile: FileContents } | undefined> {
@@ -885,6 +922,20 @@
       throw err;
     }
     return fullContext;
+  }
+
+  async function loadFullContextForSyntax(requestFileKey: string): Promise<void> {
+    try {
+      const context = await loadFullContext(requestFileKey);
+      if (!context || fileKey !== requestFileKey) return;
+      await tick();
+      if (fileKey !== requestFileKey || fullContextRendered) return;
+      renderFullContext(context);
+    } catch (err) {
+      if (fileKey !== requestFileKey) return;
+      syntaxContextLoadFailedFileKey = requestFileKey;
+      contextError = err instanceof Error ? err.message : "unknown error";
+    }
   }
 
   async function fetchFullContext(): Promise<{ oldFile: FileContents; newFile: FileContents }> {
