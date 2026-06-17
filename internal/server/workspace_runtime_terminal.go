@@ -15,9 +15,10 @@ import (
 )
 
 type runtimeTerminalControlMsg struct {
-	Type string `json:"type"`
-	Cols int    `json:"cols,omitempty"`
-	Rows int    `json:"rows,omitempty"`
+	Type   string `json:"type"`
+	Cols   int    `json:"cols,omitempty"`
+	Rows   int    `json:"rows,omitempty"`
+	Active *bool  `json:"active,omitempty"`
 }
 
 func (s *Server) handleWorkspaceRuntimeSessionTerminal(
@@ -31,15 +32,19 @@ func (s *Server) handleWorkspaceRuntimeSessionTerminal(
 		"path", r.URL.Path,
 		"query", r.URL.RawQuery,
 	)
-	summary, ok := s.readyRuntimeWorkspaceForHTTP(
+	summary, ok := s.runtimeWorkspaceForHTTP(
 		w, r, r.PathValue("id"),
 	)
 	if !ok {
 		return
 	}
 
-	attachment, err := s.runtime.AttachSession(
+	attachment, err := s.runtime.AttachSessionWithOptions(
 		summary.ID, r.PathValue("session_key"),
+		localruntime.AttachSessionOptions{
+			ResizePriority: runtimeTerminalResizePriority(r),
+			ResizeActive:   parseRuntimeTerminalResizeActive(r),
+		},
 	)
 	if err != nil {
 		logWebsocketDebug(
@@ -52,6 +57,18 @@ func (s *Server) handleWorkspaceRuntimeSessionTerminal(
 		return
 	}
 	s.serveRuntimeTerminal(w, r, attachment)
+}
+
+func runtimeTerminalResizePriority(r *http.Request) localruntime.ResizePriority {
+	if r.Header.Get("X-Middleman-Fleet-Host") != "" {
+		return localruntime.ResizePriorityRemote
+	}
+	return localruntime.ResizePriorityLocal
+}
+
+func parseRuntimeTerminalResizeActive(r *http.Request) bool {
+	raw := r.URL.Query().Get("resize_active")
+	return raw == "" || raw == "1" || raw == "true"
 }
 
 func (s *Server) serveRuntimeTerminal(
@@ -125,7 +142,7 @@ func (s *Server) serveRuntimeTerminal(
 	}
 }
 
-func (s *Server) readyRuntimeWorkspaceForHTTP(
+func (s *Server) runtimeWorkspaceForHTTP(
 	w http.ResponseWriter,
 	r *http.Request,
 	id string,
@@ -145,19 +162,6 @@ func (s *Server) readyRuntimeWorkspaceForHTTP(
 	}
 	if summary == nil {
 		http.Error(w, "workspace not found", http.StatusNotFound)
-		return nil, false
-	}
-	if summary.Status != "ready" {
-		logWebsocketDebug(
-			"runtime websocket rejected: workspace not ready",
-			"workspace_id", id,
-			"status", summary.Status,
-		)
-		http.Error(
-			w,
-			"workspace not ready (status: "+summary.Status+")",
-			http.StatusConflict,
-		)
 		return nil, false
 	}
 	return summary, true
@@ -312,6 +316,11 @@ func handleRuntimeTerminalControl(
 	}
 	info := attachment.Info()
 	switch msg.Type {
+	case "resize_active":
+		if msg.Active != nil {
+			attachment.SetResizeActive(*msg.Active)
+		}
+		return
 	case "refresh":
 		logWebsocketDebug(
 			"runtime terminal refresh requested",

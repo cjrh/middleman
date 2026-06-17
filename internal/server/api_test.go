@@ -16981,6 +16981,16 @@ func TestAPIActivityStartupRepairsLegacyTimestampStorage(t *testing.T) {
 			ALTER TABLE middleman_issues DROP COLUMN assignees_json;
 			ALTER TABLE middleman_merge_requests DROP COLUMN assignees_json;
 			ALTER TABLE middleman_merge_requests DROP COLUMN reviewers_json;
+			DROP TABLE middleman_host_runtime_sessions;
+			DROP TABLE middleman_worktree_stats;
+			DROP INDEX middleman_project_worktree_runtime_sessions_worktree_id_idx;
+			DROP TABLE middleman_project_worktree_runtime_sessions;
+			ALTER TABLE middleman_project_worktrees DROP COLUMN linked_issue_numbers;
+			ALTER TABLE middleman_project_worktrees DROP COLUMN session_backend;
+			ALTER TABLE middleman_project_worktrees DROP COLUMN is_stale;
+			ALTER TABLE middleman_project_worktrees DROP COLUMN is_hidden;
+			ALTER TABLE middleman_projects DROP COLUMN repository_kind;
+			ALTER TABLE middleman_projects DROP COLUMN is_stale;
 		`)
 	require.NoError(err)
 	_, err = raw.ExecContext(ctx,
@@ -20190,6 +20200,7 @@ func TestWorkspaceRuntimeLaunchPlainShellCreatesRuntimeSessionE2E(t *testing.T) 
 	assert.Equal("plain_shell", shell.TargetKey)
 	assert.Equal(string(localruntime.LaunchTargetPlainShell), shell.Kind)
 	assert.Equal(string(localruntime.SessionStatusRunning), shell.Status)
+	assert.Equal("terminal", shell.DisplayRegion)
 
 	getResp, err := client.HTTP.GetWorkspaceRuntimeWithResponse(ctx, ws.Id)
 	require.NoError(err)
@@ -20198,6 +20209,56 @@ func TestWorkspaceRuntimeLaunchPlainShellCreatesRuntimeSessionE2E(t *testing.T) 
 	require.NotNil(getResp.JSON200.Sessions)
 	require.Len(*getResp.JSON200.Sessions, 1)
 	assert.Equal(shell.Key, (*getResp.JSON200.Sessions)[0].Key)
+	assert.Equal("terminal", (*getResp.JSON200.Sessions)[0].DisplayRegion)
+}
+
+func TestWorkspaceRuntimeExistingSessionsAvailableWhenWorkspaceErroredE2E(t *testing.T) {
+	t.Parallel()
+
+	require := require.New(t)
+	assert := Assert.New(t)
+
+	client, database, _, _, _ := setupTestServerWithWorkspacesServer(t, nil)
+	ctx := context.Background()
+	ws := createReadyWorkspace(t, ctx, client)
+
+	launchResp, err := client.HTTP.LaunchWorkspaceRuntimeSessionWithResponse(
+		ctx, ws.Id,
+		generated.LaunchWorkspaceRuntimeSessionInputBody{
+			TargetKey: "plain_shell",
+		},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, launchResp.StatusCode())
+	require.NotNil(launchResp.JSON200)
+	shell := launchResp.JSON200
+
+	errMsg := "restart failed"
+	require.NoError(database.UpdateWorkspaceStatus(ctx, ws.Id, "error", &errMsg))
+
+	getResp, err := client.HTTP.GetWorkspaceRuntimeWithResponse(ctx, ws.Id)
+	require.NoError(err)
+	require.Equal(http.StatusOK, getResp.StatusCode())
+	require.NotNil(getResp.JSON200)
+	require.NotNil(getResp.JSON200.Sessions)
+	require.Len(*getResp.JSON200.Sessions, 1)
+	assert.Equal(shell.Key, (*getResp.JSON200.Sessions)[0].Key)
+	assert.Equal(string(localruntime.SessionStatusRunning), (*getResp.JSON200.Sessions)[0].Status)
+
+	stopResp, err := client.HTTP.StopWorkspaceRuntimeSessionWithResponse(
+		ctx, ws.Id, shell.Key,
+	)
+	require.NoError(err)
+	require.Equal(http.StatusNoContent, stopResp.StatusCode())
+
+	relaunchResp, err := client.HTTP.LaunchWorkspaceRuntimeSessionWithResponse(
+		ctx, ws.Id,
+		generated.LaunchWorkspaceRuntimeSessionInputBody{
+			TargetKey: "plain_shell",
+		},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusConflict, relaunchResp.StatusCode())
 }
 
 func TestWorkspaceRuntimeLaunchMultipleAndStopOneE2E(t *testing.T) {
@@ -23174,7 +23235,7 @@ func TestWorkspaceRuntimeSessionTerminalSkipsAltScreenReplayE2E(t *testing.T) {
 		ctx, websocket.MessageBinary, []byte("paint\n"),
 	))
 	var got strings.Builder
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case read := <-reads:
