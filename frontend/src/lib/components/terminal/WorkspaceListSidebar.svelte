@@ -83,6 +83,10 @@
   let collapsedGroups = $state<Set<string>>(new Set());
   let searchQuery = $state("");
   let sortMode = $state<WorkspaceListSort>(loadWorkspaceListSort());
+  let workspaceListStatus = $state<"loading" | "retrying" | "loaded">("loading");
+  let fetchInFlight = false;
+
+  const workspaceListLoadTimeoutMs = 10_000;
 
   type GroupedWorkspaces = Map<string, Workspace[]>;
 
@@ -204,12 +208,31 @@
   });
 
   async function fetchWorkspaces(): Promise<void> {
+    if (fetchInFlight) return;
+    fetchInFlight = true;
+    const abortController = new AbortController();
+    let timeoutHandle: number | undefined;
     try {
-      const { data } = await client.GET("/workspaces");
-      if (!data) return;
+      timeoutHandle = window.setTimeout(() => {
+        abortController.abort();
+      }, workspaceListLoadTimeoutMs);
+      const { data } = await client.GET("/workspaces", {
+        signal: abortController.signal,
+      });
+      if (!data) {
+        if (workspaces.length === 0) workspaceListStatus = "retrying";
+        return;
+      }
       workspaces = (data.workspaces ?? []) as Workspace[];
+      workspaceListStatus = "loaded";
     } catch {
       // Network error; keep stale list.
+      if (workspaces.length === 0) workspaceListStatus = "retrying";
+    } finally {
+      if (timeoutHandle !== undefined) {
+        window.clearTimeout(timeoutHandle);
+      }
+      fetchInFlight = false;
     }
   }
 
@@ -554,8 +577,14 @@
             </button>
           </div>
     {/snippet}
-    {#if visibleWorkspaces.length === 0 && normalizedSearchQuery}
+    {#if workspaceListStatus === "loading" && workspaces.length === 0}
+      <p class="filter-empty">Loading workspaces...</p>
+    {:else if workspaceListStatus === "retrying" && workspaces.length === 0}
+      <p class="filter-empty">Still loading workspaces. Retrying...</p>
+    {:else if visibleWorkspaces.length === 0 && normalizedSearchQuery}
       <p class="filter-empty">No workspaces match.</p>
+    {:else if visibleWorkspaces.length === 0}
+      <p class="filter-empty">No workspaces yet.</p>
     {/if}
   </div>
 </div>

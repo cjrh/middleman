@@ -23862,6 +23862,14 @@ func TestWorkspaceCRUDE2E(t *testing.T) {
 	)
 	require.NoError(err)
 	require.Equal(http.StatusNotFound, getResp2.StatusCode())
+
+	// 7. List workspaces -- deleted workspace is absent from the public list.
+	listResp3, err := client.HTTP.ListWorkspacesWithResponse(ctx)
+	require.NoError(err)
+	require.Equal(http.StatusOK, listResp3.StatusCode())
+	require.NotNil(listResp3.JSON200)
+	require.NotNil(listResp3.JSON200.Workspaces)
+	assert.Empty(*listResp3.JSON200.Workspaces)
 }
 
 func TestWorkspaceRetryErroredWorkspaceE2E(t *testing.T) {

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import WorkspaceListSidebar from "./WorkspaceListSidebar.svelte";
@@ -132,6 +133,7 @@ describe("WorkspaceListSidebar", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("shows provider icons in repo groups when multiple providers are present", async () => {
@@ -165,6 +167,41 @@ describe("WorkspaceListSidebar", () => {
     await screen.findByText("acme/widgets");
     expect(screen.getByRole("img", { name: "GitHub" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "GitLab" })).toBeTruthy();
+  });
+
+  it("does not render a blank rail while the workspace list is loading", async () => {
+    mockGet.mockReturnValue(new Promise(() => {}));
+
+    render(WorkspaceListSidebar, {
+      props: { selectedId: "" },
+    });
+
+    expect(screen.getByText("Loading workspaces...")).toBeTruthy();
+  });
+
+  it("shows a retrying state when the initial workspace list hangs", async () => {
+    vi.useFakeTimers();
+    let aborted = false;
+    mockGet.mockImplementation(
+      (_path: string, opts?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+    );
+
+    render(WorkspaceListSidebar, {
+      props: { selectedId: "" },
+    });
+
+    expect(screen.getByText("Loading workspaces...")).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await tick();
+
+    expect(aborted).toBe(true);
+    expect(screen.getByText("Still loading workspaces. Retrying...")).toBeTruthy();
   });
 
   it("hides provider icons in repo groups when one provider is present", async () => {

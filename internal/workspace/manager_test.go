@@ -157,6 +157,57 @@ func TestCreate(t *testing.T) {
 	assert.Equal("creating", got.Status)
 }
 
+func TestListSummariesUsesCacheWhenStoreHasNoRows(t *testing.T) {
+	t.Parallel()
+
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+	d := openTestDB(t)
+	mgr := NewManager(d, t.TempDir())
+
+	mgr.setWorkspaceSummaryCache([]WorkspaceSummary{{
+		Workspace: Workspace{
+			ID:           "cached-workspace",
+			PlatformHost: "github.com",
+			RepoOwner:    "acme",
+			RepoName:     "widget",
+			ItemType:     db.WorkspaceItemTypePullRequest,
+			ItemNumber:   7,
+			GitHeadRef:   "feature/cache-workspace",
+			Status:       "ready",
+			CreatedAt:    time.Now().UTC(),
+		},
+	}})
+	got, err := mgr.ListSummaries(ctx)
+	require.NoError(err)
+	require.Len(got, 1)
+	assert.Equal("cached-workspace", got[0].ID)
+}
+
+func TestWorkspaceSummaryCacheDoesNotResurrectDeletedWorkspace(t *testing.T) {
+	t.Parallel()
+
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+	d := openTestDB(t)
+	repoID := seedRepo(t, d, "github.com", "acme", "widget")
+	seedMR(t, d, repoID, 7, "feature/cache-workspace")
+	mgr := NewManager(d, t.TempDir())
+
+	ws, err := mgr.Create(ctx, "github.com", "acme", "widget", 7)
+	require.NoError(err)
+	first, err := mgr.ListSummaries(ctx)
+	require.NoError(err)
+	require.Len(first, 1)
+	assert.Equal(ws.ID, first[0].ID)
+
+	mgr.removeWorkspaceSummaryFromCache(ws.ID)
+	mgr.setWorkspaceSummaryCache(first)
+	assert.Empty(mgr.cachedWorkspaceSummaries())
+}
+
 func TestCreatePRHeadRepoClassification(t *testing.T) {
 	tests := []struct {
 		name           string
