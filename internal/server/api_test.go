@@ -7803,6 +7803,268 @@ func TestAPIGetIssueUsesPlatformHostQuery(t *testing.T) {
 	}
 }
 
+func TestAPIGetIssueWorkspaceUsesProviderScopedLookup(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+
+	database := dbtest.Open(t)
+	for _, provider := range []string{"github", "gitlab"} {
+		repoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+			Platform:     provider,
+			PlatformHost: "forge.example.com",
+			Owner:        "acme",
+			Name:         "widget",
+		})
+		require.NoError(err)
+		_, err = database.UpsertIssue(ctx, &db.Issue{
+			RepoID:         repoID,
+			PlatformID:     int64(len(provider)) * 1000,
+			Number:         7,
+			URL:            "https://forge.example.com/acme/widget/issues/7",
+			Title:          provider + " issue",
+			Author:         "testuser",
+			State:          "open",
+			CreatedAt:      time.Now().UTC().Truncate(time.Second),
+			UpdatedAt:      time.Now().UTC().Truncate(time.Second),
+			LastActivityAt: time.Now().UTC().Truncate(time.Second),
+		})
+		require.NoError(err)
+	}
+	require.NoError(database.InsertWorkspace(ctx, &db.Workspace{
+		ID:              "github-issue-workspace",
+		Platform:        "github",
+		PlatformHost:    "forge.example.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypeIssue,
+		ItemNumber:      7,
+		GitHeadRef:      "middleman/issue-7",
+		WorkspaceBranch: "middleman/issue-7",
+		WorktreePath:    filepath.Join(t.TempDir(), "github"),
+		TmuxSession:     "github-issue-workspace",
+		Status:          "ready",
+	}))
+	require.NoError(database.InsertWorkspace(ctx, &db.Workspace{
+		ID:              "gitlab-issue-workspace",
+		Platform:        "gitlab",
+		PlatformHost:    "forge.example.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypeIssue,
+		ItemNumber:      7,
+		GitHeadRef:      "middleman/issue-7",
+		WorkspaceBranch: "middleman/issue-7",
+		WorktreePath:    filepath.Join(t.TempDir(), "gitlab"),
+		TmuxSession:     "gitlab-issue-workspace",
+		Status:          "ready",
+	}))
+
+	syncer := ghclient.NewSyncer(nil, database, nil, nil, time.Minute, nil, nil)
+	t.Cleanup(syncer.Stop)
+	srv := New(database, syncer, nil, "/", nil, ServerOptions{})
+	srv.workspaces = workspace.NewManager(database, t.TempDir())
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/host/forge.example.com/issues/gitlab/acme/widget/7",
+		nil,
+	)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	require.Equal(http.StatusOK, rr.Code, rr.Body.String())
+	var body rawIssueDetailResponse
+	require.NoError(json.Unmarshal(rr.Body.Bytes(), &body))
+	if assert.NotNil(body.Workspace) {
+		assert.Equal("gitlab-issue-workspace", body.Workspace.ID)
+	}
+	if assert.NotNil(body.Issue) {
+		assert.Equal("gitlab issue", body.Issue.Title)
+	}
+}
+
+func TestAPIGetPRWorkspaceUsesProviderScopedLookup(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+
+	database := dbtest.Open(t)
+	for _, provider := range []string{"github", "gitlab"} {
+		repoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+			Platform:     provider,
+			PlatformHost: "forge.example.com",
+			Owner:        "acme",
+			Name:         "widget",
+		})
+		require.NoError(err)
+		_, err = database.UpsertMergeRequest(ctx, &db.MergeRequest{
+			RepoID:         repoID,
+			PlatformID:     int64(len(provider)) * 1000,
+			Number:         7,
+			URL:            "https://forge.example.com/acme/widget/pull/7",
+			Title:          provider + " PR",
+			Author:         "testuser",
+			State:          "open",
+			HeadBranch:     "feature",
+			BaseBranch:     "main",
+			CreatedAt:      time.Now().UTC().Truncate(time.Second),
+			UpdatedAt:      time.Now().UTC().Truncate(time.Second),
+			LastActivityAt: time.Now().UTC().Truncate(time.Second),
+		})
+		require.NoError(err)
+	}
+	require.NoError(database.InsertWorkspace(ctx, &db.Workspace{
+		ID:              "github-pr-workspace",
+		Platform:        "github",
+		PlatformHost:    "forge.example.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypePullRequest,
+		ItemNumber:      7,
+		GitHeadRef:      "feature",
+		WorkspaceBranch: "middleman/pr-7",
+		WorktreePath:    filepath.Join(t.TempDir(), "github"),
+		TmuxSession:     "github-pr-workspace",
+		Status:          "ready",
+	}))
+	require.NoError(database.InsertWorkspace(ctx, &db.Workspace{
+		ID:              "gitlab-pr-workspace",
+		Platform:        "gitlab",
+		PlatformHost:    "forge.example.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypePullRequest,
+		ItemNumber:      7,
+		GitHeadRef:      "feature",
+		WorkspaceBranch: "middleman/pr-7",
+		WorktreePath:    filepath.Join(t.TempDir(), "gitlab"),
+		TmuxSession:     "gitlab-pr-workspace",
+		Status:          "ready",
+	}))
+
+	syncer := ghclient.NewSyncer(nil, database, nil, nil, time.Minute, nil, nil)
+	t.Cleanup(syncer.Stop)
+	srv := New(database, syncer, nil, "/", nil, ServerOptions{})
+	srv.workspaces = workspace.NewManager(database, t.TempDir())
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/host/forge.example.com/pulls/gitlab/acme/widget/7",
+		nil,
+	)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	require.Equal(http.StatusOK, rr.Code, rr.Body.String())
+	var body mergeRequestDetailResponse
+	require.NoError(json.Unmarshal(rr.Body.Bytes(), &body))
+	if assert.NotNil(body.Workspace) {
+		assert.Equal("gitlab-pr-workspace", body.Workspace.ID)
+	}
+	if assert.NotNil(body.MergeRequest) {
+		assert.Equal("gitlab PR", body.MergeRequest.Title)
+	}
+}
+
+func TestAPICreateWorkspaceRejectsEmptyProviderForAmbiguousRepo(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+
+	srv, database := setupTestServer(t)
+	srv.workspaces = workspace.NewManager(database, t.TempDir())
+	for _, provider := range []string{"github", "gitlab"} {
+		repoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+			Platform:     provider,
+			PlatformHost: "forge.example.com",
+			Owner:        "acme",
+			Name:         "widget",
+		})
+		require.NoError(err)
+		_, err = database.UpsertMergeRequest(ctx, &db.MergeRequest{
+			RepoID:         repoID,
+			PlatformID:     int64(len(provider)) * 1000,
+			Number:         7,
+			URL:            "https://forge.example.com/acme/widget/pull/7",
+			Title:          provider + " PR",
+			Author:         "testuser",
+			State:          "open",
+			HeadBranch:     "feature",
+			BaseBranch:     "main",
+			CreatedAt:      time.Now().UTC().Truncate(time.Second),
+			UpdatedAt:      time.Now().UTC().Truncate(time.Second),
+			LastActivityAt: time.Now().UTC().Truncate(time.Second),
+		})
+		require.NoError(err)
+	}
+	client := setupTestClient(t, srv)
+	provider := ""
+
+	resp, err := client.HTTP.CreateWorkspaceWithResponse(
+		ctx,
+		generated.CreateWorkspaceInputBody{
+			Provider:     &provider,
+			PlatformHost: "forge.example.com",
+			Owner:        "acme",
+			Name:         "widget",
+			MrNumber:     7,
+		},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusBadRequest, resp.StatusCode(), string(resp.Body))
+
+	var problem rawProblemDetail
+	require.NoError(json.Unmarshal(resp.Body, &problem))
+	assert.Equal("validationError", problem.Code)
+	assert.Equal("body.provider", problem.Details["field"])
+}
+
+func TestAPICreateWorkspaceAllowsOmittedProviderForUnambiguousRepo(t *testing.T) {
+	require := require.New(t)
+	ctx := t.Context()
+
+	srv, database := setupTestServer(t)
+	srv.workspaces = workspace.NewManager(database, t.TempDir())
+	repoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	_, err = database.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:         repoID,
+		PlatformID:     7000,
+		Number:         7,
+		URL:            "https://github.com/acme/widget/pull/7",
+		Title:          "github PR",
+		Author:         "testuser",
+		State:          "open",
+		HeadBranch:     "feature",
+		BaseBranch:     "main",
+		CreatedAt:      time.Now().UTC().Truncate(time.Second),
+		UpdatedAt:      time.Now().UTC().Truncate(time.Second),
+		LastActivityAt: time.Now().UTC().Truncate(time.Second),
+	})
+	require.NoError(err)
+
+	payload := strings.NewReader(`{
+		"platform_host": "github.com",
+		"owner": "acme",
+		"name": "widget",
+		"mr_number": 7
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", payload)
+	req.Header.Set("content-type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	require.Equal(http.StatusAccepted, rr.Code, rr.Body.String())
+}
+
 func TestAPISyncIssueUsesPlatformHostQuery(t *testing.T) {
 	require := require.New(t)
 	assert := Assert.New(t)
@@ -20786,6 +21048,17 @@ exit 0
 	require.NoError(err)
 	require.Equal(http.StatusOK, resp.StatusCode())
 
+	require.Eventually(func() bool {
+		return slices.ContainsFunc(
+			readTmuxRecord(t, record),
+			func(argv []string) bool {
+				return slices.Equal(argv, []string{
+					"kill-session", "-t",
+					"middleman-0000000000000001-0123456789abcdef",
+				})
+			},
+		)
+	}, 2*time.Second, 20*time.Millisecond)
 	argvs := readTmuxRecord(t, record)
 	assert.Contains(argvs, []string{
 		"kill-session", "-t", "middleman-0000000000000001-0123456789abcdef",
@@ -24508,7 +24781,7 @@ func TestWorkspaceCreateIssueBranchConflictReturnsTyped409(t *testing.T) {
 	stored, err := fixture.database.GetWorkspace(ctx, reused.ID)
 	require.NoError(err)
 	require.NotNil(stored)
-	assert.Equal(slugBranch, stored.WorkspaceBranch)
+	assert.Empty(stored.WorkspaceBranch)
 }
 
 func prepareIssueWorkspaceAssociationFixture(
@@ -25212,6 +25485,119 @@ func TestWorkspaceDeletePreservesUserCreatedBranch(t *testing.T) {
 		scratchSHA,
 		testGitSHA(t, clonePath, "refs/heads/user-scratch"),
 	)
+}
+
+func TestWorkspaceDeleteDoesNotCleanupReplacementCloneE2E(t *testing.T) {
+	t.Parallel()
+
+	assert := Assert.New(t)
+	require := require.New(t)
+
+	client, database, _, remotePath := setupTestServerWithWorkspaces(t)
+	ctx := t.Context()
+	const branch = "middleman/pr-42"
+	replacementClone := filepath.Join(t.TempDir(), "replacement-clone")
+	runGit(t, filepath.Dir(replacementClone), "clone", remotePath, replacementClone)
+	runGit(
+		t, replacementClone, "remote", "set-url", "origin",
+		"https://github.com/acme/widget.git",
+	)
+	runGit(t, replacementClone, "branch", branch, "HEAD")
+	branchSHA := testGitSHA(t, replacementClone, "refs/heads/"+branch)
+	wsID := "ws-replacement-clone"
+	require.NoError(database.InsertWorkspace(ctx, &workspace.Workspace{
+		ID:              wsID,
+		Platform:        "github",
+		PlatformHost:    "github.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypePullRequest,
+		ItemNumber:      42,
+		GitHeadRef:      "feature",
+		WorkspaceBranch: branch,
+		WorktreePath:    replacementClone,
+		TerminalBackend: workspace.TerminalBackendTmux,
+		Status:          "ready",
+	}))
+
+	force := true
+	deleteResp, err := client.HTTP.DeleteWorkspaceWithResponse(
+		ctx, wsID, &generated.DeleteWorkspaceParams{Force: &force},
+	)
+
+	require.NoError(err)
+	require.Equal(http.StatusNoContent, deleteResp.StatusCode())
+	assert.DirExists(replacementClone)
+	assert.Equal(branchSHA, testGitSHA(t, replacementClone, "refs/heads/"+branch))
+	got, err := database.GetWorkspace(ctx, wsID)
+	require.NoError(err)
+	assert.Nil(got)
+}
+
+func TestWorkspaceDeleteDoesNotCleanupReplacementCloneFromStaleLocalBaseE2E(t *testing.T) {
+	t.Parallel()
+
+	assert := Assert.New(t)
+	require := require.New(t)
+
+	cfg := &config.Config{}
+	client, database, _, remotePath, srv := setupTestServerWithWorkspacesServer(t, cfg)
+	ctx := t.Context()
+	const branch = "middleman/pr-42"
+	localRepo := filepath.Join(t.TempDir(), "local-base")
+	runGit(t, filepath.Dir(localRepo), "clone", remotePath, localRepo)
+	replacementClone := filepath.Join(t.TempDir(), "replacement-clone")
+	runGit(
+		t, localRepo,
+		"worktree", "add", replacementClone, "-b", branch, "HEAD",
+	)
+	require.NoError(os.RemoveAll(replacementClone))
+	runGit(t, filepath.Dir(replacementClone), "clone", remotePath, replacementClone)
+	runGit(
+		t, replacementClone, "remote", "set-url", "origin",
+		"https://github.com/acme/widget.git",
+	)
+	runGit(t, replacementClone, "branch", branch, "HEAD")
+	branchSHA := testGitSHA(t, replacementClone, "refs/heads/"+branch)
+
+	srv.cfgMu.Lock()
+	srv.cfg.Repos = []config.Repo{{
+		Platform:         "github",
+		PlatformHost:     "github.com",
+		Owner:            "acme",
+		Name:             "widget",
+		WorktreeBasePath: localRepo,
+	}}
+	srv.cfgMu.Unlock()
+
+	wsID := "ws-stale-local-base-replacement-clone"
+	require.NoError(database.InsertWorkspace(ctx, &workspace.Workspace{
+		ID:              wsID,
+		Platform:        "github",
+		PlatformHost:    "github.com",
+		RepoOwner:       "acme",
+		RepoName:        "widget",
+		ItemType:        db.WorkspaceItemTypePullRequest,
+		ItemNumber:      42,
+		GitHeadRef:      "feature",
+		WorkspaceBranch: branch,
+		WorktreePath:    replacementClone,
+		TerminalBackend: workspace.TerminalBackendTmux,
+		Status:          "ready",
+	}))
+
+	force := true
+	deleteResp, err := client.HTTP.DeleteWorkspaceWithResponse(
+		ctx, wsID, &generated.DeleteWorkspaceParams{Force: &force},
+	)
+
+	require.NoError(err)
+	require.Equal(http.StatusNoContent, deleteResp.StatusCode())
+	assert.DirExists(replacementClone)
+	assert.Equal(branchSHA, testGitSHA(t, replacementClone, "refs/heads/"+branch))
+	got, err := database.GetWorkspace(ctx, wsID)
+	require.NoError(err)
+	assert.Nil(got)
 }
 
 func TestWorkspaceCreatePreservesExistingLocalPreferredBranch(t *testing.T) {

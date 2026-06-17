@@ -4334,6 +4334,26 @@ func (d *DB) GetRepoByHostOwnerName(
 	return &r, nil
 }
 
+// CountReposByHostOwnerName returns how many provider identities share a
+// host/owner/name lookup key.
+func (d *DB) CountReposByHostOwnerName(
+	ctx context.Context,
+	host, owner, name string,
+) (int, error) {
+	host, owner, name = canonicalRepoIdentifier(host, owner, name)
+	var count int
+	err := d.ro.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM middleman_repos
+		WHERE platform_host = ? AND owner_key = ? AND name_key = ?`,
+		host, owner, name,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count repos by host/owner/name: %w", err)
+	}
+	return count, nil
+}
+
 // --- Workspaces ---
 
 func canonicalWorkspacePlatform(provider string) string {
@@ -4446,6 +4466,27 @@ func (d *DB) GetWorkspaceByMR(
 	platformHost, owner, name string,
 	mrNumber int,
 ) (*Workspace, error) {
+	return d.getWorkspaceByMR(ctx, "", platformHost, owner, name, mrNumber)
+}
+
+// GetWorkspaceByMRForProvider returns the workspace for a specific MR within a
+// provider identity, or nil if not found.
+func (d *DB) GetWorkspaceByMRForProvider(
+	ctx context.Context,
+	provider, platformHost, owner, name string,
+	mrNumber int,
+) (*Workspace, error) {
+	return d.getWorkspaceByMR(
+		ctx, provider, platformHost, owner, name, mrNumber,
+	)
+}
+
+func (d *DB) getWorkspaceByMR(
+	ctx context.Context,
+	provider, platformHost, owner, name string,
+	mrNumber int,
+) (*Workspace, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
 	platformHost, owner, name = canonicalRepoLookupIdentifier(platformHost, owner, name)
 	var ws Workspace
 	err := d.ro.QueryRowContext(ctx, `
@@ -4454,10 +4495,12 @@ func (d *DB) GetWorkspaceByMR(
 		       git_head_ref, mr_head_repo, workspace_branch,
 		       worktree_path, tmux_session, terminal_backend, status,
 		       error_message, created_at
-		FROM middleman_workspaces
-		WHERE platform_host = ? AND repo_owner_key = ?
-		  AND repo_name_key = ? AND item_type = ? AND item_number = ?`,
+			FROM middleman_workspaces
+			WHERE platform_host = ? AND repo_owner_key = ?
+			  AND repo_name_key = ? AND item_type = ? AND item_number = ?
+			  AND (? = '' OR platform = ?)`,
 		platformHost, owner, name, WorkspaceItemTypePullRequest, mrNumber,
+		provider, provider,
 	).Scan(
 		&ws.ID, &ws.Platform, &ws.PlatformHost, &ws.RepoOwner, &ws.RepoName,
 		&ws.ItemType, &ws.ItemNumber, &ws.AssociatedPRNumber,
@@ -4482,6 +4525,27 @@ func (d *DB) GetWorkspaceByIssue(
 	platformHost, owner, name string,
 	issueNumber int,
 ) (*Workspace, error) {
+	return d.getWorkspaceByIssue(ctx, "", platformHost, owner, name, issueNumber)
+}
+
+// GetWorkspaceByIssueForProvider returns the workspace for a specific issue
+// within a provider identity, or nil if not found.
+func (d *DB) GetWorkspaceByIssueForProvider(
+	ctx context.Context,
+	provider, platformHost, owner, name string,
+	issueNumber int,
+) (*Workspace, error) {
+	return d.getWorkspaceByIssue(
+		ctx, provider, platformHost, owner, name, issueNumber,
+	)
+}
+
+func (d *DB) getWorkspaceByIssue(
+	ctx context.Context,
+	provider, platformHost, owner, name string,
+	issueNumber int,
+) (*Workspace, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
 	platformHost, owner, name = canonicalRepoLookupIdentifier(platformHost, owner, name)
 	var ws Workspace
 	err := d.ro.QueryRowContext(ctx, `
@@ -4492,8 +4556,10 @@ func (d *DB) GetWorkspaceByIssue(
 		       error_message, created_at
 		FROM middleman_workspaces
 		WHERE platform_host = ? AND repo_owner_key = ?
-		  AND repo_name_key = ? AND item_type = ? AND item_number = ?`,
+		  AND repo_name_key = ? AND item_type = ? AND item_number = ?
+		  AND (? = '' OR platform = ?)`,
 		platformHost, owner, name, WorkspaceItemTypeIssue, issueNumber,
+		provider, provider,
 	).Scan(
 		&ws.ID, &ws.Platform, &ws.PlatformHost, &ws.RepoOwner, &ws.RepoName,
 		&ws.ItemType, &ws.ItemNumber, &ws.AssociatedPRNumber,

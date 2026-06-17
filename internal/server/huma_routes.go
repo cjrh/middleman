@@ -447,6 +447,7 @@ type getStackForPROutput = bodyOutput[stackContextResponse]
 
 type createWorkspaceInput struct {
 	Body struct {
+		Provider     string `json:"provider,omitempty"`
 		PlatformHost string `json:"platform_host"`
 		Owner        string `json:"owner"`
 		Name         string `json:"name"`
@@ -1480,8 +1481,9 @@ func (s *Server) buildPullDetailResponse(
 	resp.MergeRequest = &responseMR
 
 	if s.workspaces != nil {
-		wsRef, wsErr := s.workspaces.GetByMR(
-			ctx, repo.PlatformHost, repo.Owner, repo.Name, mr.Number,
+		wsRef, wsErr := s.workspaces.GetByMRForProvider(
+			ctx, repo.Platform, repo.PlatformHost, repo.Owner, repo.Name,
+			mr.Number,
 		)
 		if wsErr == nil && wsRef != nil {
 			resp.Workspace = &workspaceRef{
@@ -2352,8 +2354,9 @@ func (s *Server) buildIssueDetailResponse(
 		issueResp.DetailFetchedAt = formatUTCRFC3339(*issue.DetailFetchedAt)
 	}
 	if s.workspaces != nil {
-		wsRef, wsErr := s.workspaces.GetByIssue(
-			ctx, repo.PlatformHost, repo.Owner, repo.Name, issue.Number,
+		wsRef, wsErr := s.workspaces.GetByIssueForProvider(
+			ctx, repo.Platform, repo.PlatformHost, repo.Owner, repo.Name,
+			issue.Number,
 		)
 		if wsErr == nil && wsRef != nil {
 			issueResp.Workspace = &workspaceRef{
@@ -3768,8 +3771,9 @@ func (s *Server) syncIssue(ctx context.Context, input *issueRepoNumberInput) (*s
 		syncIssueResp.DetailFetchedAt = formatUTCRFC3339(*issue.DetailFetchedAt)
 	}
 	if s.workspaces != nil {
-		wsRef, wsErr := s.workspaces.GetByIssue(
-			ctx, repo.PlatformHost, repo.Owner, repo.Name, issue.Number,
+		wsRef, wsErr := s.workspaces.GetByIssueForProvider(
+			ctx, repo.Platform, repo.PlatformHost, repo.Owner, repo.Name,
+			issue.Number,
 		)
 		if wsErr == nil && wsRef != nil {
 			syncIssueResp.Workspace = &workspaceRef{
@@ -4643,9 +4647,14 @@ func (s *Server) createWorkspace(
 	if s.workspaces == nil {
 		return nil, problemServiceUnavailable("workspace manager not configured")
 	}
+	provider, err := s.createWorkspaceProvider(ctx, input)
+	if err != nil {
+		return nil, err
+	}
 
 	ws, err := s.workspaces.Create(
 		ctx,
+		provider,
 		input.Body.PlatformHost,
 		input.Body.Owner,
 		input.Body.Name,
@@ -4678,6 +4687,40 @@ func (s *Server) createWorkspace(
 		Status: http.StatusAccepted,
 		Body:   s.toWorkspaceResponse(ctx, summary),
 	}, nil
+}
+
+func (s *Server) createWorkspaceProvider(
+	ctx context.Context, input *createWorkspaceInput,
+) (string, error) {
+	if strings.TrimSpace(input.Body.Provider) != "" {
+		provider, err := normalizeRouteProvider(input.Body.Provider)
+		if err != nil {
+			return "", problemValidation("body.provider", err.Error())
+		}
+		return provider, nil
+	}
+	count, err := s.db.CountReposByHostOwnerName(
+		ctx, input.Body.PlatformHost, input.Body.Owner, input.Body.Name,
+	)
+	if err != nil {
+		return "", problemInternal("count matching repos: " + err.Error())
+	}
+	if count > 1 {
+		return "", problemValidation(
+			"body.provider",
+			"provider is required when multiple providers share this host and repository",
+		)
+	}
+	repo, err := s.db.GetRepoByHostOwnerName(
+		ctx, input.Body.PlatformHost, input.Body.Owner, input.Body.Name,
+	)
+	if err != nil {
+		return "", problemInternal("lookup workspace repo: " + err.Error())
+	}
+	if repo == nil {
+		return "", nil
+	}
+	return repo.Platform, nil
 }
 
 func (s *Server) runWorkspaceSetup(ws *workspace.Workspace) {
@@ -4776,8 +4819,9 @@ func (s *Server) createIssueWorkspace(
 		return nil, providerRouteLookupError(err)
 	}
 
-	existing, err := s.workspaces.GetByIssue(
+	existing, err := s.workspaces.GetByIssueForProvider(
 		ctx,
+		repo.Platform,
 		repo.PlatformHost,
 		repo.Owner,
 		repo.Name,
@@ -4807,6 +4851,7 @@ func (s *Server) createIssueWorkspace(
 		repo.Name,
 		input.Number,
 		workspace.CreateIssueOptions{
+			Provider:            input.Provider,
 			GitHeadRef:          strings.TrimSpace(derefString(input.Body.GitHeadRef)),
 			ReuseExistingBranch: input.Body.ReuseExistingBranch,
 		},
@@ -4855,8 +4900,9 @@ func (s *Server) createIssueWorkspace(
 			return nil, problemValidation("body.git_head_ref", msg)
 		}
 		if strings.Contains(msg, "UNIQUE constraint") {
-			existing, getErr := s.workspaces.GetByIssue(
+			existing, getErr := s.workspaces.GetByIssueForProvider(
 				ctx,
+				repo.Platform,
 				repo.PlatformHost,
 				repo.Owner,
 				repo.Name,
