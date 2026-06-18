@@ -261,6 +261,13 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # Run inside the official Playwright image: browsers and their OS deps are
+    # pre-baked at $PLAYWRIGHT_BROWSERS_PATH, so there is no apt download to
+    # time out on (the firefox `--with-deps` install repeatedly flirted with the
+    # old 10m cap off a slow mirror). Pinned by digest like the actions above so
+    # a bot can bump it; the trailing comment records the version, which
+    # `make playwright-version-check` keeps locked to the @playwright/test pin.
+    container: mcr.microsoft.com/playwright@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948  # v1.60.0-noble
     strategy:
       fail-fast: false
       matrix:
@@ -282,13 +289,24 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
+      - name: Install tmux for workspace PTY sessions
+        # The minimal Playwright image ships browsers but not tmux, which the
+        # full-stack workspace e2e specs need to start real PTY sessions
+        # (ubuntu-latest had it pre-installed). This is one small package, not
+        # the 48MB firefox browser-deps download the container already removed.
+        timeout-minutes: 5
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends tmux
+
+      - name: Make $HOME owned by the current user for Firefox
+        # GitHub mounts the container $HOME (/github/home) owned by the runner
+        # UID while steps run as root. Firefox refuses to launch when $HOME is
+        # not owned by the current user (Chromium does not check), so the
+        # firefox leg fails every test at browser launch. Re-own the directory
+        # itself (not its contents) so the launch check passes; HOME stays
+        # /github/home, leaving the setup-go/setup-vp caches untouched.
+        run: chown "$(id -u):$(id -g)" "$HOME"
 
       - name: Build frontend
         run: cd frontend && vp build --logLevel warn
@@ -299,11 +317,11 @@ jobs:
           cp -r frontend/dist internal/web/dist
 
       - name: Build E2E server
-        run: go build -o ./cmd/e2e-server/e2e-server ./cmd/e2e-server
-
-      - name: Install Playwright browser
-        timeout-minutes: 10
-        run: cd frontend && vp exec -- playwright install --with-deps ${{ matrix.browser }}
+        # -buildvcs=false: inside the Playwright container the checked-out
+        # workspace has a git ownership mismatch, so VCS stamping fails with
+        # "error obtaining VCS status: exit status 128". This test binary has no
+        # use for stamped VCS info anyway (matches the huma-route-check target).
+        run: go build -buildvcs=false -o ./cmd/e2e-server/e2e-server ./cmd/e2e-server
 
       - name: Run E2E tests
         run: cd frontend && vp exec -- playwright test --config=playwright-e2e.config.ts --project=${{ matrix.browser }}
