@@ -46,6 +46,7 @@ func bootFleetServer(t *testing.T, cfg *config.Config) (*httptest.Server, *dbpkg
 			AllowLoopbackAnyPort: true,
 		},
 	})
+	t.Cleanup(func() { gracefulShutdown(t, srv) })
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	return ts, database
@@ -229,6 +230,7 @@ func TestFleetSnapshotFanOutE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
+			Enabled:     true,
 			Key:         "hub",
 			PeerTimeout: "1s",
 			Peers: []config.FleetPeer{
@@ -271,6 +273,81 @@ func TestFleetSnapshotFanOutE2E(t *testing.T) {
 	}
 	require.True(sawHub, "hub worktree present")
 	require.True(sawPeer, "peer worktree merged with distinct host id")
+}
+
+func TestFleetDisabledBlocksRemoteSnapshotAndProxyE2E(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	ctx := context.Background()
+
+	var peerCalls int
+	var peerCallsMu sync.Mutex
+	peerTS := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		peerCallsMu.Lock()
+		peerCalls++
+		peerCallsMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(
+			`{"schemaVersion":2,"host":{"configKey":"peer","hostname":"peer","platform":"linux"}}`,
+		))
+	}))
+	t.Cleanup(peerTS.Close)
+
+	hubCfg := &config.Config{
+		BasePath: "/",
+		DataDir:  t.TempDir(),
+		Fleet: config.Fleet{
+			Enabled:     false,
+			Key:         "hub",
+			PeerTimeout: "10ms",
+			Peers: []config.FleetPeer{
+				{Key: "peer", Name: "peer", BaseURL: peerTS.URL},
+			},
+			SSHPeers: []config.FleetSSHPeer{
+				{Key: "ssh-peer", Name: "ssh peer", Destination: "dev@ssh.local"},
+			},
+		},
+	}
+	hubTS, hubDB := bootFleetServer(t, hubCfg)
+	_, err := hubDB.CreateProject(ctx, dbpkg.CreateProjectInput{
+		DisplayName: "hubapp", LocalPath: t.TempDir() + "/hubapp", DefaultBranch: "main",
+	})
+	require.NoError(err)
+
+	var snap fleet.Snapshot
+	getJSON(t, hubTS, "/api/v1/snapshot?include_peers=true", &snap)
+	require.NotNil(findHost(snap.Hosts, "hub"), "self host remains visible")
+	assert.Nil(findHost(snap.Hosts, "peer"), "disabled federation hides configured peer")
+	assert.Nil(findHost(snap.Hosts, "ssh-peer"), "disabled federation hides configured ssh peer")
+	peerCallsMu.Lock()
+	assert.Equal(0, peerCalls, "disabled federation must not fan out to peers")
+	peerCallsMu.Unlock()
+
+	status, body := getRaw(
+		t, hubTS.Client(),
+		hubTS.URL+"/api/v1/fleet/hosts/peer/workspaces",
+	)
+	assert.Equal(http.StatusNotFound, status)
+	assert.Contains(body, `"code":"notFound"`)
+	assert.Contains(body, `"hostKey":"peer"`)
+	peerCallsMu.Lock()
+	assert.Equal(0, peerCalls, "disabled remote proxy must not call peers")
+	peerCallsMu.Unlock()
+
+	status, body = getRaw(
+		t, hubTS.Client(),
+		hubTS.URL+"/api/v1/fleet/hosts/ssh-peer/workspaces",
+	)
+	assert.Equal(http.StatusNotFound, status)
+	assert.Contains(body, `"code":"notFound"`)
+	assert.Contains(body, `"hostKey":"ssh-peer"`)
+
+	status, body = getRaw(
+		t, hubTS.Client(),
+		hubTS.URL+"/api/v1/fleet/hosts/hub/workspaces",
+	)
+	assert.Equal(http.StatusOK, status)
+	assert.NotContains(body, "fleet host not found")
 }
 
 func TestFleetSnapshotLiveTmuxEnrichmentE2E(t *testing.T) {
@@ -709,7 +786,8 @@ func TestFleetOperationProxyRoutesMutationsToPeerE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
-			Key: "hub",
+			Enabled: true,
+			Key:     "hub",
 			// PeerTimeout is the read fan-out budget. Drive mutations
 			// deliberately forward the caller's request context instead
 			// of reusing this short read timeout.
@@ -823,7 +901,8 @@ func TestFleetOperationProxyUnknownHostE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
-			Key: "hub",
+			Enabled: true,
+			Key:     "hub",
 		},
 	}
 	hubTS, _ := bootFleetServer(t, hubCfg)
@@ -843,7 +922,8 @@ func TestFleetOperationProxyPeerDispatchFailureE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
-			Key: "hub",
+			Enabled: true,
+			Key:     "hub",
 			Peers: []config.FleetPeer{
 				{Key: "peer", Name: "peer", BaseURL: peerURL},
 			},
@@ -871,7 +951,8 @@ func TestFleetOperationProxyRoutesSelfNestedOwnerE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
-			Key: "hub",
+			Enabled: true,
+			Key:     "hub",
 		},
 	}
 	hubTS, database := bootFleetServer(t, hubCfg)
@@ -964,7 +1045,8 @@ func TestFleetTerminalWebSocketProxyE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
-			Key: "hub",
+			Enabled: true,
+			Key:     "hub",
 			Peers: []config.FleetPeer{
 				{Key: "peer", Name: "peer", BaseURL: peerTS.URL},
 			},
@@ -1003,7 +1085,8 @@ func TestFleetTerminalWebSocketProxyPeerDialFailureE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
-			Key: "hub",
+			Enabled: true,
+			Key:     "hub",
 			Peers: []config.FleetPeer{
 				{Key: "peer", Name: "peer", BaseURL: peerTS.URL},
 			},
@@ -1271,6 +1354,7 @@ func TestFleetSnapshotPeerRichFieldsE2E(t *testing.T) {
 	hubCfg := &config.Config{
 		BasePath: "/",
 		Fleet: config.Fleet{
+			Enabled:     true,
 			Key:         "hub",
 			PeerTimeout: "5s",
 			Peers: []config.FleetPeer{

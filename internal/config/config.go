@@ -703,6 +703,7 @@ func (p FleetSSHPeer) RemoteCommandOrDefault() string {
 // Fleet configures this daemon's federation: an optional local host key
 // and the peers whose snapshots the hub fans out to.
 type Fleet struct {
+	Enabled     bool           `toml:"enabled,omitempty" json:"enabled"`
 	Key         string         `toml:"key,omitempty" json:"key,omitempty"`
 	PeerTimeout string         `toml:"peer_timeout,omitempty" json:"peer_timeout,omitempty"`
 	Sessions    FleetSessions  `toml:"sessions" json:"sessions"`
@@ -808,8 +809,8 @@ func isBareExecutable(s string) bool {
 
 // validateFleetSSHPeers rejects ssh peers that would later produce
 // unroutable hosts or merge collisions: empty keys/destinations,
-// duplicate keys, and keys colliding with HTTP peers or the local
-// fleet key.
+// duplicate keys, the reserved self alias, and keys colliding with
+// HTTP peers or the local fleet key.
 func (c *Config) validateFleetSSHPeers() error {
 	seen := make(map[string]string, len(c.Fleet.Peers))
 	for _, p := range c.Fleet.Peers {
@@ -820,6 +821,12 @@ func (c *Config) validateFleetSSHPeers() error {
 		if key == "" {
 			return fmt.Errorf(
 				"config: fleet.ssh_peers[%d]: key is required", i,
+			)
+		}
+		if key == "self" {
+			return fmt.Errorf(
+				"config: fleet.ssh_peers[%d]: key %q is reserved for local self routing",
+				i, key,
 			)
 		}
 		// Destination is passed to ssh(1) as a single positional
@@ -992,6 +999,7 @@ port = 8091
 # A peer that does not answer in time degrades (reachable=false)
 # instead of stalling the snapshot.
 # [fleet]
+# enabled = false
 # peer_timeout = "2s"
 
 # Federate with fleet peers reached over SSH: the daemon holds a
@@ -1219,6 +1227,9 @@ func (c *Config) Validate() error {
 // GitHub App installation coverage check for the CLI's repair path.
 func (c *Config) validate(skipAppCoverage bool) error {
 	var err error
+	if err := c.Fleet.Validate(); err != nil {
+		return err
+	}
 	if err := c.validateFleetSSHPeers(); err != nil {
 		return err
 	}
@@ -1486,22 +1497,33 @@ func (c *Config) validate(skipAppCoverage bool) error {
 		)
 	}
 
-	if err := c.Fleet.Validate(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-// Validate checks the fleet section: peer keys must be unique, non-empty,
-// and distinct from the local fleet key; base URLs must be absolute
-// http(s); peer_timeout must parse when set. Embedders that supply peers
-// through Options share this validation with the config-file path.
-func (f Fleet) Validate() error {
+// Validate checks and canonicalizes the fleet section: peer keys must be
+// unique, non-empty, distinct from the local fleet key, and not shadow the
+// reserved self alias; base URLs must be absolute http(s); peer_timeout must
+// parse when set. Embedders that supply peers through Options share this
+// validation with the config-file path.
+func (f *Fleet) Validate() error {
+	const reservedSelfKey = "self"
+	f.Key = strings.TrimSpace(f.Key)
+	for i := range f.Peers {
+		f.Peers[i].Key = strings.TrimSpace(f.Peers[i].Key)
+	}
+	for i := range f.SSHPeers {
+		f.SSHPeers[i].Key = strings.TrimSpace(f.SSHPeers[i].Key)
+	}
+	if f.Key == reservedSelfKey {
+		return fmt.Errorf("fleet.key %q is reserved for local self routing", reservedSelfKey)
+	}
 	seenFleetPeers := map[string]bool{}
 	for i, p := range f.Peers {
 		if p.Key == "" {
 			return fmt.Errorf("fleet.peers[%d]: key is required", i)
+		}
+		if strings.TrimSpace(p.Key) == reservedSelfKey {
+			return fmt.Errorf("fleet.peers[%d]: key %q is reserved for local self routing", i, reservedSelfKey)
 		}
 		if seenFleetPeers[p.Key] {
 			return fmt.Errorf("fleet.peers: duplicate key %q", p.Key)

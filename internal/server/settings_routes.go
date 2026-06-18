@@ -91,10 +91,104 @@ type fleetSSHPeersBody struct {
 
 type fleetSSHPeersOutput = bodyOutput[fleetSSHPeersBody]
 
+type fleetSettingsResponse struct {
+	Enabled         bool                  `json:"enabled"`
+	Key             string                `json:"key,omitempty"`
+	PeerTimeout     string                `json:"peer_timeout,omitempty"`
+	Sessions        config.FleetSessions  `json:"sessions"`
+	Peers           []config.FleetPeer    `json:"peers" nullable:"false"`
+	SSHPeers        []config.FleetSSHPeer `json:"ssh_peers" nullable:"false"`
+	RestartRequired bool                  `json:"restart_required"`
+}
+
+type getFleetSettingsOutput = bodyOutput[fleetSettingsResponse]
+
+type updateFleetSettingsInput struct {
+	Body struct {
+		Enabled     bool                  `json:"enabled"`
+		Key         string                `json:"key,omitempty"`
+		PeerTimeout string                `json:"peer_timeout,omitempty"`
+		Sessions    config.FleetSessions  `json:"sessions"`
+		Peers       []config.FleetPeer    `json:"peers" nullable:"false"`
+		SSHPeers    []config.FleetSSHPeer `json:"ssh_peers" nullable:"false"`
+	}
+}
+
 type updateFleetSSHPeersInput struct {
 	Body struct {
 		SSHPeers []config.FleetSSHPeer `json:"ssh_peers" nullable:"false"`
 	}
+}
+
+func (s *Server) buildFleetSettingsResponseLocked() fleetSettingsResponse {
+	fleet := s.cfg.Fleet
+	return fleetSettingsResponse{
+		Enabled:         fleet.Enabled,
+		Key:             fleet.Key,
+		PeerTimeout:     fleet.PeerTimeout,
+		Sessions:        fleet.Sessions,
+		Peers:           cloneFleetPeers(fleet.Peers),
+		SSHPeers:        cloneFleetSSHPeers(fleet.SSHPeers),
+		RestartRequired: s.fleetSettingsRestartRequiredLocked(fleet),
+	}
+}
+
+func (s *Server) fleetSettingsRestartRequiredLocked(fleet config.Fleet) bool {
+	return fleet.Sessions != s.bootCfgSnapshot.FleetSessions ||
+		s.fleetSSHPeersRestartRequired(fleet.SSHPeers)
+}
+
+// getFleetSettings returns the complete fleet federation settings shape.
+func (s *Server) getFleetSettings(
+	_ context.Context, _ *struct{},
+) (*getFleetSettingsOutput, error) {
+	if s.cfgPath == "" {
+		return nil, problemNotFound(
+			CodeSettingsUnavailable, "settings not available", nil,
+		)
+	}
+	s.cfgMu.Lock()
+	out := s.buildFleetSettingsResponseLocked()
+	s.cfgMu.Unlock()
+	return &getFleetSettingsOutput{Body: out}, nil
+}
+
+// updateFleetSettings replaces the complete fleet federation settings shape.
+// Validation happens against the whole config so key collisions across local,
+// HTTP, and SSH membership stay consistent with file loading.
+func (s *Server) updateFleetSettings(
+	_ context.Context, input *updateFleetSettingsInput,
+) (*getFleetSettingsOutput, error) {
+	if s.cfgPath == "" {
+		return nil, problemNotFound(
+			CodeSettingsUnavailable, "settings not available", nil,
+		)
+	}
+
+	next := config.Fleet{
+		Enabled:     input.Body.Enabled,
+		Key:         input.Body.Key,
+		PeerTimeout: input.Body.PeerTimeout,
+		Sessions:    input.Body.Sessions,
+		Peers:       cloneFleetPeers(input.Body.Peers),
+		SSHPeers:    cloneFleetSSHPeers(input.Body.SSHPeers),
+	}
+
+	s.cfgMu.Lock()
+	candidate := cloneReloadedConfig(s.cfg)
+	candidate.Fleet = next
+	if err := candidate.Validate(); err != nil {
+		s.cfgMu.Unlock()
+		return nil, problemBadRequest(CodeBadRequest, err.Error(), nil)
+	}
+	if err := candidate.Save(s.cfgPath); err != nil {
+		s.cfgMu.Unlock()
+		return nil, problemInternal("save config: " + err.Error())
+	}
+	s.cfg.Fleet = candidate.Fleet
+	out := s.buildFleetSettingsResponseLocked()
+	s.cfgMu.Unlock()
+	return &getFleetSettingsOutput{Body: out}, nil
 }
 
 // getFleetSSHPeers lists the configured ssh fleet peers.
@@ -118,8 +212,7 @@ func (s *Server) getFleetSSHPeers(
 }
 
 // updateFleetSSHPeers replaces the configured ssh peer set. The set
-// is validated as a whole and persisted; a failed validation or save
-// rolls the in-memory config back.
+// is validated as a whole and persisted before updating live config.
 func (s *Server) updateFleetSSHPeers(
 	_ context.Context, input *updateFleetSSHPeersInput,
 ) (*fleetSSHPeersOutput, error) {
@@ -132,19 +225,18 @@ func (s *Server) updateFleetSSHPeers(
 		[]config.FleetSSHPeer(nil), input.Body.SSHPeers...,
 	)
 	s.cfgMu.Lock()
-	prev := s.cfg.Fleet.SSHPeers
-	s.cfg.Fleet.SSHPeers = next
-	if err := s.cfg.Validate(); err != nil {
-		s.cfg.Fleet.SSHPeers = prev
+	candidate := cloneReloadedConfig(s.cfg)
+	candidate.Fleet.SSHPeers = next
+	if err := candidate.Validate(); err != nil {
 		s.cfgMu.Unlock()
 		return nil, problemBadRequest(CodeBadRequest, err.Error(), nil)
 	}
-	if err := s.cfg.Save(s.cfgPath); err != nil {
-		s.cfg.Fleet.SSHPeers = prev
+	if err := candidate.Save(s.cfgPath); err != nil {
 		s.cfgMu.Unlock()
 		return nil, problemInternal("save config: " + err.Error())
 	}
-	persisted := append([]config.FleetSSHPeer(nil), s.cfg.Fleet.SSHPeers...)
+	s.cfg.Fleet.SSHPeers = candidate.Fleet.SSHPeers
+	persisted := append([]config.FleetSSHPeer(nil), candidate.Fleet.SSHPeers...)
 	s.cfgMu.Unlock()
 	return &fleetSSHPeersOutput{Body: fleetSSHPeersBody{
 		SSHPeers:        persisted,
@@ -173,6 +265,20 @@ func (s *Server) fleetSSHPeersRestartRequired(
 }
 
 func (s *Server) registerSettingsAPI(api huma.API) {
+	huma.Register(api, huma.Operation{
+		OperationID: "get-fleet-settings",
+		Method:      http.MethodGet,
+		Path:        "/settings/fleet",
+		Summary:     "Get fleet settings",
+		Tags:        []string{"Settings"},
+	}, s.getFleetSettings)
+	huma.Register(api, huma.Operation{
+		OperationID: "update-fleet-settings",
+		Method:      http.MethodPut,
+		Path:        "/settings/fleet",
+		Summary:     "Update fleet settings",
+		Tags:        []string{"Settings"},
+	}, s.updateFleetSettings)
 	huma.Register(api, huma.Operation{
 		OperationID: "get-fleet-ssh-peers",
 		Method:      http.MethodGet,

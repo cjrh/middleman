@@ -214,8 +214,12 @@
     fleetHosts.filter((host) => host.reachable).length,
   );
 
+  const hasRemoteFleetHosts = $derived(
+    hasNonSelfFleetHost(fleetHosts),
+  );
+
   const showFleetStatus = $derived(
-    fleetError !== null || (fleetLoaded && fleetHosts.length > 0),
+    fleetError !== null || (fleetLoaded && hasRemoteFleetHosts),
   );
 
   // Flat ordering for timestamp sorts. The org/repo mode keeps
@@ -256,6 +260,14 @@
     return Number.isNaN(ms) ? 0 : ms;
   }
 
+  function hasNonSelfFleetHost(hosts: HostSummary[]): boolean {
+    return hosts.some((host) => host.kind !== "self");
+  }
+
+  function localWorkspacesOnly(items: Workspace[]): Workspace[] {
+    return items.filter((ws) => !ws.fleet_host_key);
+  }
+
   const repoLabelFormatter = $derived.by(() =>
     createRepoLabelFormatter(
       workspaces.map(workspaceRepoIdentity),
@@ -292,10 +304,13 @@
         return;
       }
       const local = (data.workspaces ?? []) as Workspace[];
-      const remote = fleetLoaded && !fleetError
+      const remote = fleetLoaded && !fleetError && hasRemoteFleetHosts
         ? await fetchPeerWorkspaces(abortController.signal)
         : [];
-      workspaces = [...local, ...remote];
+      workspaces = [
+        ...local,
+        ...(hasRemoteFleetHosts ? remote : []),
+      ];
       workspaceListStatus = "loaded";
     } catch {
       // Network error; keep stale list.
@@ -350,9 +365,13 @@
         fleetLoaded = true;
         return;
       }
-      fleetHosts = (data?.hosts ?? []) as HostSummary[];
+      const nextHosts = (data?.hosts ?? []) as HostSummary[];
+      fleetHosts = nextHosts;
       fleetError = null;
       fleetLoaded = true;
+      if (!hasNonSelfFleetHost(nextHosts)) {
+        workspaces = localWorkspacesOnly(workspaces);
+      }
       void fetchWorkspaces();
     } catch {
       fleetError = "Fleet unavailable";

@@ -2955,6 +2955,7 @@ func TestSaveRoundTripsFleet(t *testing.T) {
 		DataDir:        dir,
 		Activity:       Activity{ViewMode: "threaded", TimeRange: "7d"},
 		Fleet: Fleet{
+			Enabled:     true,
 			Key:         "studio",
 			PeerTimeout: "3s",
 			Sessions:    FleetSessions{IncludeUnmanagedDetails: true},
@@ -2968,6 +2969,7 @@ func TestSaveRoundTripsFleet(t *testing.T) {
 
 	reloaded, err := Load(path)
 	require.NoError(t, err)
+	assert.True(reloaded.Fleet.Enabled)
 	assert.Equal("studio", reloaded.Fleet.Key)
 	assert.Equal("3s", reloaded.Fleet.PeerTimeout)
 	assert.True(reloaded.Fleet.Sessions.IncludeUnmanagedDetails)
@@ -3545,6 +3547,7 @@ func TestFleetConfigParsesAndValidates(t *testing.T) {
 	require := require.New(t)
 	path := writeConfig(t, `
 [fleet]
+enabled = true
 key = "studio"
 peer_timeout = "2s"
 [fleet.sessions]
@@ -3556,12 +3559,111 @@ base_url = "http://mbp:8091"
 `)
 	cfg, err := Load(path)
 	require.NoError(err)
+	require.True(cfg.Fleet.Enabled)
 	require.Equal("studio", cfg.Fleet.Key)
 	require.Len(cfg.Fleet.Peers, 1)
 	require.Equal("mbp", cfg.Fleet.Peers[0].Key)
 	require.Equal("http://mbp:8091", cfg.Fleet.Peers[0].BaseURL)
 	require.Equal("2s", cfg.Fleet.PeerTimeoutOrDefault().String())
 	require.True(cfg.Fleet.Sessions.IncludeUnmanagedDetails)
+}
+
+func TestFleetConfigNormalizesHostKeys(t *testing.T) {
+	assert := Assert.New(t)
+	path := writeConfig(t, `
+[fleet]
+key = " studio "
+[[fleet.peers]]
+key = " mbp "
+name = "MacBook"
+base_url = "http://mbp:8091"
+[[fleet.ssh_peers]]
+key = " epyc "
+destination = "dev@epyc.tail"
+`)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+
+	assert.Equal("studio", cfg.Fleet.Key)
+	require.Len(t, cfg.Fleet.Peers, 1)
+	assert.Equal("mbp", cfg.Fleet.Peers[0].Key)
+	require.Len(t, cfg.Fleet.SSHPeers, 1)
+	assert.Equal("epyc", cfg.Fleet.SSHPeers[0].Key)
+}
+
+func TestFleetRejectsTrimmedEmptyAndDuplicatePeerKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "empty http peer",
+			content: `
+[[fleet.peers]]
+key = "   "
+base_url = "http://empty:8091"
+`,
+			want: "key is required",
+		},
+		{
+			name: "duplicate http peers",
+			content: `
+[[fleet.peers]]
+key = "mini"
+base_url = "http://mini:8091"
+[[fleet.peers]]
+key = " mini "
+base_url = "http://mini2:8091"
+`,
+			want: "duplicate key",
+		},
+		{
+			name: "http peer collides with local key",
+			content: `
+[fleet]
+key = " hub "
+[[fleet.peers]]
+key = "hub"
+base_url = "http://hub:8091"
+`,
+			want: "collides with fleet.key",
+		},
+		{
+			name: "ssh peer collides with trimmed http peer",
+			content: `
+[[fleet.peers]]
+key = " mini "
+base_url = "http://mini:8091"
+[[fleet.ssh_peers]]
+key = "mini"
+destination = "dev@mini"
+`,
+			want: "collides with fleet.peers",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tc.content))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+func TestFleetConfigDefaultsToDisabledFederation(t *testing.T) {
+	require := require.New(t)
+	path := writeConfig(t, `
+[fleet]
+key = "studio"
+[[fleet.peers]]
+key = "mbp"
+base_url = "http://mbp:8091"
+`)
+	cfg, err := Load(path)
+	require.NoError(err)
+	require.False(cfg.Fleet.Enabled)
+	require.Len(cfg.Fleet.Peers, 1)
 }
 
 func TestFleetSessionsConfigDefaultsToRedactedUnmanagedDetails(t *testing.T) {
@@ -3585,6 +3687,51 @@ base_url = "http://b:8091"
 `)
 	_, err := Load(path)
 	require.Error(t, err, "expected duplicate peer key to fail validation")
+}
+
+func TestFleetRejectsReservedSelfKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "local key",
+			content: `
+[fleet]
+key = "self"
+`,
+			want: "fleet.key",
+		},
+		{
+			name: "http peer",
+			content: `
+[[fleet.peers]]
+key = "self"
+base_url = "http://middleman.local:8091"
+`,
+			want: "fleet.peers[0]",
+		},
+		{
+			name: "ssh peer",
+			content: `
+[[fleet.ssh_peers]]
+key = "self"
+destination = "dev@middleman.local"
+`,
+			want: "fleet.ssh_peers[0]",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfig(t, tc.content)
+			_, err := Load(path)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+			require.Contains(t, err.Error(), "reserved")
+		})
+	}
 }
 
 func TestFleetRejectsSchemelessBaseURL(t *testing.T) {
