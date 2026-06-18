@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import { mockApi } from "./support/mockApi";
 
-function workspaceRepoRef(owner = "acme", name = "widgets", host = "github.com") {
+function workspaceRepoRef(owner = "acme", name = "widgets", host = "github.com", provider = "github") {
   return {
-    provider: "github",
+    provider,
     platform_host: host,
     owner,
     name,
@@ -3564,7 +3564,7 @@ test.describe("workspace list sorting", () => {
     await expect(names).toHaveText(["Newest created", "Oldest without activity", "Most recently active"]);
     await expect(headers).toHaveCount(2);
 
-    const sortTrigger = page.getByTitle("Sort workspaces");
+    const sortTrigger = page.getByTitle("View workspace options");
     await sortTrigger.click();
     await page.locator(".filter-dropdown").getByRole("button", { name: "Created" }).click();
 
@@ -3591,10 +3591,85 @@ test.describe("workspace list sorting", () => {
     await expect(names).toHaveText(["Newest created", "Oldest without activity", "Most recently active"]);
   });
 
-  test("sort trigger hugs the collapse toggle and the dropdown opens left-aligned", async ({ page }) => {
+  test("toggles visibility options and persists provider-aware labels", async ({ page }) => {
+    const wsGithub = {
+      ...testWorkspace,
+      id: "ws-github-provider",
+      item_number: 10,
+      mr_title: "GitHub provider workspace",
+      mr_additions: 8,
+      mr_deletions: 3,
+    };
+    const wsGitea = {
+      ...testWorkspace,
+      id: "ws-gitea-provider",
+      repo: workspaceRepoRef("acme", "widgets", "github.com", "gitea"),
+      item_number: 11,
+      mr_title: "Gitea provider workspace",
+      mr_additions: 5,
+      mr_deletions: 1,
+    };
+    const wsMiddleman = {
+      ...testWorkspace,
+      id: "ws-middleman",
+      repo_owner: "kenn-io",
+      repo_name: "middleman",
+      repo: workspaceRepoRef("kenn-io", "middleman"),
+      item_number: 12,
+      mr_title: "Middleman workspace",
+      mr_additions: 13,
+      mr_deletions: 2,
+    };
+
+    await page.route("**/api/v1/workspaces", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ workspaces: [wsGithub, wsGitea, wsMiddleman] }),
+        });
+        return;
+      }
+      await route.fulfill({ status: 200 });
+    });
+
     await page.goto("/workspaces");
 
-    const trigger = page.getByTitle("Sort workspaces");
+    const groupLabels = page.locator(".workspace-list-sidebar .group-label");
+    await expect(groupLabels).toHaveText([
+      "github/github.com/acme/widgets",
+      "gitea/github.com/acme/widgets",
+      "kenn-io/middleman",
+    ]);
+    await expect(page.locator(".workspace-list-sidebar .workspace-diff-stats")).toHaveCount(3);
+
+    const viewTrigger = page.getByTitle("View workspace options");
+    await viewTrigger.click();
+    await page.locator(".filter-dropdown").getByRole("button", { name: "Show org names" }).click();
+
+    await expect(groupLabels).toHaveText([
+      "github/github.com/acme/widgets",
+      "gitea/github.com/acme/widgets",
+      "middleman",
+    ]);
+
+    await page.locator(".filter-dropdown").getByRole("button", { name: "Show PR diff stats" }).click();
+    await expect(page.locator(".workspace-list-sidebar .workspace-diff-stats")).toHaveCount(0);
+
+    await page.reload();
+
+    await expect(groupLabels).toHaveText([
+      "github/github.com/acme/widgets",
+      "gitea/github.com/acme/widgets",
+      "middleman",
+    ]);
+    await expect(page.locator(".workspace-list-sidebar .workspace-diff-stats")).toHaveCount(0);
+  });
+
+  test("view trigger hugs the collapse toggle and the dropdown opens end-aligned", async ({ page }) => {
+    await page.goto("/workspaces");
+
+    const trigger = page.getByTitle("View workspace options");
     const toggle = page.getByRole("button", { name: "Collapse Workspaces sidebar" });
     await expect(trigger).toBeVisible();
     await expect(toggle).toBeVisible();
@@ -3618,9 +3693,11 @@ test.describe("workspace list sorting", () => {
     const dropdownBox = await dropdown.boundingBox();
     expect(dropdownBox).not.toBeNull();
 
-    // Regression: align="end" used to hang the panel out to the
-    // left over the filter input. Left edges must align instead.
-    expect(Math.abs(dropdownBox!.x - triggerBox!.x)).toBeLessThanOrEqual(1.5);
+    // The wider View menu is end-aligned so it stays inside the
+    // rail while the trigger remains beside the collapse toggle.
+    expect(Math.abs(dropdownBox!.x + dropdownBox!.width - (triggerBox!.x + triggerBox!.width))).toBeLessThanOrEqual(
+      1.5,
+    );
   });
 });
 

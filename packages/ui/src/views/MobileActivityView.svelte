@@ -15,6 +15,7 @@
   import WorkspaceIndicator from "../components/shared/WorkspaceIndicator.svelte";
   import {
     activityBranchKey,
+    activityItemKey,
     isDefaultBranchActivity,
     isDefaultBranchForcePushActivity,
     shortSha,
@@ -22,6 +23,10 @@
   import {
     buildMobileActivityRepoOptions,
   } from "./mobileActivityRepoOptions.js";
+  import {
+    createRepoLabelFormatter,
+    type RepoLabelIdentity,
+  } from "../utils/repo-label.js";
 
   const { activity, settings, sync, grouping } = getStores();
 
@@ -62,7 +67,6 @@
       ...buildMobileActivityRepoOptions(settings.getConfiguredRepos()),
     ],
   );
-
   onMount(() => {
     activity.initializeFromMount();
     searchInput = activity.getActivitySearch() ?? "";
@@ -119,9 +123,18 @@
             platformHost: item.repo.platform_host,
             owner: item.repo.owner,
             name: item.repo.name,
+            repoPath: item.repo.repo_path,
             branchName: item.branch_name || "default branch",
           })
-        : `${item.repo.platform_host}|${item.repo.repo_path}:${item.item_type}:${item.item_number}`;
+        : activityItemKey({
+            provider: item.repo.provider,
+            platformHost: item.repo.platform_host,
+            owner: item.repo.owner,
+            name: item.repo.name,
+            repoPath: item.repo.repo_path,
+            itemType: item.item_type,
+            itemNumber: item.item_number,
+          });
       const bucket = map.get(key);
       if (bucket) bucket.push(item);
       else map.set(key, [item]);
@@ -154,6 +167,13 @@
   });
 
   const visibleGroups = $derived(groups.slice(0, 30));
+
+  const repoLabelFormatter = $derived.by(() =>
+    createRepoLabelFormatter(
+      displayItems.map(activityRepoIdentity),
+      { showOrgNames: !grouping.getHideOrgName() },
+    ),
+  );
 
   function applyFilters(): void {
     activity.setActivityFilterTypes(buildActivityFilterTypes(
@@ -285,9 +305,18 @@
     return group.events.slice(0, 2);
   }
 
+  function activityRepoIdentity(item: ActivityItem): RepoLabelIdentity {
+    return {
+      provider: item.repo.provider,
+      platformHost: item.repo.platform_host,
+      owner: item.repo.owner,
+      name: item.repo.name,
+      repoPath: item.repo.repo_path,
+    };
+  }
+
   function repoLabel(item: ActivityItem): string {
-    if (grouping.getHideOrgName()) return item.repo.name;
-    return `${item.repo.platform_host}/${item.repo.repo_path}`;
+    return repoLabelFormatter.format(activityRepoIdentity(item));
   }
 
   function branchName(item: ActivityItem): string {

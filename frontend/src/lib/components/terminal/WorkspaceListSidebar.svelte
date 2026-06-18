@@ -13,11 +13,21 @@
     FilterDropdown,
     LeftSidebarToggle,
   } from "@middleman/ui";
+  import {
+    createRepoLabelFormatter,
+    repoIdentityKey,
+    type RepoLabelIdentity,
+  } from "@middleman/ui/utils/repo-label";
   import ProviderIcon from "../provider/ProviderIcon.svelte";
   import {
+    defaultWorkspaceListDisplayOptions,
+    defaultWorkspaceListSort,
+    loadWorkspaceListDisplayOptions,
     loadWorkspaceListSort,
+    saveWorkspaceListDisplayOptions,
     saveWorkspaceListSort,
     workspaceListSortOptions,
+    type WorkspaceListDisplayOptions,
     type WorkspaceListSort,
   } from "./workspaceListSort.ts";
 
@@ -101,6 +111,9 @@
   let fetchInFlight = false;
 
   const workspaceListLoadTimeoutMs = 10_000;
+  let displayOptions = $state<WorkspaceListDisplayOptions>(
+    loadWorkspaceListDisplayOptions(),
+  );
 
   type WorkspaceGroup = {
     key: string;
@@ -127,9 +140,7 @@
   const grouped = $derived.by<WorkspaceGroup[]>(() => {
     const groups: WorkspaceGroup[] = [];
     for (const ws of visibleWorkspaces) {
-      const key =
-        `${ws.platform_host}/${ws.repo_owner}` +
-        `/${ws.repo_name}`;
+      const key = repoIdentityKey(workspaceRepoIdentity(ws));
       const group = groups.find((candidate) => candidate.key === key);
       if (group) {
         group.items.push(ws);
@@ -146,8 +157,21 @@
     )?.label ?? "Org / repo",
   );
 
-  const sortSections = $derived.by(() => [
+  const viewBadgeCount = $derived(
+    Number(sortMode !== defaultWorkspaceListSort) +
+      Number(
+        displayOptions.showOrgNames !==
+          defaultWorkspaceListDisplayOptions.showOrgNames,
+      ) +
+      Number(
+        displayOptions.showDiffStats !==
+          defaultWorkspaceListDisplayOptions.showDiffStats,
+      ),
+  );
+
+  const viewSections = $derived.by(() => [
     {
+      title: "Sorting",
       items: workspaceListSortOptions.map((option) => ({
         id: option.value,
         label: option.label,
@@ -156,6 +180,33 @@
         closeOnSelect: true,
         onSelect: () => setSort(option.value),
       })),
+    },
+    {
+      title: "Visibility",
+      items: [
+        {
+          id: "show-org-names",
+          label: "Show org names",
+          description: "Include owner or organization names in workspace repo labels.",
+          active: displayOptions.showOrgNames,
+          onSelect: () =>
+            setDisplayOption(
+              "showOrgNames",
+              !displayOptions.showOrgNames,
+            ),
+        },
+        {
+          id: "show-diff-stats",
+          label: "Show PR diff stats",
+          description: "Show additions and deletions for linked pull request workspaces.",
+          active: displayOptions.showDiffStats,
+          onSelect: () =>
+            setDisplayOption(
+              "showDiffStats",
+              !displayOptions.showDiffStats,
+            ),
+        },
+      ],
     },
   ]);
 
@@ -191,37 +242,26 @@
     saveWorkspaceListSort(sort);
   }
 
+  function setDisplayOption(
+    key: keyof WorkspaceListDisplayOptions,
+    value: boolean,
+  ): void {
+    displayOptions = { ...displayOptions, [key]: value };
+    saveWorkspaceListDisplayOptions(displayOptions);
+  }
+
   function timeValue(value: string | null | undefined): number {
     if (!value) return 0;
     const ms = Date.parse(value);
     return Number.isNaN(ms) ? 0 : ms;
   }
 
-  // Owner/name pairs that exist on more than one platform host.
-  // Flat rows prefix the host for these so identical repo names on
-  // different hosts stay distinguishable; repo identity is always
-  // (platform, host, owner, name), never owner/name alone.
-  const ambiguousFlatRepos = $derived.by(() => {
-    const hostByRepo: Record<string, string> = {};
-    const ambiguous: string[] = [];
-    for (const ws of workspaces) {
-      const key = `${ws.repo_owner}/${ws.repo_name}`;
-      const seen = hostByRepo[key];
-      if (seen === undefined) {
-        hostByRepo[key] = ws.platform_host;
-      } else if (seen !== ws.platform_host && !ambiguous.includes(key)) {
-        ambiguous.push(key);
-      }
-    }
-    return ambiguous;
-  });
-
-  function flatRepoLabel(ws: Workspace): string {
-    const key = `${ws.repo_owner}/${ws.repo_name}`;
-    return ambiguousFlatRepos.includes(key)
-      ? `${ws.platform_host}/${key}`
-      : key;
-  }
+  const repoLabelFormatter = $derived.by(() =>
+    createRepoLabelFormatter(
+      workspaces.map(workspaceRepoIdentity),
+      { showOrgNames: displayOptions.showOrgNames },
+    ),
+  );
 
   const showProviderIcons = $derived.by(() => {
     const providers: string[] = [];
@@ -395,14 +435,18 @@
     return ref.replace(/^refs\/heads\//, "");
   }
 
-  function shortRepo(repoKey: string): string {
-    // platform/owner/name → owner/name (the platform host crowds
-    // the rail and is rarely useful at a glance).
-    const parts = repoKey.split("/");
-    if (parts.length >= 3) {
-      return parts.slice(-2).join("/");
-    }
-    return repoKey;
+  function workspaceRepoIdentity(ws: Workspace): RepoLabelIdentity {
+    return {
+      provider: ws.repo?.provider ?? "",
+      platformHost: ws.platform_host,
+      owner: ws.repo_owner,
+      name: ws.repo_name,
+      repoPath: ws.repo?.repo_path,
+    };
+  }
+
+  function repoLabel(ws: Workspace): string {
+    return repoLabelFormatter.format(workspaceRepoIdentity(ws));
   }
 
   function workspaceProvider(ws: Workspace): string | undefined {
@@ -475,12 +519,14 @@
     <span class="sidebar-header-count">{sidebarCountLabel}</span>
     <div class="workspace-sort">
       <FilterDropdown
-        label={sortLabel}
-        showBadge={false}
-        sections={sortSections}
-        title="Sort workspaces"
-        minWidth="170px"
-        icon="sort"
+        label="View"
+        detail={sortLabel}
+        active={viewBadgeCount > 0}
+        badgeCount={viewBadgeCount}
+        sections={viewSections}
+        title="View workspace options"
+        minWidth="220px"
+        align="end"
       />
     </div>
     {#if isSidebarToggleEnabled && onCollapseSidebar}
@@ -567,7 +613,7 @@
             class="group-provider-icon"
           />
         {/if}
-        <span class="group-label">{shortRepo(repoKey)}</span>
+        <span class="group-label">{repoLabel(items[0]!)}</span>
         <span class="group-count">{items.length}</span>
       </button>
       {#if !collapsed}
@@ -585,9 +631,6 @@
     {#snippet workspaceRow(ws: Workspace, showRepo: boolean)}
           {@const adds = ws.mr_additions}
           {@const dels = ws.mr_deletions}
-          {@const showDiff =
-            ws.item_type === "pull_request" &&
-            ((adds ?? 0) > 0 || (dels ?? 0) > 0)}
           {@const ahead = ws.commits_ahead ?? 0}
           {@const behind = ws.commits_behind ?? 0}
           {@const showPush = ahead > 0 || behind > 0}
@@ -656,7 +699,7 @@
                         class="repo-context-icon"
                       />
                     {/if}
-                    <span class="repo-context-name">{flatRepoLabel(ws)}</span>
+                    <span class="repo-context-name">{repoLabel(ws)}</span>
                   </span>
                 {/if}
                 <span class="branch-chip" title={ws.git_head_ref}>
@@ -695,7 +738,9 @@
                     {/if}
                   </span>
                 {/if}
-                {#if showDiff}
+                {#if displayOptions.showDiffStats &&
+                  ws.item_type === "pull_request" &&
+                  ((adds ?? 0) > 0 || (dels ?? 0) > 0)}
                   <span class="workspace-diff-stats">
                     <DiffStats
                       additions={adds ?? 0}

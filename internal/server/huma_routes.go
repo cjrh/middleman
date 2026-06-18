@@ -32,7 +32,7 @@ import (
 )
 
 type listPullsInput struct {
-	Repo    string `query:"repo"`
+	Repo    string `query:"repo" doc:"Repository filter. Accepts owner/name, platform_host/repo_path, comma-separated values, or provider|platform_host/repo_path for provider-qualified matches."`
 	State   string `query:"state"`
 	Kanban  string `query:"kanban"`
 	Starred bool   `query:"starred"`
@@ -173,7 +173,7 @@ type resolveDiffReviewThreadInput struct {
 }
 
 type listIssuesInput struct {
-	Repo     string `query:"repo"`
+	Repo     string `query:"repo" doc:"Repository filter. Accepts owner/name, platform_host/repo_path, comma-separated values, or provider|platform_host/repo_path for provider-qualified matches."`
 	State    string `query:"state"`
 	Starred  bool   `query:"starred"`
 	Q        string `query:"q"`
@@ -582,7 +582,7 @@ type workspaceDiffRequest struct {
 }
 
 type listActivityInput struct {
-	Repo   string   `query:"repo"`
+	Repo   string   `query:"repo" doc:"Repository filter. Accepts owner/name, platform_host/repo_path, comma-separated values, or provider|platform_host/repo_path for provider-qualified matches."`
 	Types  []string `query:"types"`
 	Search string   `query:"search"`
 	After  string   `query:"after"`
@@ -590,7 +590,7 @@ type listActivityInput struct {
 }
 
 type triggerSyncInput struct {
-	PriorityRepos []string `query:"priority_repo" doc:"Optional repository filters to sync first. Accepts repeated values or comma-separated values. Each value may be host-qualified as platform_host/owner/name or bare as owner/name; bare values match the first tracked repo with that repo path."`
+	PriorityRepos []string `query:"priority_repo" doc:"Optional repository filters to sync first. Accepts repeated values or comma-separated values. Each value may be provider-qualified as provider|platform_host/owner/name, host-qualified as platform_host/owner/name, or bare as owner/name; bare values match the first tracked repo with that repo path."`
 }
 
 type listActivityOutput = bodyOutput[activityResponse]
@@ -1230,7 +1230,7 @@ func (s *Server) listPulls(ctx context.Context, input *listPullsInput) (*listPul
 		RepoFilters: parseRepoFilters(input.Repo),
 	}
 	if len(opts.RepoFilters) == 0 {
-		if platformHost, owner, name, repoPath := parseRepoFilter(input.Repo); repoPath != "" {
+		if _, platformHost, owner, name, repoPath := parseRepoFilter(input.Repo); repoPath != "" {
 			opts.PlatformHost = platformHost
 			opts.RepoPath = repoPath
 		} else if owner != "" {
@@ -2186,7 +2186,7 @@ func (s *Server) listIssues(ctx context.Context, input *listIssuesInput) (*listI
 		RepoFilters: parseRepoFilters(input.Repo),
 	}
 	if len(opts.RepoFilters) == 0 {
-		if platformHost, owner, name, repoPath := parseRepoFilter(input.Repo); repoPath != "" {
+		if _, platformHost, owner, name, repoPath := parseRepoFilter(input.Repo); repoPath != "" {
 			opts.PlatformHost = platformHost
 			opts.RepoPath = repoPath
 		} else if owner != "" {
@@ -3459,6 +3459,26 @@ func matchPriorityRepo(
 	filter string,
 	tracked []ghclient.RepoRef,
 ) (ghclient.RepoRef, bool) {
+	if provider, value, ok := strings.Cut(filter, "|"); ok {
+		provider = strings.TrimSpace(provider)
+		value = strings.Trim(value, "/ ")
+		parts := strings.Split(value, "/")
+		if provider == "" || len(parts) < 3 {
+			return ghclient.RepoRef{}, false
+		}
+
+		host := parts[0]
+		path := strings.Join(parts[1:], "/")
+		for _, repo := range tracked {
+			if strings.EqualFold(string(repoPlatformForPriority(repo)), provider) &&
+				strings.EqualFold(repoHostForPriority(repo), host) &&
+				strings.EqualFold(repoPathForPriority(repo), path) {
+				return repo, true
+			}
+		}
+		return ghclient.RepoRef{}, false
+	}
+
 	for _, repo := range tracked {
 		if strings.EqualFold(repoPathForPriority(repo), filter) {
 			return repo, true
@@ -4006,7 +4026,7 @@ func (s *Server) resolveItem(
 	if providerKind != platform.KindGitLab {
 		itemTypeHint = ""
 	}
-	if !s.syncer.IsTrackedRepoOnHost(repo.Owner, repo.Name, repoProviderHost(*repo)) {
+	if !s.isConfiguredRepoTracked(*repo) {
 		return &resolveItemOutput{
 			Body: resolveItemResponse{
 				Number:      number,

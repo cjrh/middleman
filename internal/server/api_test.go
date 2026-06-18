@@ -3430,6 +3430,58 @@ func TestAPIListRepos(t *testing.T) {
 	require.Equal("widget", (*resp.JSON200)[0].Name)
 }
 
+func TestAPIConfiguredRepoFiltersUseProviderIdentity(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	ctx := t.Context()
+	srv, database, _ := setupTestServerWithConfig(t)
+	client := setupTestClientWithBaseURL(t, srv, "http://127.0.0.1:8091")
+
+	_, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	})
+	require.NoError(err)
+	_, err = database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitea",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	})
+	require.NoError(err)
+	srv.syncer.SetRepos([]ghclient.RepoRef{{
+		Platform:     platform.KindGitHub,
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	}})
+
+	reposResp, err := client.HTTP.ListReposWithResponse(ctx)
+	require.NoError(err)
+	require.Equal(http.StatusOK, reposResp.StatusCode())
+	require.NotNil(reposResp.JSON200)
+	require.Len(*reposResp.JSON200, 1)
+	assert.Equal("github", (*reposResp.JSON200)[0].Platform)
+	assert.Equal("github.com", (*reposResp.JSON200)[0].PlatformHost)
+	assert.Equal("acme", (*reposResp.JSON200)[0].Owner)
+	assert.Equal("widget", (*reposResp.JSON200)[0].Name)
+
+	summariesResp, err := client.HTTP.ListRepoSummariesWithResponse(ctx)
+	require.NoError(err)
+	require.Equal(http.StatusOK, summariesResp.StatusCode())
+	require.NotNil(summariesResp.JSON200)
+	require.Len(*summariesResp.JSON200, 1)
+	assert.Equal("github", (*summariesResp.JSON200)[0].Repo.Provider)
+	assert.Equal("github.com", (*summariesResp.JSON200)[0].PlatformHost)
+	assert.Equal("acme", (*summariesResp.JSON200)[0].Owner)
+	assert.Equal("widget", (*summariesResp.JSON200)[0].Name)
+}
+
 func TestAPIGitLabConfiguredRepoSyncThroughProviderRegistry(t *testing.T) {
 	assert := Assert.New(t)
 	require := require.New(t)
@@ -6290,7 +6342,7 @@ func TestMatchPriorityRepoSupportsNestedBareRepoPaths(t *testing.T) {
 		},
 		{
 			Platform:     platform.KindGitea,
-			PlatformHost: "gitea",
+			PlatformHost: "github.com",
 			Owner:        "acme",
 			Name:         "widget",
 			RepoPath:     "acme/widget",
@@ -6307,10 +6359,16 @@ func TestMatchPriorityRepoSupportsNestedBareRepoPaths(t *testing.T) {
 	assert.Equal(platform.KindGitHub, repo.Platform)
 	assert.Equal("acme/widget", repo.RepoPath)
 
-	repo, ok = matchPriorityRepo("gitea/acme/widget", tracked)
+	repo, ok = matchPriorityRepo("gitea|github.com/acme/widget", tracked)
 	assert.True(ok)
 	assert.Equal(platform.KindGitea, repo.Platform)
-	assert.Equal("gitea", repo.PlatformHost)
+	assert.Equal("github.com", repo.PlatformHost)
+	assert.Equal("acme/widget", repo.RepoPath)
+
+	repo, ok = matchPriorityRepo("github|github.com/acme/widget", tracked)
+	assert.True(ok)
+	assert.Equal(platform.KindGitHub, repo.Platform)
+	assert.Equal("github.com", repo.PlatformHost)
 	assert.Equal("acme/widget", repo.RepoPath)
 }
 
@@ -6533,6 +6591,17 @@ func seedIssueOnHost(
 
 	repoID, err := database.UpsertRepo(ctx, db.GitHubRepoIdentity(host, owner, name))
 	require.NoError(t, err)
+
+	return seedIssueForRepo(t, database, repoID, host, owner, name, number, state, title)
+}
+
+func seedIssueForRepo(
+	t *testing.T, database *db.DB,
+	repoID int64, host, owner, name string, number int,
+	state, title string,
+) int64 {
+	t.Helper()
+	ctx := t.Context()
 
 	now := time.Now().UTC().Truncate(time.Second)
 	issue := &db.Issue{
@@ -7627,6 +7696,43 @@ func TestAPIListPullsFiltersHostedNestedRepoPath(t *testing.T) {
 	assert.Equal("project.special", (*resp.JSON200)[0].RepoName)
 }
 
+func TestAPIListPullsAcceptsProviderQualifiedRepoFilter(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	client := setupTestClient(t, srv)
+	ctx := t.Context()
+
+	githubRepo, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	giteaRepo, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitea",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	seedPRForRepo(t, database, githubRepo, "github.com", "acme", "widget", 1)
+	seedPRForRepo(t, database, giteaRepo, "github.com", "acme", "widget", 2)
+
+	repo := "gitea|github.com/acme/widget"
+	resp, err := client.HTTP.ListPullsWithResponse(ctx, &generated.ListPullsParams{Repo: &repo})
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.Len(*resp.JSON200, 1)
+	assert.Equal("gitea", (*resp.JSON200)[0].Repo.Provider)
+	assert.Equal("github.com", (*resp.JSON200)[0].PlatformHost)
+	assert.Equal("acme", (*resp.JSON200)[0].RepoOwner)
+	assert.Equal("widget", (*resp.JSON200)[0].RepoName)
+	assert.EqualValues(2, (*resp.JSON200)[0].Number)
+}
+
 func TestAPIListIssuesIncludesLabels(t *testing.T) {
 	require := require.New(t)
 	srv, database := setupTestServer(t)
@@ -7739,6 +7845,43 @@ func TestAPIListIssuesFiltersHostedNestedRepoPath(t *testing.T) {
 	assert.Equal("group/subgroup", (*resp.JSON200)[0].RepoOwner)
 	assert.Equal("project.special", (*resp.JSON200)[0].RepoName)
 	assert.EqualValues(1, (*resp.JSON200)[0].Number)
+}
+
+func TestAPIListIssuesAcceptsProviderQualifiedRepoFilter(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	client := setupTestClient(t, srv)
+	ctx := t.Context()
+
+	githubRepo, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	giteaRepo, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitea",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	seedIssueForRepo(t, database, githubRepo, "github.com", "acme", "widget", 1, "open", "GitHub issue")
+	seedIssueForRepo(t, database, giteaRepo, "github.com", "acme", "widget", 2, "open", "Gitea issue")
+
+	repo := "gitea|github.com/acme/widget"
+	resp, err := client.HTTP.ListIssuesWithResponse(ctx, &generated.ListIssuesParams{Repo: &repo})
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.Len(*resp.JSON200, 1)
+	assert.Equal("gitea", (*resp.JSON200)[0].Repo.Provider)
+	assert.Equal("github.com", (*resp.JSON200)[0].PlatformHost)
+	assert.Equal("acme", (*resp.JSON200)[0].RepoOwner)
+	assert.Equal("widget", (*resp.JSON200)[0].RepoName)
+	assert.EqualValues(2, (*resp.JSON200)[0].Number)
 }
 
 func TestAPIGetIssueUsesPlatformHostQuery(t *testing.T) {
@@ -18168,6 +18311,83 @@ func TestAPIListActivityAcceptsHostQualifiedRepoFilter(t *testing.T) {
 	}
 }
 
+func TestAPIListActivityAcceptsProviderQualifiedRepoFilter(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	client := setupTestClient(t, srv)
+	ctx := t.Context()
+
+	githubRepo, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	giteaRepo, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitea",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	seedPRForRepo(t, database, githubRepo, "github.com", "acme", "widget", 1)
+	seedPRForRepo(t, database, giteaRepo, "github.com", "acme", "widget", 2)
+
+	since := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+	repo := "gitea|github.com/acme/widget"
+	resp, err := client.HTTP.ListActivityWithResponse(
+		ctx, &generated.ListActivityParams{Since: &since, Repo: &repo},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.NotNil(resp.JSON200.Items)
+	require.NotEmpty(*resp.JSON200.Items)
+	for _, item := range *resp.JSON200.Items {
+		assert.Equal("gitea", item.Repo.Provider)
+		assert.Equal("github.com", item.PlatformHost)
+		assert.Equal("acme", item.RepoOwner)
+		assert.Equal("widget", item.RepoName)
+	}
+}
+
+func TestAPIListActivityKeepsProviderNamedHostsHostQualified(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	client := setupTestClient(t, srv)
+	ctx := t.Context()
+
+	repoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "gitea",
+		Owner:        "acme/team",
+		Name:         "widget",
+	})
+	require.NoError(err)
+	seedPRForRepo(t, database, repoID, "gitea", "acme/team", "widget", 1)
+	seedPROnHost(t, database, "github.com", "acme", "widget", 2)
+
+	since := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+	repo := "gitea/acme/team/widget"
+	resp, err := client.HTTP.ListActivityWithResponse(
+		ctx, &generated.ListActivityParams{Since: &since, Repo: &repo},
+	)
+	require.NoError(err)
+	require.Equal(http.StatusOK, resp.StatusCode())
+	require.NotNil(resp.JSON200)
+	require.NotNil(resp.JSON200.Items)
+	require.NotEmpty(*resp.JSON200.Items)
+	for _, item := range *resp.JSON200.Items {
+		assert.Equal("github", item.Repo.Provider)
+		assert.Equal("gitea", item.PlatformHost)
+		assert.Equal("acme/team", item.RepoOwner)
+		assert.Equal("widget", item.RepoName)
+	}
+}
+
 func TestAPIListActivityFiltersConfiguredReposByHost(t *testing.T) {
 	assert := Assert.New(t)
 	require := require.New(t)
@@ -25855,6 +26075,16 @@ func seedPROnHost(
 	repoID, err := database.UpsertRepo(ctx, db.GitHubRepoIdentity(host, owner, name))
 	require.NoError(t, err)
 
+	return seedPRForRepo(t, database, repoID, host, owner, name, number, opts...)
+}
+
+func seedPRForRepo(
+	t *testing.T, database *db.DB,
+	repoID int64, host, owner, name string, number int,
+	opts ...seedPROpt,
+) int64 {
+	t.Helper()
+	ctx := t.Context()
 	now := time.Now().UTC().Truncate(time.Second)
 	pr := &db.MergeRequest{
 		RepoID:         repoID,

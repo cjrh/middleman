@@ -2827,6 +2827,7 @@ type WorktreeSummary struct {
 
 // ListActivityParams defines parameters for ListActivity.
 type ListActivityParams struct {
+	// Repo Repository filter. Accepts owner/name, platform_host/repo_path, comma-separated values, or provider|platform_host/repo_path for provider-qualified matches.
 	Repo   *string   `form:"repo,omitempty" json:"repo,omitempty"`
 	Types  *[]string `form:"types,omitempty" json:"types,omitempty"`
 	Search *string   `form:"search,omitempty" json:"search,omitempty"`
@@ -3064,6 +3065,7 @@ type ResolveRepoItemOnHostParamsItemType string
 
 // ListIssuesParams defines parameters for ListIssues.
 type ListIssuesParams struct {
+	// Repo Repository filter. Accepts owner/name, platform_host/repo_path, comma-separated values, or provider|platform_host/repo_path for provider-qualified matches.
 	Repo     *string `form:"repo,omitempty" json:"repo,omitempty"`
 	State    *string `form:"state,omitempty" json:"state,omitempty"`
 	Starred  *bool   `form:"starred,omitempty" json:"starred,omitempty"`
@@ -3123,6 +3125,7 @@ type ListUserRepositoriesParams struct {
 
 // ListPullsParams defines parameters for ListPulls.
 type ListPullsParams struct {
+	// Repo Repository filter. Accepts owner/name, platform_host/repo_path, comma-separated values, or provider|platform_host/repo_path for provider-qualified matches.
 	Repo    *string `form:"repo,omitempty" json:"repo,omitempty"`
 	State   *string `form:"state,omitempty" json:"state,omitempty"`
 	Kanban  *string `form:"kanban,omitempty" json:"kanban,omitempty"`
@@ -3201,7 +3204,7 @@ type ListStacksParams struct {
 
 // TriggerSyncParams defines parameters for TriggerSync.
 type TriggerSyncParams struct {
-	// PriorityRepo Optional repository filters to sync first. Accepts repeated values or comma-separated values. Each value may be host-qualified as platform_host/owner/name or bare as owner/name; bare values match the first tracked repo with that repo path.
+	// PriorityRepo Optional repository filters to sync first. Accepts repeated values or comma-separated values. Each value may be provider-qualified as provider|platform_host/owner/name, host-qualified as platform_host/owner/name, or bare as owner/name; bare values match the first tracked repo with that repo path.
 	PriorityRepo *[]string `form:"priority_repo,omitempty" json:"priority_repo,omitempty"`
 }
 
