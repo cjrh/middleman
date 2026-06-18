@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -210,6 +213,44 @@ func TestSSHFleetProxyRelaysWrites(t *testing.T) {
 	}
 	assert.Contains(string(relayedBody), "create_on_disk",
 		"request body must ride the relay verbatim")
+}
+
+func TestSSHFleetProxyRelaysWorkspaceDiffReads(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+
+	fake := &fakeSSHExec{routes: map[string]string{
+		"GET /api/v1/workspaces/ws_1/diff?base=merge-target&whitespace=hide": framedJSON(
+			http.StatusOK,
+			`{"stale":false,"files":[{"path":"remote.go","status":"modified"}]}`,
+		),
+	}}
+	srv, _ := setupTestServer(t)
+	srv.sshFleet = newSSHTestTransport(t, fake, config.FleetSSHPeer{
+		Key: "epyc", Destination: "wes@epyc.local",
+	})
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp := httpDo(t, ts, http.MethodGet,
+		"/api/v1/fleet/hosts/epyc/workspaces/ws_1/diff?base=merge-target&whitespace=hide", nil)
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		require.Failf("unexpected relay status",
+			"relay status %d: %s (calls: %v)", resp.StatusCode, raw, fake.calls)
+	}
+	var diff struct {
+		Files []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+	}
+	require.NoError(json.NewDecoder(resp.Body).Decode(&diff))
+	resp.Body.Close()
+
+	require.Len(diff.Files, 1)
+	assert.Equal("remote.go", diff.Files[0].Path)
+	assert.Contains(fake.calls,
+		"GET /api/v1/workspaces/ws_1/diff?base=merge-target&whitespace=hide")
 }
 
 // TestSSHFleetAttachSpecWrapped pins the attach contract: a peer's
@@ -440,16 +481,25 @@ func TestSSHFleetRelayAutoStartsRemoteDaemon(t *testing.T) {
 	mu.Unlock()
 }
 
-// TestSSHFleetWebSocketProxyRejectsExplicitly pins, over the REAL
-// registered route on a workspace-enabled server, that a terminal
-// WebSocket request for an ssh peer answers with a stable problem
-// pointing at the attach-spec path, instead of falling through the
-// HTTP peer proxy with a zero base URL.
-func TestSSHFleetWebSocketProxyRejectsExplicitly(t *testing.T) {
+func TestSSHFleetWebSocketTerminalUsesAttachSpecCommand(t *testing.T) {
 	require := require.New(t)
 
 	fixture := setupWorkspaceServerFixture(t, nil)
-	fake := &fakeSSHExec{routes: map[string]string{}}
+	writeFakeSSHForAttach(t)
+	remoteSpec := runtimeAttachSpecResponse{
+		Version:           1,
+		Kind:              "tmux",
+		SessionKey:        "sess-1",
+		TargetKey:         "shell",
+		TmuxSession:       "mm-sess-1",
+		Command:           serverRuntimeHelperCommand("echo"),
+		RequiresLocalHost: true,
+	}
+	remoteSpecBody, err := json.Marshal(remoteSpec)
+	require.NoError(err)
+	fake := &fakeSSHExec{routes: map[string]string{
+		"GET /api/v1/workspaces/ws_1/runtime/sessions/sess-1/attach-spec": framedJSON(200, string(remoteSpecBody)),
+	}}
 	fixture.server.sshFleet = newSSHTestTransport(
 		t, fake, config.FleetSSHPeer{
 			Key: "epyc", Destination: "wes@epyc.local",
@@ -458,21 +508,184 @@ func TestSSHFleetWebSocketProxyRejectsExplicitly(t *testing.T) {
 
 	ts := httptest.NewServer(fixture.server)
 	t.Cleanup(ts.Close)
-	resp := httpDo(t, ts, http.MethodGet,
-		"/ws/v1/fleet/hosts/epyc/workspaces/ws_1/terminal", nil)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(err)
-	require.Equal(http.StatusNotImplemented, resp.StatusCode, string(body))
 
-	var problem struct {
-		Code    string `json:"code"`
-		Details struct {
-			HostKey string `json:"hostKey"`
-		} `json:"details"`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") +
+		"/ws/v1/fleet/hosts/epyc/workspaces/ws_1/runtime/sessions/sess-1/terminal?cols=80&rows=24"
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	require.NoError(err)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	require.NoError(conn.Write(ctx, websocket.MessageBinary, []byte("ping\n")))
+	readWebSocketBinaryUntil(t, ctx, conn, 2*time.Second, "echo:ping")
+	require.Contains(fake.calls,
+		"GET /api/v1/workspaces/ws_1/runtime/sessions/sess-1/attach-spec")
+}
+
+func TestSSHFleetWebSocketTerminalHonorsResizeActive(t *testing.T) {
+	require := require.New(t)
+
+	fixture := setupWorkspaceServerFixture(t, nil)
+	writeFakeSSHForAttach(t)
+	remoteSpec := runtimeAttachSpecResponse{
+		Version:     1,
+		Kind:        "tmux",
+		SessionKey:  "sess-1",
+		TargetKey:   "shell",
+		TmuxSession: "mm-sess-1",
+		Command: []string{
+			"sh",
+			"-lc",
+			`while IFS= read -r line; do set -- $(stty size); printf 'size:%s:%s:%s\n' "$1" "$2" "$line"; done`,
+		},
 	}
-	require.NoError(json.Unmarshal(body, &problem), string(body))
-	require.Equal("unsupportedCapability", problem.Code)
-	require.Equal("epyc", problem.Details.HostKey)
-	require.Contains(string(body), "attach-spec")
+	remoteSpecBody, err := json.Marshal(remoteSpec)
+	require.NoError(err)
+	fake := &fakeSSHExec{routes: map[string]string{
+		"GET /api/v1/workspaces/ws_1/runtime/sessions/sess-1/attach-spec": framedJSON(200, string(remoteSpecBody)),
+	}}
+	fixture.server.sshFleet = newSSHTestTransport(
+		t, fake, config.FleetSSHPeer{
+			Key: "epyc", Destination: "wes@epyc.local",
+		},
+	)
+
+	ts := httptest.NewServer(fixture.server)
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") +
+		"/ws/v1/fleet/hosts/epyc/workspaces/ws_1/runtime/sessions/sess-1/terminal?cols=80&rows=24&resize_active=0"
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	require.NoError(err)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	require.NoError(conn.Write(ctx, websocket.MessageBinary, []byte("before\n")))
+	readWebSocketBinaryUntil(t, ctx, conn, 2*time.Second, "size:30:120:before")
+
+	require.NoError(conn.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":81,"rows":25}`)))
+	require.NoError(conn.Write(ctx, websocket.MessageBinary, []byte("inactive\n")))
+	readWebSocketBinaryUntil(t, ctx, conn, 2*time.Second, "size:30:120:inactive")
+
+	require.NoError(conn.Write(ctx, websocket.MessageText, []byte(`{"type":"resize_active","active":true}`)))
+	require.NoError(conn.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":82,"rows":26}`)))
+	require.NoError(conn.Write(ctx, websocket.MessageBinary, []byte("active\n")))
+	readWebSocketBinaryUntil(t, ctx, conn, 2*time.Second, "size:26:82:active")
+}
+
+func TestSSHFleetAttachPTYWritesExitFrameWhenPTYEOFPrecedesWait(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+
+	ptyReader, ptyWriter, err := os.Pipe()
+	require.NoError(err)
+	done := make(chan int, 1)
+	attach := &fleetSSHPTYAttachment{
+		ptmx:   ptyReader,
+		done:   done,
+		active: true,
+	}
+
+	bridgeDone := make(chan struct{})
+	acceptErrors := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				InsecureSkipVerify: true,
+			})
+			if err != nil {
+				acceptErrors <- err
+				return
+			}
+			bridgeFleetSSHAttachPTY(r.Context(), conn, attach)
+			conn.Close(websocket.StatusNormalClosure, "test done")
+			close(bridgeDone)
+		},
+	))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	require.NoError(err)
+	defer conn.Close(websocket.StatusNormalClosure, "done")
+
+	_, err = ptyWriter.Write([]byte("ssh-output"))
+	require.NoError(err)
+	require.NoError(ptyWriter.Close())
+	time.AfterFunc(25*time.Millisecond, func() {
+		done <- 7
+		close(done)
+	})
+
+	var sawOutput bool
+	for {
+		typ, data, readErr := conn.Read(ctx)
+		require.NoError(readErr)
+		if typ == websocket.MessageBinary {
+			sawOutput = sawOutput || strings.Contains(string(data), "ssh-output")
+			continue
+		}
+		if typ != websocket.MessageText {
+			continue
+		}
+		var msg struct {
+			Type string `json:"type"`
+			Code int    `json:"code"`
+		}
+		require.NoError(json.Unmarshal(data, &msg))
+		assert.True(sawOutput)
+		assert.Equal("exited", msg.Type)
+		assert.Equal(7, msg.Code)
+		break
+	}
+
+	select {
+	case <-bridgeDone:
+	case err := <-acceptErrors:
+		require.NoError(err)
+	case <-ctx.Done():
+		require.NoError(ctx.Err())
+	}
+}
+
+func writeFakeSSHForAttach(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ssh")
+	script := `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      shift 2
+      ;;
+    -t)
+      shift
+      if [ "$#" -gt 0 ]; then
+        shift
+      fi
+      break
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+exec "$@"
+`
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestServerRuntimeHelperProcessForFleetSSH(t *testing.T) {
+	args := os.Args
+	if sep := slices.Index(args, "--"); sep >= 0 {
+		args = args[sep+1:]
+	}
+	if len(args) > 0 && args[0] == serverRuntimeHelperMarker {
+		TestServerRuntimeHelperProcess(t)
+	}
 }
