@@ -686,4 +686,86 @@ describe("PullDetail approvals", () => {
     expect(button.disabled).toBe(true);
     expect(button.title).toBe("No user credential for writes on github.com");
   });
+
+  it("opens the merge modal in deferred mode when CI is still pending", async () => {
+    const detail = pullDetail();
+    detail.repo.capabilities.merge_mutation = true;
+    detail.merge_request.CIStatus = "pending";
+    detail.merge_request.CIChecksJSON = JSON.stringify([
+      {
+        name: "build",
+        status: "in_progress",
+        conclusion: "",
+        url: "https://example.com/build",
+        app: "GitHub Actions",
+      },
+    ]);
+
+    renderPullDetail(detail, {
+      AllowSquashMerge: true,
+      AllowMergeCommit: false,
+      AllowRebaseMerge: false,
+      ViewerCanMerge: true,
+    });
+
+    await fireEvent.click(await screen.findByRole("button", { name: "Squash and merge" }));
+
+    expect(screen.getByRole("heading", { name: "Merge Pull Request" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Merge after CI is complete" })).toBeTruthy();
+  });
+
+  it("opens the merge modal in deferred mode when aggregate CI is pending without check rows", async () => {
+    const detail = pullDetail();
+    detail.repo.capabilities.merge_mutation = true;
+    detail.merge_request.CIStatus = "pending";
+    detail.merge_request.CIChecksJSON = "";
+
+    renderPullDetail(detail, {
+      AllowSquashMerge: true,
+      AllowMergeCommit: false,
+      AllowRebaseMerge: false,
+      ViewerCanMerge: true,
+    });
+
+    await fireEvent.click(await screen.findByRole("button", { name: "Squash and merge" }));
+
+    expect(screen.getByRole("heading", { name: "Merge Pull Request" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Merge after CI is complete" })).toBeTruthy();
+  });
+
+  it("opens the merge modal in normal mode when aggregate CI has already failed", async () => {
+    const detail = pullDetail();
+    detail.repo.capabilities.merge_mutation = true;
+    detail.merge_request.CIStatus = "failure";
+    detail.merge_request.CIChecksJSON = JSON.stringify([
+      {
+        name: "build",
+        status: "completed",
+        conclusion: "failure",
+        url: "https://example.com/build",
+        app: "GitHub Actions",
+      },
+      {
+        name: "integration",
+        status: "in_progress",
+        conclusion: "",
+        url: "https://example.com/integration",
+        app: "GitHub Actions",
+      },
+    ]);
+
+    renderPullDetail(detail, {
+      AllowSquashMerge: true,
+      AllowMergeCommit: false,
+      AllowRebaseMerge: false,
+      ViewerCanMerge: true,
+    });
+
+    await fireEvent.click(await screen.findByRole("button", { name: "Squash and merge" }));
+
+    expect(screen.getByRole("heading", { name: "Merge Pull Request" })).toBeTruthy();
+    // A failed aggregate with a still-running check must not route to deferred
+    // merge, since the backend would reject that with a 409.
+    expect(screen.queryByRole("button", { name: "Merge after CI is complete" })).toBeNull();
+  });
 });

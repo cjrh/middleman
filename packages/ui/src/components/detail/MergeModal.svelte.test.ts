@@ -149,4 +149,37 @@ describe("MergeModal head pinning", () => {
     expect(onheadconflict).not.toHaveBeenCalled();
     expect(onclose).not.toHaveBeenCalled();
   });
+
+  it("enqueues a deferred merge and closes when CI is still pending", async () => {
+    const post = vi.fn().mockResolvedValue({ data: {}, error: undefined, response: new Response("{}") });
+    const onclose = vi.fn();
+    renderModal(post, {
+      deferUntilChecksPass: true,
+      onclose,
+    });
+
+    await fireEvent.click(screen.getByText("Merge after CI is complete", { selector: ".modal-footer button" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const [path, init] = post.mock.calls[0];
+    expect(path).toBe("/pulls/{provider}/{owner}/{name}/{number}/merge/deferred");
+    expect(init.body.method).toBe("squash");
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
+
+  it("enqueues a deferred merge when requested without granular pending checks", async () => {
+    const post = vi.fn().mockResolvedValue({ data: {}, error: undefined, response: new Response("{}") });
+    const onclose = vi.fn();
+    renderModal(post, {
+      deferUntilChecksPass: true,
+      onclose,
+    });
+
+    await fireEvent.click(screen.getByText("Merge after CI is complete", { selector: ".modal-footer button" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const [path] = post.mock.calls[0];
+    expect(path).toBe("/pulls/{provider}/{owner}/{name}/{number}/merge/deferred");
+    expect(onclose).toHaveBeenCalledTimes(1);
+  });
 });

@@ -202,6 +202,29 @@
     }
   }
 
+  function ciStatusIsPending(status: string): boolean {
+    return ["pending", "in_progress", "queued"].includes(status.toLowerCase());
+  }
+
+  function ciStatusHasFailed(status: string): boolean {
+    return [
+      "failure",
+      "failed",
+      "error",
+      "cancelled",
+      "canceled",
+      "timed_out",
+    ].includes(status.toLowerCase());
+  }
+
+  function shouldDeferMergeForCI(status: string, checksJSON: string): boolean {
+    // The backend rejects a deferred merge once aggregate CI has failed, so a
+    // failed pipeline with a check still running must use the normal merge path
+    // rather than route to the deferred endpoint that would 409.
+    if (ciStatusHasFailed(status)) return false;
+    return ciStatusIsPending(status) || ciChecksHavePending(checksJSON);
+  }
+
   function requiredStatusChecksHaveNotPassed(checksJSON: string): boolean {
     if (!checksJSON) return false;
     try {
@@ -2036,6 +2059,7 @@
           allowRebase={repoSettings.allowRebase}
           expectedHeadSha={detailHeadSha}
           requireHeadPin={capabilities.mutation_head_binding}
+          deferUntilChecksPass={shouldDeferMergeForCI(p.CIStatus, p.CIChecksJSON)}
           onheadconflict={handleHeadConflict}
           onclose={() => { showMergeModal = false; }}
           onmerged={() => {
