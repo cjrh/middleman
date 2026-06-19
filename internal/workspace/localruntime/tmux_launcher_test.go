@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -64,6 +65,116 @@ func TestTmuxLauncherAgentOperationsKeepEnvValuesOutOfArgv(t *testing.T) {
 	assert.NotContains(newSessionText, "secret-value")
 	assert.NotContains(scriptText, "argv-visible-value")
 	assert.NotContains(scriptText, "secret-value")
+}
+
+func TestTmuxLauncherCanHideStatusOnNewSessions(t *testing.T) {
+	assert := Assert.New(t)
+
+	paneEnv := tmuxAgentEnvPolicy.paneEnvironment(
+		os.Environ(), []string{"/bin/sh", "-lc", "sleep 10"}, nil,
+	)
+	launcher := tmuxLauncher{
+		TmuxCommand: []string{"/usr/bin/tmux"},
+		Session:     "middleman-test",
+		CWD:         "/tmp/work tree",
+		Pane:        paneEnv,
+		OwnerMarker: "middleman:test-owner",
+		HideStatus:  true,
+	}
+
+	paneCommand, cleanup, err := launcher.newSessionPaneCommand()
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+	newSession := launcher.newSessionCommand(paneCommand)
+
+	hideStatus := launcher.hideStatusCommand()
+
+	assert.NotContains(newSession, "status")
+	assert.NotContains(newSession, "off")
+	assert.True(containsArgvSequence(hideStatus, []string{
+		"set-option", "-q", "-t", "middleman-test", "status", "off",
+	}))
+	assert.NotContains(launcher.attachSessionCommand(), "status")
+}
+
+func TestTmuxLauncherCleansUpWhenHideStatusFails(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	dir := t.TempDir()
+	record := filepath.Join(dir, "tmux-record")
+	created := filepath.Join(dir, "created")
+	tmuxPath := filepath.Join(dir, "tmux")
+	require.NoError(os.WriteFile(tmuxPath, []byte(`#!/bin/sh
+printf '%s\0' "$#" "$@" >> "$TMUX_RECORD"
+case "$1" in
+  has-session)
+    if [ -f "$TMUX_CREATED" ]; then exit 0; fi
+    echo "can't find session: $3" >&2
+    exit 1
+    ;;
+  new-session)
+    : > "$TMUX_CREATED"
+    previous=""
+    for arg in "$@"; do
+      if [ "$previous" = "status" ] && [ "$arg" = "off" ]; then
+        echo "status update failed" >&2
+        exit 1
+      fi
+      previous="$arg"
+    done
+    exit 0
+    ;;
+  show-options)
+    printf '%s\n' "$TMUX_EXISTING_OWNER"
+    exit 0
+    ;;
+  set-option)
+    if [ "$5" = "status" ] && [ "$6" = "off" ]; then
+      echo "status update failed" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+  kill-session)
+    rm -f "$TMUX_CREATED"
+    exit 0
+    ;;
+  attach-session)
+    exit 0
+    ;;
+esac
+exit 0
+`), 0o755))
+
+	launcher := tmuxLauncher{
+		TmuxCommand: []string{tmuxPath},
+		Session:     "middleman-test",
+		Pane: tmuxPaneEnvironment{
+			paneCommand: "exec /bin/sh",
+			keys:        []string{"PATH", "TERM"},
+			commandEnv: append(
+				os.Environ(),
+				"TMUX_RECORD="+record,
+				"TMUX_CREATED="+created,
+				"TMUX_EXISTING_OWNER=middleman:test-owner",
+			),
+		},
+		OwnerMarker: "middleman:test-owner",
+		HideStatus:  true,
+	}
+
+	_, err := launcher.prepare(context.Background())
+
+	require.Error(err)
+	assert.Contains(err.Error(), "hide tmux status")
+	records := readNullArgvRecord(t, record)
+	assert.Contains(records, []string{
+		"kill-session", "-t", "middleman-test",
+	})
+	assert.NotContains(records, []string{
+		"attach-session", "-t", "middleman-test",
+	})
+	assert.NoFileExists(created)
 }
 
 func TestTmuxLauncherShellPolicyPreservesCustomEnvByKey(t *testing.T) {
@@ -188,4 +299,16 @@ func requireTmuxPaneScript(t *testing.T, command string) string {
 	data, err := os.ReadFile(words[1])
 	require.NoError(t, err)
 	return string(data)
+}
+
+func containsArgvSequence(argv []string, sequence []string) bool {
+	if len(sequence) == 0 {
+		return true
+	}
+	for i := 0; i+len(sequence) <= len(argv); i++ {
+		if slices.Equal(argv[i:i+len(sequence)], sequence) {
+			return true
+		}
+	}
+	return false
 }

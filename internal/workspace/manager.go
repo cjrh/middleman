@@ -40,6 +40,8 @@ type Manager struct {
 	clones                 *gitclone.Manager
 	locks                  *FileLockManager
 	tmuxCmd                []string
+	hideTmuxStatusMu       sync.RWMutex
+	hideTmuxStatus         bool
 	ptyOwner               PtyOwnerClient
 	preferPtyOwner         bool
 	retryMu                sync.Mutex
@@ -204,6 +206,20 @@ func (m *Manager) worktreeLockRoot(ctx context.Context, gitDir string) (string, 
 // ["tmux"] — preserving today's behavior.
 func (m *Manager) SetTmuxCommand(cmd []string) {
 	m.tmuxCmd = slices.Clone(cmd)
+}
+
+// SetHideTmuxStatus controls whether newly-created tmux sessions hide
+// tmux's own status line.
+func (m *Manager) SetHideTmuxStatus(hide bool) {
+	m.hideTmuxStatusMu.Lock()
+	defer m.hideTmuxStatusMu.Unlock()
+	m.hideTmuxStatus = hide
+}
+
+func (m *Manager) currentHideTmuxStatus() bool {
+	m.hideTmuxStatusMu.RLock()
+	defer m.hideTmuxStatusMu.RUnlock()
+	return m.hideTmuxStatus
 }
 
 // tmuxExec builds an *exec.Cmd for a tmux invocation: the
@@ -2445,6 +2461,18 @@ func (m *Manager) newTmuxSession(
 		}
 		return fmt.Errorf("set tmux owner marker: %w", err)
 	}
+	if m.currentHideTmuxStatus() {
+		if err := m.setTmuxStatus(ctx, session, false); err != nil {
+			if killErr := m.killTmuxSession(ctx, session); killErr != nil &&
+				!isTmuxKillSessionGone(killErr) {
+				return fmt.Errorf(
+					"hide tmux status: %w; cleanup new tmux session: %v",
+					err, killErr,
+				)
+			}
+			return fmt.Errorf("hide tmux status: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -2458,6 +2486,21 @@ func (m *Manager) setTmuxOwnerMarker(
 			"set-option", "-t", session,
 			"@middleman_owner", m.tmuxOwnerMarker(),
 		),
+	)
+}
+
+func (m *Manager) setTmuxStatus(
+	ctx context.Context,
+	session string,
+	enabled bool,
+) error {
+	value := "off"
+	if enabled {
+		value = "on"
+	}
+	return runBuiltCmd(
+		ctx,
+		m.tmuxExec(ctx, "set-option", "-q", "-t", session, "status", value),
 	)
 }
 

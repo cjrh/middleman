@@ -121,6 +121,7 @@ type tmuxLauncher struct {
 	CWD         string
 	Pane        tmuxPaneEnvironment
 	OwnerMarker string
+	HideStatus  bool
 }
 
 type tmuxLaunchResult struct {
@@ -158,6 +159,17 @@ func (l tmuxLauncher) prepare(ctx context.Context) (tmuxLaunchResult, error) {
 			return tmuxLaunchResult{AttachCommand: l.attachSessionCommand()}, nil
 		}
 		return tmuxLaunchResult{}, fmt.Errorf("tmux new-session: %w", err)
+	}
+	if l.HideStatus {
+		if err := l.run(ctx, l.hideStatusCommand()); err != nil {
+			if killErr := l.run(ctx, l.killSessionCommand()); killErr != nil {
+				return tmuxLaunchResult{}, fmt.Errorf(
+					"hide tmux status: %w; cleanup new tmux session: %v",
+					err, killErr,
+				)
+			}
+			return tmuxLaunchResult{}, fmt.Errorf("hide tmux status: %w", err)
+		}
 	}
 	created = true
 	return tmuxLaunchResult{
@@ -389,6 +401,19 @@ func (l tmuxLauncher) newSessionCommand(paneCommand string) []string {
 		)
 	}
 	return command
+}
+
+func (l tmuxLauncher) hideStatusCommand() []string {
+	return append(
+		slices.Clone(l.TmuxCommand),
+		"set-option", "-q", "-t", l.Session, "status", "off",
+	)
+}
+
+func (l tmuxLauncher) killSessionCommand() []string {
+	return append(
+		slices.Clone(l.TmuxCommand), "kill-session", "-t", l.Session,
+	)
 }
 
 func (l tmuxLauncher) attachSessionCommand() []string {
