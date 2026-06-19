@@ -140,20 +140,56 @@ describe("budget display", () => {
     expect(bars.textContent).toContain("GQL");
   });
 
-  it("budget bars show middleman count when budget enabled", async () => {
+  it("budget bars keep eager refresh budget out of the compact status", async () => {
     const bars = await mountStatusBar();
-    expect(bars.textContent).toContain("42 req/hr");
+    expect(bars.textContent).not.toContain("Refresh");
+    expect(bars.textContent).not.toContain("42 / 500");
+    expect(bars.querySelector(".budget-count")).toBeNull();
   });
 
-  // The popover dialog exposes REST req, GraphQL pts, and the middleman
-  // budget spend from the same payload.
+  // The popover dialog exposes REST req, GraphQL pts, and the eager
+  // refresh budget spend from the same payload.
   it("clicking budget area opens popover with per-host breakdown", async () => {
     const bars = await mountStatusBar();
     const popover = await openPopover(bars);
     const units = Array.from(popover.querySelectorAll(".row-unit")).map((el) => el.textContent?.trim());
     expect(units).toContain("req");
     expect(units).toContain("pts");
+    expect(popover.textContent).toContain("Eager refresh");
+    expect(popover.textContent).toContain("42 / 500 budgeted req/hr");
+    expect(popover.textContent).toContain("Details, comments, and backfills pause when spent.");
+    expect(popover.textContent).not.toContain("Optional");
     expect(popover.querySelector(".budget-spent")?.textContent).toBe("42");
+
+    const eagerLabel = popover.querySelector<HTMLElement>(".budget-row--eager .row-label");
+    const eagerValue = popover.querySelector<HTMLElement>(".budget-row--eager .row-value");
+    expect(eagerLabel).not.toBeNull();
+    expect(eagerValue).not.toBeNull();
+    expect(Math.abs(eagerLabel!.getBoundingClientRect().top - eagerValue!.getBoundingClientRect().top)).toBeLessThan(2);
+  });
+
+  it("marks sync budget spend that exceeds the configured limit", async () => {
+    const bars = await mountStatusBar([
+      rateLimits({
+        "github.com": {
+          ...knownHost,
+          budget_limit: 500,
+          budget_spent: 1300,
+          budget_remaining: -800,
+        },
+      }),
+    ]);
+
+    expect(bars.textContent).not.toContain("Refresh");
+    expect(bars.textContent).not.toContain("1.3k / 500");
+    expect(bars.querySelector(".budget-count")).toBeNull();
+
+    const popover = await openPopover(bars);
+    const spent = popover.querySelector<HTMLElement>(".budget-spent");
+    expect(spent?.textContent).toBe("1.3k");
+    expect(spent?.classList.contains("budget-spent--over")).toBe(true);
+    expect(popover.textContent).toContain("Details, comments, and backfills are paused.");
+    expect(popover.textContent).not.toContain("eager refresh deferred");
   });
 
   it("popover dismisses on Escape", async () => {
@@ -275,7 +311,7 @@ describe("budget display", () => {
     expect(healthDot(popover, "github.com").style.background).toBe("var(--budget-red)");
   });
 
-  it("GQL known but REST unknown still shows budget count", async () => {
+  it("GQL known but REST unknown still hides eager refresh budget from compact status", async () => {
     const bars = await mountStatusBar([
       rateLimits({
         "github.com": {
@@ -295,8 +331,14 @@ describe("budget display", () => {
     expect(bars.textContent).toContain("GQL");
     expect(bars.textContent).not.toContain("REST");
     expect(bars.textContent).toContain("--");
-    // Budget count visible — budget is independent of REST rate observation
-    expect(bars.textContent).toContain("10 req/hr");
+    // Eager refresh budget remains available in the popover, not the compact status.
+    expect(bars.textContent).not.toContain("Refresh");
+    expect(bars.textContent).not.toContain("10 / 500");
+    expect(bars.querySelector(".budget-count")).toBeNull();
+
+    const popover = await openPopover(bars);
+    expect(popover.textContent).toContain("Eager refresh");
+    expect(popover.textContent).toContain("10 / 500 budgeted req/hr");
   });
 
   it("stale host excluded from compact bars, fresh host drives ratio", async () => {
