@@ -9,6 +9,11 @@ type DiffFixtureFile = Omit<DiffFile, "patch"> & {
 type DiffFixture = Omit<DiffResult, "files"> & {
   files: DiffFixtureFile[];
 };
+type MergeRequestDetailForRoute = {
+  diff_head_sha?: string;
+  events?: unknown[] | null;
+  merge_request?: { ID?: number };
+};
 
 const gitBackedDiffTestTimeoutMs = 120_000;
 
@@ -555,10 +560,254 @@ const previewDiff: DiffResult = withServerDiffData({
   ],
 });
 
+const listReviewPreviewDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [
+    {
+      path: "docs/list-review.md",
+      old_path: "docs/list-review.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 4,
+      deletions: 0,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 0,
+          new_start: 1,
+          new_count: 4,
+          lines: [
+            { type: "add", content: "- Issues", new_num: 1 },
+            { type: "add", content: "- Actions", new_num: 2 },
+            { type: "add", content: "- Statuses", new_num: 3 },
+            { type: "add", content: "- Members", new_num: 4 },
+          ],
+        },
+      ],
+    },
+    ...smallDiff.files,
+  ],
+});
+
+const untargetedListReviewPreviewDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [
+    {
+      path: "docs/untargeted-list-review.md",
+      old_path: "docs/untargeted-list-review.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 1,
+      deletions: 0,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 4,
+          new_start: 1,
+          new_count: 5,
+          lines: [
+            { type: "context", content: "- Issues", old_num: 1, new_num: 1 },
+            { type: "context", content: "- Actions", old_num: 2, new_num: 2 },
+            { type: "context", content: "- Statuses", old_num: 3, new_num: 3 },
+            { type: "context", content: "", old_num: 4, new_num: 4 },
+            { type: "add", content: "Paragraph with review note.", new_num: 5 },
+          ],
+        },
+      ],
+    },
+    ...smallDiff.files,
+  ],
+});
+
+const changedListReviewPreviewDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [
+    {
+      path: "docs/changed-list-review.md",
+      old_path: "docs/changed-list-review.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 1,
+      deletions: 0,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 2,
+          new_start: 1,
+          new_count: 3,
+          lines: [
+            { type: "context", content: "- Issues", old_num: 1, new_num: 1 },
+            { type: "add", content: "- Actions", new_num: 2 },
+            { type: "context", content: "- Statuses", old_num: 2, new_num: 3 },
+          ],
+        },
+      ],
+    },
+    ...smallDiff.files,
+  ],
+});
+
+const edgeListReviewPreviewDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [
+    {
+      path: "docs/edge-added-list-review.md",
+      old_path: "docs/edge-added-list-review.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 3,
+      deletions: 0,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 2,
+          new_start: 1,
+          new_count: 5,
+          lines: [
+            { type: "add", content: "- Prepended", new_num: 1 },
+            { type: "add", content: "prepended details", new_num: 2 },
+            { type: "context", content: "- Issues", old_num: 1, new_num: 3 },
+            { type: "context", content: "- Statuses", old_num: 2, new_num: 4 },
+            { type: "add", content: "- Appended", new_num: 5 },
+          ],
+        },
+      ],
+    },
+    {
+      path: "docs/edge-deleted-list-review.md",
+      old_path: "docs/edge-deleted-list-review.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 0,
+      deletions: 3,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 5,
+          new_start: 1,
+          new_count: 2,
+          lines: [
+            { type: "delete", content: "- Removed first", old_num: 1 },
+            { type: "delete", content: "removed first details", old_num: 2 },
+            { type: "context", content: "- Issues", old_num: 3, new_num: 1 },
+            { type: "context", content: "- Statuses", old_num: 4, new_num: 2 },
+            { type: "delete", content: "- Removed last", old_num: 5 },
+          ],
+        },
+      ],
+    },
+    ...smallDiff.files,
+  ],
+});
+
+const multiHunkMarkdownDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [
+    {
+      path: "docs/multihunk.md",
+      old_path: "docs/multihunk.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 1,
+      deletions: 0,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 2,
+          new_start: 1,
+          new_count: 2,
+          lines: [
+            { type: "context", content: "```text", old_num: 1, new_num: 1 },
+            { type: "context", content: "first hunk code", old_num: 2, new_num: 2 },
+          ],
+        },
+        {
+          old_start: 10,
+          old_count: 2,
+          new_start: 10,
+          new_count: 3,
+          lines: [
+            { type: "context", content: "second hunk code", old_num: 10, new_num: 10 },
+            { type: "add", content: "added hunk code", new_num: 11 },
+            { type: "context", content: "```", old_num: 11, new_num: 12 },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const blockFillMarkdownDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [
+    {
+      path: "docs/block-fill.md",
+      old_path: "docs/block-fill.md",
+      status: "modified",
+      is_binary: false,
+      is_whitespace_only: false,
+      additions: 1,
+      deletions: 1,
+      hunks: [
+        {
+          old_start: 1,
+          old_count: 6,
+          new_start: 1,
+          new_count: 6,
+          lines: [
+            { type: "context", content: "# Block fills", old_num: 1, new_num: 1 },
+            { type: "context", content: "", old_num: 2, new_num: 2 },
+            {
+              type: "delete",
+              content: "Removed standalone block that should have a filled background.",
+              old_num: 3,
+            },
+            { type: "context", content: "", old_num: 4, new_num: 3 },
+            { type: "context", content: "Shared stable block", old_num: 5, new_num: 4 },
+            { type: "context", content: "", old_num: 6, new_num: 5 },
+            {
+              type: "add",
+              content: "Added standalone block that should have a filled background.",
+              new_num: 6,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const splitRichPreviewDiff: DiffResult = withServerDiffData({
+  stale: false,
+  whitespace_only_count: 0,
+  files: [previewDiff.files[0]!, blockFillMarkdownDiff.files[0]!, ...smallDiff.files],
+});
+
 // --- Helpers ---
 
 function cssString(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function expectNonTransparentBackground(locator: Locator) {
+  await expect
+    .poll(async () => {
+      const background = await locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+      return background !== "rgba(0, 0, 0, 0)" && background !== "transparent";
+    })
+    .toBe(true);
 }
 
 function treeFileItems(pageOrLocator: Page | ReturnType<Page["locator"]>) {
@@ -1191,6 +1440,87 @@ async function mockFilePreviewApi(page: Page): Promise<void> {
       status: 404,
       contentType: "application/json",
       body: JSON.stringify({ detail: "preview unavailable" }),
+    });
+  });
+}
+
+async function mockReviewThreadOnPreviewMarkdown(
+  page: Page,
+  body: string,
+  line = 3,
+  path = "docs/preview.md",
+): Promise<void> {
+  await mockReviewThreadsOnPreviewMarkdown(page, [{ body, line, path }]);
+}
+
+interface PreviewMarkdownReviewThread {
+  body: string;
+  line?: number;
+  lineType?: "add" | "delete";
+  newLine?: number;
+  oldLine?: number;
+  path?: string;
+  side?: "left" | "right";
+}
+
+async function mockReviewThreadsOnPreviewMarkdown(page: Page, threads: PreviewMarkdownReviewThread[]): Promise<void> {
+  await page.route("**/api/v1/pulls/github/acme/widgets/1", async (route) => {
+    const response = await route.fetch();
+    const detail = (await response.json()) as MergeRequestDetailForRoute;
+    const timestamp = "2026-06-17T15:00:00Z";
+
+    await route.fulfill({
+      response,
+      json: {
+        ...detail,
+        events: [
+          ...(detail.events ?? []),
+          ...threads.map((thread, index) => {
+            const line = thread.line ?? 3;
+            const path = thread.path ?? "docs/preview.md";
+            const side = thread.side ?? "right";
+            const lineType = thread.lineType ?? (side === "left" ? "delete" : "add");
+            const newLine = thread.newLine ?? (side === "right" ? line : undefined);
+            const oldLine = thread.oldLine ?? (side === "left" ? line : undefined);
+            const externalID = `e2e-rich-preview-${path}-${side}-${line}-${index}`;
+            const threadID = `thread-rich-preview-${path}-${side}-${line}-${index}`;
+            return {
+              Author: "reviewer",
+              Body: thread.body,
+              CreatedAt: timestamp,
+              DedupeKey: `review_comment:${externalID}`,
+              DirectURL: "",
+              EventType: "review_comment",
+              ID: 900_001 + index,
+              MergeRequestID: detail.merge_request?.ID ?? 1,
+              MetadataJSON: "{}",
+              PlatformExternalID: externalID,
+              PlatformID: 900_001 + index,
+              Resolvable: false,
+              Resolved: false,
+              Summary: thread.body,
+              ThreadID: threadID,
+              diff_thread: {
+                author_login: "reviewer",
+                body: thread.body,
+                can_resolve: false,
+                created_at: timestamp,
+                diff_head_sha: detail.diff_head_sha,
+                id: threadID,
+                line,
+                line_type: lineType,
+                new_line: newLine,
+                old_line: oldLine,
+                path,
+                provider_comment_id: externalID,
+                resolved: false,
+                side,
+                updated_at: timestamp,
+              },
+            };
+          }),
+        ],
+      },
     });
   });
 }
@@ -1946,6 +2276,384 @@ test.describe("diff view", () => {
 
     await clickTreeFileItem(page, "assets/logo.png");
     await expect(page.locator(".diff-image-preview img[alt='assets/logo.png']")).toBeVisible();
+  });
+
+  test("rich preview side-by-side panes do not underline changed text", async ({ page }) => {
+    await page.setViewportSize({ width: 2200, height: 1000 });
+    await mockDiffApi(page, splitRichPreviewDiff);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+    await page.getByRole("switch", { name: "Side-by-side diffs" }).click();
+
+    const markdownPreview = page.locator('[data-file-path="docs/preview.md"] .markdown-rich-diff--split');
+    await expect(markdownPreview).toBeVisible();
+    const beforeChange = markdownPreview
+      .locator('[aria-label="Before markdown preview"] del')
+      .filter({ hasText: "Old" })
+      .first();
+    const afterChange = markdownPreview
+      .locator('[aria-label="After markdown preview"] ins')
+      .filter({ hasText: "New" })
+      .first();
+    await expect(beforeChange).toBeVisible();
+    await expect(afterChange).toBeVisible();
+    await expect
+      .poll(() => beforeChange.evaluate((element) => getComputedStyle(element).textDecorationLine))
+      .toBe("none");
+    await expect
+      .poll(() => afterChange.evaluate((element) => getComputedStyle(element).textDecorationLine))
+      .toBe("none");
+    const blockFillPreview = page.locator('[data-file-path="docs/block-fill.md"] .markdown-rich-diff--split');
+    await expect(blockFillPreview).toBeVisible();
+    const deletedBlock = blockFillPreview
+      .locator('[aria-label="Before markdown preview"] del.markdown-diff__block')
+      .filter({ hasText: "Removed standalone block" })
+      .first();
+    await expect(deletedBlock).toBeVisible();
+    await expect
+      .poll(() =>
+        deletedBlock.evaluate((element) => {
+          const textElement = element.querySelector("*") ?? element;
+          return getComputedStyle(textElement).textDecorationLine;
+        }),
+      )
+      .toBe("none");
+    const inlineBeforeChange = markdownPreview
+      .locator('[aria-label="Before markdown preview"] strong del')
+      .filter({ hasText: "beta" })
+      .first();
+    const inlineAfterChange = markdownPreview
+      .locator('[aria-label="After markdown preview"] strong ins')
+      .filter({ hasText: "two" })
+      .first();
+    await expect(inlineBeforeChange).toBeVisible();
+    await expect(inlineAfterChange).toBeVisible();
+    await expect
+      .poll(() => inlineBeforeChange.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .not.toBe("rgba(0, 0, 0, 0)");
+    await expect
+      .poll(() => inlineAfterChange.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .not.toBe("rgba(0, 0, 0, 0)");
+    await expect
+      .poll(() => markdownPreview.evaluate((element) => element.getBoundingClientRect().width))
+      .toBeGreaterThan(1300);
+  });
+
+  test("rich preview gives standalone block additions and deletions visible fills", async ({ page }) => {
+    await mockDiffApi(page, blockFillMarkdownDiff);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownPreview = page.locator('[data-file-path="docs/block-fill.md"] .markdown-rich-diff--unified');
+    await expect(markdownPreview).toBeVisible();
+    await expectNonTransparentBackground(
+      markdownPreview.locator("del.markdown-diff__block").filter({
+        hasText: "Removed standalone block that should have a filled background.",
+      }),
+    );
+    await expectNonTransparentBackground(
+      markdownPreview.locator("ins.markdown-diff__block").filter({
+        hasText: "Added standalone block that should have a filled background.",
+      }),
+    );
+  });
+
+  test("rich preview shows review thread cards", async ({ page }) => {
+    const reviewBody = "Review note should show in rich preview";
+    await mockDiffApi(page, previewDiff);
+    await mockFilePreviewApi(page);
+    await mockReviewThreadOnPreviewMarkdown(page, reviewBody);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownFile = page.locator('[data-file-path="docs/preview.md"]');
+    await expect(markdownFile.locator(".markdown-rich-diff--unified")).toBeVisible();
+    const reviewCard = markdownFile
+      .locator(".markdown-rich-diff--unified .inline-review-thread")
+      .filter({ hasText: reviewBody });
+    await expect(reviewCard).toBeVisible();
+    await expect
+      .poll(() =>
+        reviewCard.evaluate(
+          (element) =>
+            element.previousElementSibling?.classList.contains("markdown-rich-diff__anchored-block") ?? false,
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        reviewCard.evaluate((element) => {
+          const preview = element.closest(".markdown-rich-diff--unified");
+          if (!preview) return false;
+          const cardRect = element.getBoundingClientRect();
+          const previewRect = preview.getBoundingClientRect();
+          return cardRect.right <= previewRect.right + 1;
+        }),
+      )
+      .toBe(true);
+  });
+
+  test("rich preview anchors multiple list review cards to their source items", async ({ page }) => {
+    await mockDiffApi(page, listReviewPreviewDiff);
+    await mockReviewThreadsOnPreviewMarkdown(page, [
+      { body: "Actions review note", line: 2, path: "docs/list-review.md" },
+      { body: "Issues review note", line: 1, path: "docs/list-review.md" },
+    ]);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownFile = page.locator('[data-file-path="docs/list-review.md"]');
+    await expect(markdownFile.locator(".markdown-rich-diff--unified")).toBeVisible();
+    await expect(markdownFile.locator(".markdown-rich-diff__split-list")).toHaveCount(3);
+    await expect
+      .poll(() =>
+        markdownFile.locator(".markdown-rich-diff__split-list").evaluateAll((lists) =>
+          lists.every((list) => {
+            const style = getComputedStyle(list);
+            return style.marginTop === "0px" && style.marginBottom === "0px";
+          }),
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        markdownFile
+          .locator(".markdown-diff__block")
+          .evaluateAll(
+            (blocks) => blocks.filter((block) => block.querySelector(".markdown-rich-diff__split-list")).length,
+          ),
+      )
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        markdownFile.locator(".markdown-diff__block").evaluateAll((blocks) =>
+          blocks
+            .filter((block) => block.querySelector(".markdown-rich-diff__split-list"))
+            .every((block) => {
+              const style = getComputedStyle(block);
+              return (
+                style.marginTop === "0px" &&
+                style.marginBottom === "0px" &&
+                style.paddingTop === "0px" &&
+                style.paddingBottom === "0px"
+              );
+            }),
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() => markdownFile.locator(".markdown-rich-diff--unified .review-thread-body").allTextContents())
+      .toEqual(["Issues review note", "Actions review note"]);
+
+    const issuesCard = markdownFile
+      .locator(".markdown-rich-diff--unified .inline-review-thread")
+      .filter({ hasText: "Issues review note" });
+    const actionsCard = markdownFile
+      .locator(".markdown-rich-diff--unified .inline-review-thread")
+      .filter({ hasText: "Actions review note" });
+    await expect
+      .poll(() => issuesCard.evaluate((element) => element.previousElementSibling?.textContent?.trim() ?? ""))
+      .toContain("Issues");
+    await expect
+      .poll(() => actionsCard.evaluate((element) => element.previousElementSibling?.textContent?.trim() ?? ""))
+      .toContain("Actions");
+    await expect
+      .poll(() => markdownFile.locator(".markdown-rich-diff__split-list").last().textContent())
+      .toContain("Statuses");
+    await expect
+      .poll(() => markdownFile.locator(".markdown-rich-diff__split-list").last().textContent())
+      .toContain("Members");
+  });
+
+  test("rich preview keeps untargeted lists intact when a later block has a review card", async ({ page }) => {
+    const reviewBody = "Paragraph review note";
+    await mockDiffApi(page, untargetedListReviewPreviewDiff);
+    await mockReviewThreadOnPreviewMarkdown(page, reviewBody, 5, "docs/untargeted-list-review.md");
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownPreview = page.locator(
+      '[data-file-path="docs/untargeted-list-review.md"] .markdown-rich-diff--unified',
+    );
+    await expect(markdownPreview).toBeVisible();
+    await expect(markdownPreview.locator("ul")).toHaveCount(1);
+    await expect(markdownPreview.locator("ul.markdown-rich-diff__split-list")).toHaveCount(0);
+
+    const reviewCard = markdownPreview.locator(".inline-review-thread").filter({ hasText: reviewBody });
+    await expect(reviewCard).toBeVisible();
+    await expect
+      .poll(() => reviewCard.evaluate((element) => element.previousElementSibling?.textContent?.trim() ?? ""))
+      .toContain("Paragraph with review note.");
+  });
+
+  test("rich preview keeps unchanged list siblings aligned around an added item review card", async ({ page }) => {
+    const reviewBody = "Added list item review note";
+    await mockDiffApi(page, changedListReviewPreviewDiff);
+    await mockReviewThreadOnPreviewMarkdown(page, reviewBody, 2, "docs/changed-list-review.md");
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownPreview = page.locator('[data-file-path="docs/changed-list-review.md"] .markdown-rich-diff--unified');
+    await expect(markdownPreview).toBeVisible();
+    await expect(markdownPreview.locator("ins", { hasText: "Actions" })).toBeVisible();
+    await expect(markdownPreview.locator("ins", { hasText: "Issues" })).toHaveCount(0);
+    await expect(markdownPreview.locator("del", { hasText: "Statuses" })).toHaveCount(0);
+
+    const reviewCard = markdownPreview.locator(".inline-review-thread").filter({ hasText: reviewBody });
+    await expect(reviewCard).toBeVisible();
+    await expect
+      .poll(() => reviewCard.evaluate((element) => element.previousElementSibling?.textContent?.trim() ?? ""))
+      .toContain("Actions");
+  });
+
+  test("rich preview keeps unchanged list siblings aligned for edge added and deleted item comments", async ({
+    page,
+  }) => {
+    await mockDiffApi(page, edgeListReviewPreviewDiff);
+    await mockReviewThreadsOnPreviewMarkdown(page, [
+      {
+        body: "Prepended item review note",
+        line: 1,
+        path: "docs/edge-added-list-review.md",
+      },
+      {
+        body: "Appended item review note",
+        line: 5,
+        path: "docs/edge-added-list-review.md",
+      },
+      {
+        body: "Deleted first item review note",
+        line: 1,
+        oldLine: 1,
+        path: "docs/edge-deleted-list-review.md",
+        side: "left",
+      },
+      {
+        body: "Deleted last item review note",
+        line: 5,
+        oldLine: 5,
+        path: "docs/edge-deleted-list-review.md",
+        side: "left",
+      },
+    ]);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const addedPreview = page.locator('[data-file-path="docs/edge-added-list-review.md"] .markdown-rich-diff--unified');
+    await expect(addedPreview).toBeVisible();
+    await expect(addedPreview.locator("ins", { hasText: "Prepended" })).toBeVisible();
+    await expect(addedPreview.locator("ins", { hasText: "Appended" })).toBeVisible();
+    await expect(addedPreview.locator("ins", { hasText: "Issues" })).toHaveCount(0);
+    await expect(addedPreview.locator("ins", { hasText: "Statuses" })).toHaveCount(0);
+    await expect(addedPreview.locator("del", { hasText: "Issues" })).toHaveCount(0);
+    await expect(addedPreview.locator("del", { hasText: "Statuses" })).toHaveCount(0);
+    await expect(addedPreview.locator(".inline-review-thread").filter({ hasText: "Prepended item" })).toBeVisible();
+    await expect(addedPreview.locator(".inline-review-thread").filter({ hasText: "Appended item" })).toBeVisible();
+
+    const deletedPreview = page.locator(
+      '[data-file-path="docs/edge-deleted-list-review.md"] .markdown-rich-diff--unified',
+    );
+    await expect(deletedPreview).toBeVisible();
+    await expect(deletedPreview.locator("del", { hasText: "Removed first" })).toBeVisible();
+    await expect(deletedPreview.locator("del", { hasText: "Removed last" })).toBeVisible();
+    await expect(deletedPreview.locator("del", { hasText: "Issues" })).toHaveCount(0);
+    await expect(deletedPreview.locator("del", { hasText: "Statuses" })).toHaveCount(0);
+    await expect(deletedPreview.locator("ins", { hasText: "Issues" })).toHaveCount(0);
+    await expect(deletedPreview.locator("ins", { hasText: "Statuses" })).toHaveCount(0);
+    await expect(deletedPreview.locator(".inline-review-thread").filter({ hasText: "Deleted first" })).toBeVisible();
+    await expect(deletedPreview.locator(".inline-review-thread").filter({ hasText: "Deleted last" })).toBeVisible();
+  });
+
+  test("rich preview keeps unmapped review thread cards visible as file-level fallback", async ({ page }) => {
+    const reviewBody = "Unmapped rich preview note should stay visible";
+    await mockDiffApi(page, previewDiff);
+    await mockFilePreviewApi(page);
+    await mockReviewThreadOnPreviewMarkdown(page, reviewBody, 99);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownFile = page.locator('[data-file-path="docs/preview.md"]');
+    await expect(markdownFile.locator(".markdown-rich-diff--unified")).toBeVisible();
+    const fallbackCard = markdownFile.locator(".preview-shell > .inline-review-thread").filter({
+      hasText: reviewBody,
+    });
+    await expect(fallbackCard).toBeVisible();
+    await expect(fallbackCard).toHaveClass(/inline-review-thread--file-level/);
+    await expect(fallbackCard).toContainText("File");
+    await expect(
+      markdownFile.locator(".markdown-rich-diff--unified .inline-review-thread").filter({ hasText: reviewBody }),
+    ).toHaveCount(0);
+  });
+
+  test("rich preview hides synthetic hunk separators inside spanning markdown blocks", async ({ page }) => {
+    await mockDiffApi(page, multiHunkMarkdownDiff);
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownFile = page.locator('[data-file-path="docs/multihunk.md"]');
+    const markdownPreview = markdownFile.locator(".markdown-rich-diff--unified");
+    await expect(markdownPreview).toBeVisible();
+    const codeBlock = markdownPreview.locator("code").filter({ hasText: "first hunk code" });
+    await expect(codeBlock).toBeVisible();
+    await expect(codeBlock).toContainText("second hunk code");
+    await expect(codeBlock).toContainText("added hunk code");
+    await expect(codeBlock).not.toContainText("---");
+    await expect(markdownPreview.locator("hr")).toHaveCount(0);
+  });
+
+  test("rich preview keeps hidden hunk-gap review threads as file-level fallback", async ({ page }) => {
+    const reviewBody = "Hidden hunk gap review note should stay fallback";
+    await mockDiffApi(page, multiHunkMarkdownDiff);
+    await mockReviewThreadOnPreviewMarkdown(page, reviewBody, 6, "docs/multihunk.md");
+    await navigateToDiff(page);
+    await waitForDiffLoaded(page);
+    await waitForSidebarFilesLoaded(page);
+
+    await openDiffFilterMenu(page);
+    await page.getByRole("switch", { name: "Rich preview" }).click();
+
+    const markdownFile = page.locator('[data-file-path="docs/multihunk.md"]');
+    const fallbackCard = markdownFile.locator(".preview-shell > .inline-review-thread").filter({
+      hasText: reviewBody,
+    });
+    await expect(fallbackCard).toBeVisible();
+    await expect(fallbackCard).toHaveClass(/inline-review-thread--file-level/);
+    await expect(
+      markdownFile.locator(".markdown-rich-diff--unified .inline-review-thread").filter({ hasText: reviewBody }),
+    ).toHaveCount(0);
   });
 
   test("rich preview refetches blob content after a same-PR diff reload", async ({ page }) => {
