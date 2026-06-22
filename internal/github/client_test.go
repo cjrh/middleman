@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -823,6 +824,59 @@ func TestMarkPullRequestReadyForReviewUsesGraphQLMutation(t *testing.T) {
 	require.Equal(2, calls)
 	require.Equal([]string{http.MethodPost, http.MethodPost}, methods)
 	require.Equal([]string{"application/json", "application/json"}, contentTypes)
+}
+
+func TestConvertPullRequestToDraftUsesGraphQLMutation(t *testing.T) {
+	require := require.New(t)
+	var calls int
+	var methods []string
+	var contentTypes []string
+	var requestBodies []string
+	var readBodyErr error
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		methods = append(methods, r.Method)
+		contentTypes = append(contentTypes, r.Header.Get("Content-Type"))
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			readBodyErr = err
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		requestBodies = append(requestBodies, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"id":"PR_kwDOAAABc84"}}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"convertPullRequestToDraft":{"pullRequest":{"id":"PR_kwDOAAABc84"}}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ghClient, err := gh.NewClient(srv.Client()).WithEnterpriseURLs(srv.URL+"/api/v3/", srv.URL+"/api/uploads/")
+	require.NoError(err)
+
+	c := &liveClient{
+		gh:              ghClient,
+		httpClient:      srv.Client(),
+		graphQLEndpoint: srv.URL + "/graphql",
+	}
+
+	pr, err := c.ConvertPullRequestToDraft(t.Context(), "wesm", "middleman", 141)
+	require.NoError(err)
+	require.NotNil(pr)
+	require.Equal(141, pr.GetNumber())
+	require.True(pr.GetDraft())
+	require.Equal(2, calls)
+	require.Equal([]string{http.MethodPost, http.MethodPost}, methods)
+	require.Equal([]string{"application/json", "application/json"}, contentTypes)
+	require.NoError(readBodyErr)
+	require.Len(requestBodies, 2)
+	require.Contains(requestBodies[1], "convertPullRequestToDraft")
+	require.NotContains(requestBodies[1], "reviewDecision")
+	require.NotContains(requestBodies[1], "databaseId")
 }
 
 func TestMarkPullRequestReadyForReviewReturnsTypedStaleStateError(t *testing.T) {

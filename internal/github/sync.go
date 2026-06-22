@@ -776,6 +776,7 @@ func (p gitHubClientProvider) Capabilities() platform.Capabilities {
 		MutationHeadBinding:   true,
 		WorkflowApproval:      true,
 		ReadyForReview:        true,
+		DraftMutation:         true,
 		IssueMutation:         true,
 		LabelMutation:         labels,
 		AssigneeMutation:      assignees,
@@ -1330,6 +1331,21 @@ func (p gitHubClientProvider) MarkReadyForReview(
 		return platform.MergeRequest{}, fmt.Errorf("provider returned no pull request")
 	}
 	return platformgithub.NormalizePullRequest(ref, pr)
+}
+
+func (p gitHubClientProvider) ConvertMergeRequestToDraft(
+	ctx context.Context,
+	ref platform.RepoRef,
+	number int,
+) error {
+	pr, err := p.client.ConvertPullRequestToDraft(ctx, ref.Owner, ref.Name, number)
+	if err != nil {
+		return err
+	}
+	if pr == nil {
+		return fmt.Errorf("provider returned no pull request")
+	}
+	return nil
 }
 
 func (p gitHubClientProvider) CreateIssue(
@@ -2137,6 +2153,13 @@ func (s *Syncer) ReadyForReviewMutator(
 	host string,
 ) (platform.ReadyForReviewMutator, error) {
 	return s.clients.ReadyForReviewMutator(kind, canonicalRepoHost(host))
+}
+
+func (s *Syncer) DraftMutator(
+	kind platform.Kind,
+	host string,
+) (platform.DraftMutator, error) {
+	return s.clients.DraftMutator(kind, canonicalRepoHost(host))
 }
 
 func (s *Syncer) IssueMutator(

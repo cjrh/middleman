@@ -3434,6 +3434,42 @@ func TestUpdatePRState(t *testing.T) {
 	assert.True(pr.MergedAt.Equal(mergedAt))
 }
 
+func TestUpdateMRDraftStateAdvancesTimestampToRejectStaleSync(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := t.Context()
+
+	repoID := insertTestRepo(t, d, "o", "r")
+	base := time.Now().UTC().Add(time.Hour)
+	insertTestMR(t, d, repoID, 1, "current pr", base)
+
+	require.NoError(d.UpdateMRDraftState(ctx, repoID, 1, true))
+
+	staleSync := testMR(repoID, 1, withMRTitle("stale sync"), withMRActivity(base))
+	staleSync.IsDraft = false
+	_, err := d.UpsertMergeRequest(ctx, staleSync)
+	require.NoError(err)
+
+	pr, err := d.GetMergeRequest(ctx, "o", "r", 1)
+	require.NoError(err)
+	require.NotNil(pr)
+	assert.True(pr.IsDraft)
+	assert.Equal("current pr", pr.Title)
+	assert.True(pr.UpdatedAt.After(base))
+	assert.False(pr.LastActivityAt.Before(base))
+}
+
+func TestUpdateMRDraftStateReturnsErrorWhenMissing(t *testing.T) {
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := t.Context()
+
+	repoID := insertTestRepo(t, d, "o", "r")
+	err := d.UpdateMRDraftState(ctx, repoID, 404, true)
+	require.Error(err)
+}
+
 func TestListIssues_AttachesLabels(t *testing.T) {
 	require := require.New(t)
 	d := openTestDB(t)

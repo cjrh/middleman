@@ -138,6 +138,7 @@ type Client interface {
 	// submits is backed out through dismissal.
 	DismissReview(ctx context.Context, owner, repo string, number int, reviewID int64, message string) (*gh.PullRequestReview, error)
 	MarkPullRequestReadyForReview(ctx context.Context, owner, repo string, number int) (*gh.PullRequest, error)
+	ConvertPullRequestToDraft(ctx context.Context, owner, repo string, number int) (*gh.PullRequest, error)
 	MergePullRequest(ctx context.Context, owner, repo string, number int, commitTitle, commitMessage, method, expectedHeadSHA string) (*gh.PullRequestMergeResult, error)
 	EditPullRequest(ctx context.Context, owner, repo string, number int, opts EditPullRequestOpts) (*gh.PullRequest, error)
 	EditIssue(ctx context.Context, owner, repo string, number int, state string) (*gh.Issue, error)
@@ -932,6 +933,15 @@ mutation($pullRequestId: ID!) {
           isDefault
         }
       }
+    }
+  }
+}`
+
+const convertToDraftMutation = `
+mutation($pullRequestId: ID!) {
+  convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) {
+    pullRequest {
+      id
     }
   }
 }`
@@ -2621,6 +2631,143 @@ func (c *liveClient) MarkPullRequestReadyForReview(
 	}
 
 	return adaptPR(mutationResult.Data.MarkPullRequestReadyForReview.PullRequest), nil
+}
+
+func (c *liveClient) ConvertPullRequestToDraft(
+	ctx context.Context, owner, repo string, number int,
+) (*gh.PullRequest, error) {
+	type draftIDResponse struct {
+		Errors []graphQLError `json:"errors"`
+		Data   struct {
+			Repository *struct {
+				PullRequest *struct {
+					ID string `json:"id"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	type draftMutationResponse struct {
+		Errors []graphQLError `json:"errors"`
+		Data   struct {
+			ConvertPullRequestToDraft *struct {
+				PullRequest *struct {
+					ID string `json:"id"`
+				} `json:"pullRequest"`
+			} `json:"convertPullRequestToDraft"`
+		} `json:"data"`
+	}
+
+	postGraphQL := func(payload any, dest any) (*http.Response, error) {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			c.graphQLEndpoint,
+			bytes.NewReader(body),
+		)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.writeHTTPClient().Do(req)
+		if err != nil {
+			return nil, err
+		}
+		c.trackWriteGraphQLRateHeaders(resp)
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return resp, newReadyForReviewError(
+				fmt.Errorf("graphql status %s", resp.Status),
+				resp.StatusCode,
+				resp.StatusCode == http.StatusNotFound,
+			)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+			_ = resp.Body.Close()
+			return resp, err
+		}
+		_ = resp.Body.Close()
+		return resp, nil
+	}
+
+	idPayload := graphQLRequest{
+		Query: readyForReviewIDQuery,
+		Variables: map[string]any{
+			"owner":  owner,
+			"repo":   repo,
+			"number": number,
+		},
+	}
+	var idResult draftIDResponse
+	if _, err := postGraphQL(idPayload, &idResult); err != nil {
+		return nil, fmt.Errorf(
+			"converting %s/%s#%d to draft: resolve pull request id: %w",
+			owner, repo, number, err,
+		)
+	}
+	if len(idResult.Errors) > 0 {
+		statusCode, staleState := readyForReviewGraphQLErrorMeta(idResult.Errors)
+		return nil, newReadyForReviewError(fmt.Errorf(
+			"converting %s/%s#%d to draft: resolve pull request id: graphql errors: %s",
+			owner, repo, number, joinGraphQLErrorMessages(idResult.Errors),
+		), statusCode, staleState)
+	}
+	if idResult.Data.Repository == nil || idResult.Data.Repository.PullRequest == nil || idResult.Data.Repository.PullRequest.ID == "" {
+		return nil, newReadyForReviewError(
+			fmt.Errorf(
+				"converting %s/%s#%d to draft: resolve pull request id: missing pull request in graphql response",
+				owner, repo, number,
+			),
+			http.StatusNotFound,
+			true,
+		)
+	}
+
+	mutationPayload := graphQLRequest{
+		Query: convertToDraftMutation,
+		Variables: map[string]any{
+			"pullRequestId": idResult.Data.Repository.PullRequest.ID,
+		},
+	}
+	var mutationResult draftMutationResponse
+	if _, err := postGraphQL(mutationPayload, &mutationResult); err != nil {
+		return nil, fmt.Errorf(
+			"converting %s/%s#%d to draft: %w",
+			owner, repo, number, err,
+		)
+	}
+	if len(mutationResult.Errors) > 0 {
+		statusCode, staleState := readyForReviewGraphQLErrorMeta(mutationResult.Errors)
+		return nil, newReadyForReviewError(fmt.Errorf(
+			"converting %s/%s#%d to draft: graphql errors: %s",
+			owner, repo, number, joinGraphQLErrorMessages(mutationResult.Errors),
+		), statusCode, staleState)
+	}
+	if mutationResult.Data.ConvertPullRequestToDraft == nil || mutationResult.Data.ConvertPullRequestToDraft.PullRequest == nil {
+		return nil, newReadyForReviewError(
+			fmt.Errorf(
+				"converting %s/%s#%d to draft: missing pull request in graphql response",
+				owner, repo, number,
+			),
+			0,
+			false,
+		)
+	}
+
+	draft := true
+	state := "open"
+	nodeID := mutationResult.Data.ConvertPullRequestToDraft.PullRequest.ID
+	return &gh.PullRequest{
+		NodeID: &nodeID,
+		Number: &number,
+		State:  &state,
+		Draft:  &draft,
+	}, nil
 }
 
 func (c *liveClient) MergePullRequest(
