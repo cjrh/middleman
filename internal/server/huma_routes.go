@@ -2664,6 +2664,7 @@ func (s *Server) getCommentAutocomplete(
 	case "@":
 		users, err := s.db.ListCommentAutocompleteUsers(
 			ctx,
+			repo.Platform,
 			repo.PlatformHost,
 			input.Owner,
 			input.Name,
@@ -2691,6 +2692,7 @@ func (s *Server) getCommentAutocomplete(
 		}
 		references, err := s.db.ListCommentAutocompleteReferences(
 			ctx,
+			repo.Platform,
 			repo.PlatformHost,
 			input.Owner,
 			input.Name,

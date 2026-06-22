@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import { providerItemPath, providerRepoPath, providerRouteParams } from "../../api/provider-routes.js";
+  import { canonicalProvider, providerItemPath, providerRepoPath, providerRouteParams } from "../../api/provider-routes.js";
   import type { Label, ProviderCapabilities } from "../../api/types.js";
   import {
     getStores, getClient, getActions,
@@ -348,6 +348,17 @@
       throw new Error(error.detail ?? error.title ?? "failed to load users");
     }
     return data?.users ?? [];
+  }
+
+  function userAvatarURL(username: string): string {
+    if (canonicalProvider(provider) !== "github") return "";
+    const login = encodeURIComponent(username.trim());
+    const host = issues.getIssueDetail()?.repo?.platform_host
+      ?? issues.getIssueDetail()?.platform_host
+      ?? platformHost
+      ?? "";
+    if (login === "" || host === "") return "";
+    return `https://${host}/${login}.png?size=40`;
   }
 
   function onDocumentMousedown(e: MouseEvent): void {
@@ -904,6 +915,7 @@
             disabled={staleIssue || assigneeGate.unavailable}
             disabledReason={assigneeGate.unavailable ? assigneeGate.reason : undefined}
             loadCandidates={loadUserCandidates}
+            avatarUrlForUser={userAvatarURL}
             onchange={(next) => issues.setIssueAssignees(owner, name, number, next)}
           >
             {#snippet icon()}

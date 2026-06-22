@@ -71,6 +71,7 @@
   import CopyItemNumber from "./CopyItemNumber.svelte";
   import { DiffSummaryFilesResult } from "./diff-summary.js";
   import {
+    canonicalProvider,
     providerItemPath,
     providerRepoPath,
     providerRouteParams,
@@ -1047,6 +1048,17 @@
     return data?.users ?? [];
   }
 
+  function userAvatarURL(username: string): string {
+    if (canonicalProvider(provider) !== "github") return "";
+    const login = encodeURIComponent(username.trim());
+    const host = detailStore.getDetail()?.repo?.platform_host
+      ?? detailStore.getDetail()?.platform_host
+      ?? platformHost
+      ?? "";
+    if (login === "" || host === "") return "";
+    return `https://${host}/${login}.png?size=40`;
+  }
+
   function onActionMenuKeydown(e: KeyboardEvent): void {
     if (actionMenuOpen && e.key === "Escape") {
       actionMenuOpen = false;
@@ -1633,6 +1645,7 @@
           disabled={stalePR || assigneeGate.unavailable}
           disabledReason={assigneeGate.unavailable ? assigneeGate.reason : undefined}
           loadCandidates={loadUserCandidates}
+          avatarUrlForUser={userAvatarURL}
           onchange={(next) => detailStore.setPullAssignees(owner, name, number, next)}
         >
           {#snippet icon()}
@@ -1647,6 +1660,7 @@
           disabledReason={reviewerGate.unavailable ? reviewerGate.reason : undefined}
           tooltipNote="User review requests only; team requests are not shown"
           loadCandidates={loadUserCandidates}
+          avatarUrlForUser={userAvatarURL}
           onchange={(next) => detailStore.setPullReviewers(owner, name, number, next)}
         >
           {#snippet icon()}

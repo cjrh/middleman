@@ -6270,6 +6270,138 @@ func TestAPICommentAutocompleteUsesRepoPlatformHost(t *testing.T) {
 	assert.Equal([]db.CommentAutocompleteReference{{Kind: "pull", Number: 12, Title: "Polish mentions", State: "open"}}, body.References)
 }
 
+func TestAPICommentAutocompleteReferencesScopesByProvider(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	githubRepoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	})
+	require.NoError(err)
+	giteaRepoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitea",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	})
+	require.NoError(err)
+
+	_, err = database.UpsertIssue(ctx, &db.Issue{
+		RepoID:         githubRepoID,
+		PlatformID:     17001,
+		Number:         1,
+		URL:            "https://github.com/acme/widget/issues/1",
+		Title:          "Provider collision issue",
+		Author:         "alice",
+		State:          "open",
+		CreatedAt:      now.Add(-2 * time.Hour),
+		UpdatedAt:      now.Add(-2 * time.Hour),
+		LastActivityAt: now.Add(-2 * time.Hour),
+	})
+	require.NoError(err)
+	_, err = database.UpsertIssue(ctx, &db.Issue{
+		RepoID:         giteaRepoID,
+		PlatformID:     17901,
+		Number:         901,
+		URL:            "https://github.com/acme/widget/issues/901",
+		Title:          "Provider collision issue",
+		Author:         "gina",
+		State:          "open",
+		CreatedAt:      now.Add(-time.Hour),
+		UpdatedAt:      now.Add(-time.Hour),
+		LastActivityAt: now.Add(-time.Hour),
+	})
+	require.NoError(err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/host/github.com/repo/gitea/acme/widget/comment-autocomplete?trigger=%23&q=collision&limit=10", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	require.Equal(http.StatusOK, rr.Code, rr.Body.String())
+
+	var body commentAutocompleteResponse
+	require.NoError(json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal([]db.CommentAutocompleteReference{
+		{Kind: "issue", Number: 901, Title: "Provider collision issue", State: "open"},
+	}, body.References)
+	assert.Empty(body.Users)
+}
+
+func TestAPICommentAutocompleteGitLabMergeRequestReferencesScopesByProvider(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	srv, database := setupTestServer(t)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	giteaRepoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitea",
+		PlatformHost: "gitlab.example.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	})
+	require.NoError(err)
+	gitlabRepoID, err := database.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "gitlab",
+		PlatformHost: "gitlab.example.com",
+		Owner:        "acme",
+		Name:         "widget",
+		RepoPath:     "acme/widget",
+	})
+	require.NoError(err)
+
+	_, err = database.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:         giteaRepoID,
+		PlatformID:     12001,
+		Number:         1,
+		URL:            "https://gitlab.example.com/acme/widget/pulls/1",
+		Title:          "Provider collision merge request",
+		Author:         "gina",
+		State:          "open",
+		HeadBranch:     "feature-gitea",
+		BaseBranch:     "main",
+		CreatedAt:      now.Add(-2 * time.Hour),
+		UpdatedAt:      now.Add(-2 * time.Hour),
+		LastActivityAt: now.Add(-2 * time.Hour),
+	})
+	require.NoError(err)
+	_, err = database.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:         gitlabRepoID,
+		PlatformID:     12901,
+		Number:         901,
+		URL:            "https://gitlab.example.com/acme/widget/-/merge_requests/901",
+		Title:          "Provider collision merge request",
+		Author:         "glenda",
+		State:          "open",
+		HeadBranch:     "feature-gitlab",
+		BaseBranch:     "main",
+		CreatedAt:      now.Add(-time.Hour),
+		UpdatedAt:      now.Add(-time.Hour),
+		LastActivityAt: now.Add(-time.Hour),
+	})
+	require.NoError(err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/host/gitlab.example.com/repo/gitlab/acme/widget/comment-autocomplete?trigger=!&q=collision&limit=10", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+	require.Equal(http.StatusOK, rr.Code, rr.Body.String())
+
+	var body commentAutocompleteResponse
+	require.NoError(json.NewDecoder(rr.Body).Decode(&body))
+	assert.Equal([]db.CommentAutocompleteReference{
+		{Kind: "pull", Number: 901, Title: "Provider collision merge request", State: "open"},
+	}, body.References)
+	assert.Empty(body.Users)
+}
+
 func TestAPISyncStatus(t *testing.T) {
 	require := require.New(t)
 
@@ -24140,20 +24272,11 @@ func TestWorkspaceRuntimePlainShellTerminalWebSocketE2E(t *testing.T) {
 	require.Contains(got.String(), "echo:ping")
 }
 
-// TestWorkspaceRuntimeShellTerminalDeliversExitFrameE2E pins the
-// websocket "exited" text frame contract. The frontend's ShellDrawer
-// only fires onExit when this frame arrives; without it the drawer
-// doesn't auto-close on shell exit and the user is stranded on a dead
-// session (TerminalPane reconnect-loops on a still-listed-but-
-// output-dead session, which looks like a hang).
-//
-// Uses the "pty-close-on-input-then-sleep" helper on the pty-owner backend to
-// deterministically open the race window where drainOutput's PTY EOF precedes
-// watchSession's cmd.Wait return by hundreds of milliseconds. Without the
-// bridge fix (always send exit frame on outputDone), this test fails because
-// the 100ms timeout fires before attachment.Done — exactly the systemd-
-// run-wrapped shell case the user hit. Real tmux does not expose that signal:
-// while the pane process is still sleeping, the attach client remains open.
+// TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E pins the
+// websocket "exited" text frame contract through the real runtime stack. The
+// frontend's ShellDrawer only fires onExit when this frame arrives; without it
+// the drawer doesn't auto-close on shell exit and the user is stranded on a
+// dead session.
 func TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test fixture uses /bin/sh")
@@ -24164,7 +24287,9 @@ func TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E(t *testing.T) {
 	dir := t.TempDir()
 	ptyOwnerDir := filepath.Join(dir, "pty-owner")
 	cfg := &config.Config{
-		Tmux: config.Tmux{Command: []string{filepath.Join(dir, "missing-tmux")}},
+		Tmux: config.Tmux{
+			Command: []string{filepath.Join(dir, "missing-tmux")},
+		},
 		Shell: config.Shell{
 			Command: serverRuntimeHelperCommand("pty-close-on-input-then-sleep"),
 		},
@@ -24172,13 +24297,15 @@ func TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E(t *testing.T) {
 	fixture := setupWorkspaceServerFixtureWithOptions(
 		t, cfg, ptyOwnerServerOptions(ptyOwnerDir),
 	)
+	client := fixture.client
+	srv := fixture.server
 	ctx := context.Background()
-	ws := createReadyWorkspace(t, ctx, fixture.client)
+	ws := createReadyWorkspace(t, ctx, client)
 
-	shell := launchPlainShellRuntimeSession(t, ctx, fixture.client, ws.Id)
+	shell := launchPlainShellRuntimeSession(t, ctx, client, ws.Id)
 	cleanupPtyOwnerWorkspace(t, ptyOwnerDir, shell.Key)
 
-	ts := httptest.NewServer(fixture.server)
+	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") +
 		"/ws/v1/workspaces/" + ws.Id +
@@ -24186,20 +24313,13 @@ func TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E(t *testing.T) {
 	conn := dialWebSocketForTest(t, ctx, wsURL, "shell")
 	defer conn.Close(websocket.StatusNormalClosure, "done")
 
-	// Trigger after attach so the session cannot naturally exit before
-	// the websocket connects. The helper then closes its PTY end and
-	// sleeps long enough before process exit that a regression which gates
-	// the exit frame on cmd.Wait would push delivery well past our
-	// promptness budget. The bridge's outputDone path must deliver the
-	// frame within a few hundred ms of PTY EOF; cmd.Wait can only return
-	// when the helper finishes its sleep, so the gap between "right" and
-	// "wrong" is the helper's sleep duration. Helper sleeps 2 s; we allow
-	// up to 800 ms for the PTY-EOF path even on slow CI.
+	// Trigger after attach so the session cannot naturally exit before the
+	// websocket connects. The focused bridge test below covers the fast
+	// outputDone-before-Done race directly; this e2e keeps the real runtime
+	// contract pinned without depending on backend-specific PTY EOF timing.
 	require.NoError(conn.Write(ctx, websocket.MessageBinary, []byte("close\n")))
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	const exitFrameBudget = 800 * time.Millisecond
-	attachStart := time.Now()
 	for {
 		typ, data, readErr := conn.Read(readCtx)
 		if readErr != nil {
@@ -24211,14 +24331,6 @@ func TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E(t *testing.T) {
 		if typ != websocket.MessageText {
 			continue
 		}
-		elapsed := time.Since(attachStart)
-		require.Lessf(elapsed, exitFrameBudget,
-			"exit frame took %s after attach; bridge appears "+
-				"gated on cmd.Wait rather than PTY EOF (helper "+
-				"sleeps 2 s, so a regression would clock in "+
-				"around there)",
-			elapsed,
-		)
 		var msg struct {
 			Type string `json:"type"`
 			Code int    `json:"code"`
@@ -24229,10 +24341,79 @@ func TestWorkspaceRuntimePlainShellTerminalDeliversExitFrameE2E(t *testing.T) {
 		// reads the snapshot) or -1 (writeRuntimeExit read snapshot
 		// before watchSession populated ExitCode). Both are "the
 		// session ended" signals the frontend treats identically;
-		// pinning a specific value would be timing-dependent. Reject
+		// pinning a specific value would be timing-dependent.
 		require.NotEqual(0, msg.Code,
 			"non-success exit must report non-zero (or -1)")
 		return
+	}
+}
+
+// TestBridgeRuntimeAttachmentOutputClosedEmitsExitFrameBeforeDone pins the
+// bridge branch for wrappers where PTY EOF reaches the subscriber before
+// cmd.Wait marks the session done. That is the race the real ShellDrawer cares
+// about, but it is cleaner to drive it with controlled channels than to depend
+// on backend-specific PTY behavior in an e2e helper.
+func TestBridgeRuntimeAttachmentOutputClosedEmitsExitFrameBeforeDone(t *testing.T) {
+	require := require.New(t)
+	closedOutput := make(chan []byte)
+	close(closedOutput)
+	stillWaiting := make(chan struct{})
+	exitCode := 7
+	attach := localruntime.NewAttachmentForTesting(
+		localruntime.AttachmentForTestingOptions{
+			Output: closedOutput,
+			Done:   stillWaiting,
+			Info: func() localruntime.SessionInfo {
+				return localruntime.SessionInfo{ExitCode: &exitCode}
+			},
+			SessionOutputClosed: func() bool { return true },
+		},
+	)
+
+	bridgeReturn := make(chan bool, 1)
+	acceptErr := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				InsecureSkipVerify: true,
+			})
+			if err != nil {
+				acceptErr <- err
+				return
+			}
+			exited := bridgeRuntimeAttachment(r.Context(), conn, attach)
+			bridgeReturn <- exited
+			conn.Close(websocket.StatusNormalClosure, "test done")
+		},
+	))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	require.NoError(err)
+	defer conn.Close(websocket.StatusNormalClosure, "done")
+
+	typ, data, err := conn.Read(ctx)
+	require.NoError(err)
+	require.Equal(websocket.MessageText, typ)
+	var msg struct {
+		Type string `json:"type"`
+		Code int    `json:"code"`
+	}
+	require.NoError(json.Unmarshal(data, &msg))
+	require.Equal("exited", msg.Type)
+	require.Equal(7, msg.Code)
+
+	select {
+	case exited := <-bridgeReturn:
+		require.True(exited,
+			"bridge must report exited when session output closed")
+	case err := <-acceptErr:
+		require.NoError(err, "websocket accept failed")
+	case <-time.After(2 * time.Second):
+		require.Fail("bridge did not return")
 	}
 }
 
