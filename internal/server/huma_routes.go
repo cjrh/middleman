@@ -1404,6 +1404,7 @@ func (s *Server) listPulls(ctx context.Context, input *listPullsInput) (*listPul
 		if stackConflictBlocked[mr.ID] {
 			responseMR.MergeableState = "dirty"
 		}
+		responseMR = mergeRequestResponseModel(responseMR)
 		resp := mergeRequestResponse{
 			MergeRequest:  responseMR,
 			Repo:          s.repoRefFromRepo(rp),
@@ -1600,6 +1601,7 @@ func (s *Server) buildPullDetailResponse(
 			responseMR.MergeableState = "dirty"
 		}
 	}
+	responseMR = mergeRequestResponseModel(responseMR)
 	resp.MergeRequest = &responseMR
 
 	if s.workspaces != nil {
@@ -1616,6 +1618,23 @@ func (s *Server) buildPullDetailResponse(
 	}
 
 	return resp, nil
+}
+
+func mergeRequestResponseModel(mr db.MergeRequest) db.MergeRequest {
+	mr.KanbanStatus = mergeRequestResponseKanbanStatus(mr)
+	return mr
+}
+
+func mergeRequestResponseKanbanStatus(mr db.MergeRequest) db.KanbanStatus {
+	switch mr.KanbanStatus {
+	case db.KanbanStatusNew, db.KanbanStatusReviewing, db.KanbanStatusWaiting, db.KanbanStatusAwaitingMerge:
+		return mr.KanbanStatus
+	case "":
+		return db.KanbanStatusNew
+	default:
+		slog.Warn("normalizing unexpected kanban status in merge request response", "merge_request_id", mr.ID, "status", mr.KanbanStatus)
+		return db.KanbanStatusNew
+	}
 }
 
 func verifiedReviewedHeadSHA(mr *db.MergeRequest) string {

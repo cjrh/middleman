@@ -1558,6 +1558,56 @@ func TestAPIListPulls(t *testing.T) {
 	assert.Equal("acme/widget", body[0].Repo.RepoPath)
 }
 
+func TestAPIPullResponsesNormalizeMissingKanbanStateToNew(t *testing.T) {
+	require := require.New(t)
+	assert := Assert.New(t)
+	srv, database := setupTestServer(t)
+	ctx := t.Context()
+
+	repoID, err := database.UpsertRepo(ctx, db.GitHubRepoIdentity("github.com", "acme", "widget"))
+	require.NoError(err)
+	now := time.Now().UTC().Truncate(time.Second)
+	mrID, err := database.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:         repoID,
+		PlatformID:     7000,
+		Number:         7,
+		URL:            "https://github.com/acme/widget/pull/7",
+		Title:          "Default kanban PR",
+		Author:         "alice",
+		State:          "open",
+		HeadBranch:     "feature/default-kanban",
+		BaseBranch:     "main",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		LastActivityAt: now,
+	})
+	require.NoError(err)
+	kanbanState, err := database.GetKanbanState(ctx, mrID)
+	require.NoError(err)
+	require.Nil(kanbanState)
+
+	rawList := doJSON(t, srv, http.MethodGet, "/api/v1/pulls", nil)
+	require.Equal(http.StatusOK, rawList.Code)
+	var list []mergeRequestResponse
+	require.NoError(json.Unmarshal(rawList.Body.Bytes(), &list))
+	require.Len(list, 1)
+	assert.Equal(db.KanbanStatusNew, list[0].KanbanStatus)
+
+	rawNewList := doJSON(t, srv, http.MethodGet, "/api/v1/pulls?kanban=new", nil)
+	require.Equal(http.StatusOK, rawNewList.Code)
+	var newList []mergeRequestResponse
+	require.NoError(json.Unmarshal(rawNewList.Body.Bytes(), &newList))
+	require.Len(newList, 1)
+	assert.Equal(db.KanbanStatusNew, newList[0].KanbanStatus)
+
+	rawDetail := doJSON(t, srv, http.MethodGet, "/api/v1/pulls/gh/acme/widget/7", nil)
+	require.Equal(http.StatusOK, rawDetail.Code)
+	var detail mergeRequestDetailResponse
+	require.NoError(json.Unmarshal(rawDetail.Body.Bytes(), &detail))
+	require.NotNil(detail.MergeRequest)
+	assert.Equal(db.KanbanStatusNew, detail.MergeRequest.KanbanStatus)
+}
+
 func TestAPIListItemsIncludeWorkspaceRefs(t *testing.T) {
 	require := require.New(t)
 	assert := Assert.New(t)
@@ -24655,7 +24705,7 @@ func TestWorkspaceRuntimePlainShellAfterExitStartsFreshE2E(t *testing.T) {
 			Command: []string{filepath.Join(t.TempDir(), "missing-tmux")},
 		},
 		Shell: config.Shell{
-			Command: serverRuntimeHelperCommand("pty-close-then-sleep"),
+			Command: serverRuntimeHelperCommand("pty-close-on-input-then-sleep"),
 		},
 	}
 	ptyOwnerDir := filepath.Join(t.TempDir(), "pty-owner")
@@ -24679,8 +24729,8 @@ func TestWorkspaceRuntimePlainShellAfterExitStartsFreshE2E(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") +
 		"/ws/v1/workspaces/" + ws.Id +
 		"/runtime/sessions/" + first.Key + "/terminal?cols=80&rows=24"
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	require.NoError(err)
+	conn := dialWebSocketForTest(t, ctx, wsURL, "plain shell after exit")
+	require.NoError(conn.Write(ctx, websocket.MessageBinary, []byte("exit\n")))
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for {
