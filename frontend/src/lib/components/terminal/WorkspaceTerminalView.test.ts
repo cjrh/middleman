@@ -358,6 +358,89 @@ describe("WorkspaceTerminalView", () => {
     vi.unstubAllGlobals();
   });
 
+  it("explains workspace creation in the main pane when no workspaces exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: Request | URL | string) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const { pathname } = new URL(url, "http://localhost");
+        if (pathname.endsWith("/api/v1/workspaces")) {
+          return Promise.resolve(Response.json({ workspaces: [] }));
+        }
+        if (pathname.endsWith("/api/v1/snapshot")) {
+          return Promise.resolve(
+            Response.json({
+              hosts: [
+                {
+                  configKey: "local",
+                  diagnostics: [],
+                  id: "local",
+                  kind: "self",
+                  name: "local",
+                  operationAvailability: {},
+                  platform: "darwin",
+                  preferredTransport: "local",
+                  reachable: true,
+                  tmuxSessions: [],
+                },
+              ],
+            }),
+          );
+        }
+        if (pathname.endsWith("/api/v1/settings")) {
+          return Promise.resolve(
+            Response.json({
+              launch_targets: [
+                {
+                  key: "configured-agent",
+                  label: "Configured Agent",
+                  kind: "agent",
+                  source: "config",
+                  available: true,
+                },
+                {
+                  key: "plain_shell",
+                  label: "Shell",
+                  kind: "plain_shell",
+                  source: "system",
+                  available: true,
+                },
+              ],
+            }),
+          );
+        }
+        return Promise.resolve(Response.json({}));
+      }),
+    );
+
+    render(WorkspaceTerminalView, {
+      props: {
+        workspaceId: "",
+      },
+    });
+
+    expect(await screen.findByText("Create a workspace to run agents from a PR or issue")).toBeTruthy();
+    expect(screen.getByText(/Workspaces are git worktrees created from PR or issue heads\./i)).toBeTruthy();
+    expect(screen.getByText(/From a PR or issue, use the/i)).toBeTruthy();
+    const exampleCard = screen.getByLabelText("Workspace workflow example");
+    expect(exampleCard).toBeTruthy();
+    expect(screen.queryByText("Example workflow")).toBeNull();
+    const createWorkspaceButton = screen.getByRole("button", {
+      name: "Create Workspace",
+    }) as HTMLButtonElement;
+    expect(createWorkspaceButton.disabled).toBe(true);
+    expect(createWorkspaceButton.getAttribute("title")).toContain("launch agents");
+    const capabilityCopy = screen.getByText(/start agents, local review sessions, or a shell/i);
+    expect(screen.getByText("You can then launch configured agents via the buttons provided")).toBeTruthy();
+    const exampleHeading = await screen.findByText("Launch");
+    expect(capabilityCopy.compareDocumentPosition(exampleHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("New session")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Codex review agent/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Claude review agent/i })).toBeNull();
+    expect((screen.getByRole("button", { name: /Configured Agent/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Shell/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("closes an agent tab immediately when its terminal exits", async () => {
     render(WorkspaceTerminalView, {
       props: {

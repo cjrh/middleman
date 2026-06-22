@@ -12,7 +12,11 @@
     type WorkflowTabDescriptor,
   } from "./WorkflowSplitTree.svelte";
   import WorkflowPresetMenu from "./WorkflowPresetMenu.svelte";
-  import type { RuntimeSession } from "@middleman/ui/api/types";
+  import PackagePlusIcon from "@lucide/svelte/icons/package-plus";
+  import type {
+    LaunchTarget,
+    RuntimeSession,
+  } from "@middleman/ui/api/types";
   import {
     getWorkspaceRuntime,
     launchWorkspaceSession,
@@ -62,6 +66,7 @@
     readRuntimeSessionDrag,
   } from "./terminal-drag";
   import {
+    ActionButton,
     CollapsibleResizableSidebar,
     SplitResizeHandle,
     WorkspaceRightSidebar,
@@ -201,6 +206,10 @@
   );
   let terminalLayoutWorkspaceId = $state("");
   let terminalLaunching = $state(false);
+  let workspaceListState = $state<{
+    status: "loading" | "retrying" | "loaded";
+    total: number;
+  }>({ status: "loading", total: 0 });
 
   const SIDEBAR_TAB_KEY = "middleman-workspace-sidebar-tab";
   const SIDEBAR_OPEN_KEY = "middleman-workspace-sidebar-open";
@@ -213,6 +222,9 @@
     "middleman-workspace-terminal-layout:";
   const WORKFLOW_PRESETS_KEY = "middleman-workspace-layout-presets";
   const PLAIN_SHELL_TARGET = "plain_shell";
+  type EmptyLaunchTargetsState = "idle" | "loading" | "loaded" | "error";
+  let emptyLaunchTargets = $state.raw<LaunchTarget[]>([]);
+  let emptyLaunchTargetsState = $state<EmptyLaunchTargetsState>("idle");
 
   let workflowPresets = $state<WorkflowPreset[]>(loadWorkflowPresets());
   let selectedWorkflowPresetId = $state<string | null>(null);
@@ -234,6 +246,30 @@
         Math.round(value),
       ),
     );
+  }
+
+  function updateWorkspaceListState(
+    state: { status: "loading" | "retrying" | "loaded"; total: number },
+  ): void {
+    workspaceListState = state;
+  }
+
+  async function loadEmptyLaunchTargets(): Promise<void> {
+    if (
+      emptyLaunchTargetsState === "loaded" ||
+      emptyLaunchTargetsState === "loading"
+    ) {
+      return;
+    }
+    emptyLaunchTargetsState = "loading";
+    try {
+      const { data } = await client.GET("/settings");
+      emptyLaunchTargets = data?.launch_targets ?? [];
+      emptyLaunchTargetsState = "loaded";
+    } catch {
+      emptyLaunchTargets = [];
+      emptyLaunchTargetsState = "error";
+    }
   }
 
   function readLocalStorage(key: string): string | null {
@@ -2431,15 +2467,96 @@
       }
     };
   });
+
+  $effect(() => {
+    if (
+      workspaceId ||
+      workspaceListState.status !== "loaded" ||
+      workspaceListState.total !== 0
+    ) {
+      return;
+    }
+    void loadEmptyLaunchTargets();
+  });
 </script>
 
 <div class="terminal-view" inert={modalOpen}>
   {#snippet terminalMainContent()}
     <div class="terminal-main">
       {#if !workspaceId}
-        <div class="state-message">
-          Select a workspace from the sidebar
-        </div>
+        {#if workspaceListState.status === "loaded" && workspaceListState.total === 0}
+          <section class="workspace-zero-state" aria-label="Workspaces empty state">
+            <div class="workspace-zero-copy">
+              <p class="workspace-zero-eyebrow">Workspaces</p>
+              <h2>Create a workspace to run agents from a PR or issue</h2>
+              <p>
+                Workspaces are git worktrees created from PR or issue
+                heads.
+              </p>
+              <p>
+                From a PR or issue, use the
+                <span
+                  class="workspace-zero-inline-action"
+                  aria-label="Create Workspace example"
+                >
+                  <ActionButton
+                    class="workspace-zero-create-button"
+                    disabled
+                    tone="info"
+                    surface="soft"
+                    size="sm"
+                    title="Create a PR or issue worktree, then open Workspaces to launch agents, shells, or local review sessions on that branch."
+                    label="Create Workspace"
+                    shortLabel="Create Workspace"
+                  >
+                    <PackagePlusIcon
+                      size="14"
+                      strokeWidth="2.2"
+                      aria-hidden="true"
+                    />
+                  </ActionButton>
+                </span>
+                button to launch a workspace.
+              </p>
+              <p>
+                Once it exists, this pane can start agents, local review
+                sessions, or a shell inside that worktree.
+              </p>
+            </div>
+            <div class="workspace-zero-example-card" aria-label="Workspace workflow example">
+              <div class="workspace-zero-example" aria-label="Launch surface example">
+                <span class="workspace-zero-example-label">
+                  You can then launch configured agents via the buttons provided
+                </span>
+                {#if emptyLaunchTargets.length > 0}
+                  <WorkspaceHome
+                    launchTargets={emptyLaunchTargets}
+                    sessions={[]}
+                    readonly
+                    showHeader={false}
+                  />
+                {:else if emptyLaunchTargetsState === "error"}
+                  <p class="workspace-zero-example-empty">
+                    Launch targets could not be loaded.
+                  </p>
+                {:else if emptyLaunchTargetsState === "loaded"}
+                  <p class="workspace-zero-example-empty">
+                    Launch targets appear here after agent tools are configured
+                    or detected.
+                  </p>
+                {:else}
+                  <p class="workspace-zero-example-empty">
+                    Loading launch targets...
+                  </p>
+                {/if}
+              </div>
+            </div>
+          </section>
+        {:else}
+          <div class="state-message">
+            Select a workspace from the sidebar
+          </div>
+        {/if}
       {:else if loadError && !workspace}
         <div class="state-message error">
           <span
@@ -2832,6 +2949,7 @@
           {isSidebarToggleEnabled}
           onCollapseSidebar={onToggleSidebar}
           onOpenItemSidebar={openItemSidebar}
+          onWorkspaceListStateChange={updateWorkspaceListState}
         />
       {/snippet}
       {@render terminalMainContent()}
@@ -3027,6 +3145,125 @@
 
   .state-message.error {
     color: var(--accent-red);
+  }
+
+  .workspace-zero-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 18px;
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    padding: 56px 28px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    max-width: 560px;
+    margin: 0 auto;
+  }
+
+  .workspace-zero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .workspace-zero-eyebrow {
+    margin: 0;
+    color: var(--accent-green);
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .workspace-zero-copy h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--font-size-xl);
+    font-weight: 650;
+    line-height: 1.25;
+  }
+
+  .workspace-zero-copy p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-md);
+    line-height: 1.5;
+  }
+
+  .workspace-zero-inline-action {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: 5px;
+    transform: translateY(-1px);
+  }
+
+  .workspace-zero-example-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    align-self: flex-start;
+    min-width: 280px;
+    width: min(620px, 100%);
+    padding: 12px;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    background: var(--bg-surface);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 4px 14px rgba(0, 0, 0, 0.08);
+  }
+
+  .workspace-zero-example {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-secondary);
+    font-size: var(--font-size-md);
+    line-height: 1.5;
+  }
+
+  .workspace-zero-example-label {
+    align-self: flex-start;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  .workspace-zero-inline-action :global(.workspace-zero-create-button:disabled) {
+    cursor: default;
+    opacity: 0.72;
+  }
+
+  .workspace-zero-example-empty {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 1.45;
+  }
+
+  .workspace-zero-example :global(.workspace-home) {
+    width: 100%;
+    height: auto;
+    padding: 0;
+    overflow: visible;
+    background: transparent;
+  }
+
+  @media (max-width: 760px) {
+    .workspace-zero-state {
+      padding: 28px 18px;
+      max-width: none;
+    }
+
+    .workspace-zero-example-card {
+      min-width: 0;
+      width: 100%;
+    }
   }
 
   .error-icon-badge {
