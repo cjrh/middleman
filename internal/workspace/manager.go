@@ -516,20 +516,29 @@ func (m *Manager) Setup(
 		ws.ID, workspaceSetupStageSetup, "started",
 		"starting workspace setup",
 	)
-	gitDir, refreshBeforeAdd, err := m.workspaceSetupGitDir(ctx, ws)
-	if err != nil {
-		return m.failSetup(
-			ctx,
-			ws.ID, workspaceSetupStageClone, err,
-		)
-	}
 
-	branch, err := m.addWorktree(ctx, gitDir, refreshBeforeAdd, ws)
+	branch, reusedWorktree, err := m.reuseExistingWorkspaceWorktree(ctx, ws)
+	var gitDir string
 	if err != nil {
-		return m.failSetup(
-			ctx,
-			ws.ID, workspaceSetupStageWorktree, err,
-		)
+		return m.failSetup(ctx, ws.ID, workspaceSetupStageWorktree, err)
+	}
+	if !reusedWorktree {
+		var refreshBeforeAdd bool
+		gitDir, refreshBeforeAdd, err = m.workspaceSetupGitDir(ctx, ws)
+		if err != nil {
+			return m.failSetup(
+				ctx,
+				ws.ID, workspaceSetupStageClone, err,
+			)
+		}
+
+		branch, err = m.addWorktree(ctx, gitDir, refreshBeforeAdd, ws)
+		if err != nil {
+			return m.failSetup(
+				ctx,
+				ws.ID, workspaceSetupStageWorktree, err,
+			)
+		}
 	}
 	persistedBranch := branch
 	if ws.ItemType == db.WorkspaceItemTypeIssue && ws.WorkspaceBranch == "" {
@@ -539,7 +548,9 @@ func (m *Manager) Setup(
 	if err := m.updateWorkspaceBranch(
 		ctx, ws.ID, persistedBranch,
 	); err != nil {
-		m.rollbackWorktree(ctx, gitDir, ws, branch)
+		if !reusedWorktree {
+			m.rollbackWorktree(ctx, gitDir, ws, branch)
+		}
 		return m.failSetup(
 			ctx,
 			ws.ID, workspaceSetupStageWorktree, err,
@@ -548,7 +559,9 @@ func (m *Manager) Setup(
 
 	err = m.newTerminalSession(ctx, ws)
 	if err != nil {
-		m.rollbackWorktree(ctx, gitDir, ws, branch)
+		if !reusedWorktree {
+			m.rollbackWorktree(ctx, gitDir, ws, branch)
+		}
 		return m.failSetup(
 			ctx,
 			ws.ID, workspaceSetupStageTmuxSession, err,
@@ -580,6 +593,277 @@ func (m *Manager) Setup(
 		)
 	}
 	return nil
+}
+
+func (m *Manager) reuseExistingWorkspaceWorktree(
+	ctx context.Context, ws *Workspace,
+) (string, bool, error) {
+	info, err := os.Stat(ws.WorktreePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("stat existing worktree: %w", err)
+	}
+	if !info.IsDir() {
+		return "", false, nil
+	}
+	commonDir, err := worktreeCommonGitDir(ctx, ws.WorktreePath)
+	if err != nil {
+		if isGitWorktreeAbsent(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("inspect existing worktree: %w", err)
+	}
+	if !gitDirMatchesWorkspaceRepo(ctx, commonDir, ws) {
+		return "", false, nil
+	}
+	owned, err := gitDirOwnsLinkedWorktree(ctx, commonDir, ws.WorktreePath)
+	if err != nil {
+		return "", false, err
+	}
+	if !owned {
+		return "", false, nil
+	}
+	localBase, reusable, err := m.existingWorkspaceWorktreeProvenance(
+		ctx, commonDir, ws,
+	)
+	if err != nil {
+		return "", false, err
+	}
+	if !reusable {
+		return "", false, nil
+	}
+	var branch string
+	if err := m.withRepoLockForGitDir(ctx, commonDir, func() error {
+		useMergeRequestHeadRef, refreshErr := m.refreshExistingWorkspaceWorktree(
+			ctx, commonDir, ws,
+		)
+		if refreshErr != nil {
+			return refreshErr
+		}
+		currentBranch, branchErr := worktreeCurrentBranch(ctx, ws.WorktreePath)
+		if branchErr != nil {
+			return branchErr
+		}
+		var ok bool
+		branch, ok, branchErr = existingWorkspacePersistedBranch(
+			ctx, commonDir, ws, currentBranch, localBase, useMergeRequestHeadRef,
+		)
+		if branchErr != nil {
+			return branchErr
+		}
+		if !ok {
+			return fmt.Errorf(
+				"existing worktree branch %q does not match workspace-owned branch for %s #%d",
+				currentBranch, ws.ItemType, ws.ItemNumber,
+			)
+		}
+		return nil
+	}); err != nil {
+		return "", false, err
+	}
+	return branch, true, nil
+}
+
+// existingWorkspaceWorktreeProvenance decides whether the path already
+// recorded for this workspace may be refreshed and reused. The ownership
+// matrix is intentionally narrow:
+//   - expected managed clone: reusable for synthetic PR branches, persisted
+//     workspace branches, issue branches, and detached/unknown heads that later
+//     pass branch validation;
+//   - current configured local base: reusable only for same-repo workspaces
+//     after validating the actual worktree config, hooks, refspecs, and origin;
+//   - fork PR/MR: reusable only from the managed clone, never from a local base;
+//   - matching origin from any other git dir, stale local-base config, or a
+//     user-created checkout at the deterministic path: not reusable.
+//
+// If reuse fails after this point, Setup records an error and leaves the
+// worktree in place. Cleanup later deletes only branches that the persisted
+// workspace branch proves middleman owns; an empty or unknown branch marker is
+// deliberately treated as user-owned.
+func (m *Manager) existingWorkspaceWorktreeProvenance(
+	ctx context.Context,
+	commonDir string,
+	ws *Workspace,
+) (localBase bool, reusable bool, err error) {
+	if m.existingWorktreeUsesManagedClone(ctx, commonDir, ws) {
+		return false, true, nil
+	}
+	if ws.MRHeadRepo != nil {
+		return false, false, nil
+	}
+	usesLocalBase, err := m.workspaceWorktreeUsesLocalBase(ctx, commonDir, ws)
+	if err != nil || !usesLocalBase {
+		return false, false, err
+	}
+	if _, err := ValidateWorktreeBasePath(
+		ctx, ws.WorktreePath, ws.PlatformHost, ws.RepoOwner, ws.RepoName,
+	); err != nil {
+		return false, false, err
+	}
+	return true, true, nil
+}
+
+func (m *Manager) existingWorktreeUsesManagedClone(
+	ctx context.Context,
+	commonDir string,
+	ws *Workspace,
+) bool {
+	if m.clones == nil {
+		return false
+	}
+	cloneDir, err := m.clones.ClonePathInNamespace(
+		workspaceCloneNamespace(ws.Platform),
+		ws.PlatformHost, ws.RepoOwner, ws.RepoName,
+	)
+	if err != nil {
+		return false
+	}
+	ready, err := gitCloneDirReady(cloneDir)
+	if err != nil || !ready {
+		return false
+	}
+	actualDir, err := canonicalFilesystemPath(commonDir)
+	if err != nil {
+		return false
+	}
+	expectedDir, err := canonicalFilesystemPath(cloneDir)
+	if err != nil {
+		return false
+	}
+	return actualDir == expectedDir
+}
+
+func (m *Manager) refreshExistingWorkspaceWorktree(
+	ctx context.Context,
+	commonDir string,
+	ws *Workspace,
+) (bool, error) {
+	if err := m.fetchWorkspaceBase(ctx, commonDir, ws.PlatformHost, false); err != nil {
+		return false, err
+	}
+	if ws.ItemType != db.WorkspaceItemTypePullRequest {
+		return false, nil
+	}
+	if err := m.fetchWorkspaceMergeRequestHeadRef(ctx, commonDir, ws); err != nil {
+		if ws.MRHeadRepo != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func (m *Manager) workspaceWorktreeUsesLocalBase(
+	ctx context.Context,
+	commonDir string,
+	ws *Workspace,
+) (bool, error) {
+	baseDir, ok, err := m.localWorktreeBaseDir(
+		ctx, ws.Platform, ws.PlatformHost, ws.RepoOwner, ws.RepoName,
+	)
+	if err != nil || !ok {
+		return false, err
+	}
+	baseCommonDir, err := worktreeCommonGitDir(ctx, baseDir)
+	if err != nil {
+		return false, fmt.Errorf("inspect local worktree base: %w", err)
+	}
+	actualDir, err := canonicalFilesystemPath(commonDir)
+	if err != nil {
+		return false, fmt.Errorf("resolve existing worktree git dir: %w", err)
+	}
+	expectedDir, err := canonicalFilesystemPath(baseCommonDir)
+	if err != nil {
+		return false, fmt.Errorf("resolve local worktree base git dir: %w", err)
+	}
+	return actualDir == expectedDir, nil
+}
+
+func existingWorkspacePersistedBranch(
+	ctx context.Context,
+	gitDir string,
+	ws *Workspace,
+	currentBranch string,
+	localBase bool,
+	useMergeRequestHeadRef bool,
+) (string, bool, error) {
+	if ws.ItemType == db.WorkspaceItemTypePullRequest &&
+		currentBranch == syntheticPRWorktreeBranch(ws.ItemNumber) {
+		ok, err := existingWorkspaceHeadMatchesCurrentHead(
+			ctx, gitDir, ws, currentBranch, useMergeRequestHeadRef,
+		)
+		return currentBranch, ok, err
+	}
+	if ws.WorkspaceBranch != "" && ws.WorkspaceBranch != workspaceBranchUnknown {
+		return ws.WorkspaceBranch, currentBranch == ws.WorkspaceBranch, nil
+	}
+	if currentBranch != "" && currentBranch == ws.GitHeadRef {
+		if ws.ItemType == db.WorkspaceItemTypePullRequest {
+			ok, err := existingWorkspaceHeadMatchesCurrentHead(
+				ctx, gitDir, ws, currentBranch, useMergeRequestHeadRef,
+			)
+			if err != nil || !ok {
+				return "", false, err
+			}
+			if localBase {
+				return "", true, nil
+			}
+			return currentBranch, true, nil
+		}
+		headSHA, ok, err := gitRefSHA(ctx, ws.WorktreePath, "HEAD")
+		if err != nil || !ok {
+			return "", false, err
+		}
+		startSHA, ok, err := gitRefSHA(ctx, ws.WorktreePath, workspaceStartRef(ws))
+		if err != nil || !ok {
+			return "", false, err
+		}
+		if headSHA != startSHA {
+			return "", false, nil
+		}
+		return currentBranch, true, nil
+	}
+	return "", false, nil
+}
+
+func existingWorkspaceHeadMatchesCurrentHead(
+	ctx context.Context,
+	gitDir string,
+	ws *Workspace,
+	currentBranch string,
+	useMergeRequestHeadRef bool,
+) (bool, error) {
+	headSHA, ok, err := gitRefSHA(ctx, ws.WorktreePath, "HEAD")
+	if err != nil || !ok {
+		return false, err
+	}
+	expectedRef, err := workspaceFallbackStartRef(
+		ctx, gitDir, ws, useMergeRequestHeadRef,
+	)
+	if err != nil {
+		return false, err
+	}
+	expectedSHA, ok, err := gitRefSHA(ctx, gitDir, expectedRef)
+	if err != nil || !ok {
+		return false, err
+	}
+	if headSHA != expectedSHA {
+		return false, fmt.Errorf(
+			"existing worktree branch %q points at %s, not current workspace head %s",
+			currentBranch, headSHA, expectedSHA,
+		)
+	}
+	return true, nil
+}
+
+func worktreeCurrentBranch(ctx context.Context, path string) (string, error) {
+	out, err := gitCombinedOutput(ctx, path, "branch", "--show-current")
+	if err != nil {
+		return "", fmt.Errorf("inspect existing worktree branch: %w", err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func (m *Manager) workspaceSetupGitDir(
@@ -975,7 +1259,8 @@ func localGitConfigKeysForScope(
 		}
 		if scope == "--worktree" &&
 			(strings.Contains(out, "extensions.worktreeConfig") ||
-				strings.Contains(out, "extension worktreeConfig")) {
+				strings.Contains(out, "extension worktreeConfig") ||
+				strings.Contains(out, "config.worktree")) {
 			return nil, nil
 		}
 		return nil, err
@@ -1021,12 +1306,42 @@ func (m *Manager) addWorktreeLocked(
 	if ws.ItemType == db.WorkspaceItemTypeIssue {
 		return m.addIssueWorktree(ctx, cloneDir, ws)
 	}
+	mergeRequestHeadRefFetched := false
+	if ws.MRHeadRepo != nil {
+		if err := m.fetchWorkspaceMergeRequestHeadRef(ctx, cloneDir, ws); err != nil {
+			return "", fmt.Errorf("fetch merge request head ref: %w", err)
+		}
+		mergeRequestHeadRefFetched = true
+	}
 	branch, err := m.addPreferredWorktree(ctx, cloneDir, localBase, ws)
 	if err == nil {
 		return branch, nil
 	}
 	fallbackBranch := syntheticPRWorktreeBranch(ws.ItemNumber)
-	startRef := workspaceStartRef(ws)
+	// Providers may not retain a synthetic MR head ref. Try to populate the
+	// specific ref needed for this workspace, but do not trust a local stale
+	// copy when the exact refresh fails.
+	var fetchHeadErr error
+	useMergeRequestHeadRef := mergeRequestHeadRefFetched
+	if !useMergeRequestHeadRef {
+		fetchHeadErr = m.fetchWorkspaceMergeRequestHeadRef(ctx, cloneDir, ws)
+		useMergeRequestHeadRef = fetchHeadErr == nil
+	}
+	if !useMergeRequestHeadRef && ws.MRHeadRepo != nil {
+		return "", fmt.Errorf(
+			"preferred branch %q failed: %w; fallback branch %q failed: fetch merge request head ref: %w",
+			ws.GitHeadRef, err, fallbackBranch, fetchHeadErr,
+		)
+	}
+	startRef, startRefErr := workspaceFallbackStartRef(
+		ctx, cloneDir, ws, useMergeRequestHeadRef,
+	)
+	if startRefErr != nil {
+		return "", fmt.Errorf(
+			"preferred branch %q failed: %w; fallback branch %q failed: %w",
+			ws.GitHeadRef, err, fallbackBranch, startRefErr,
+		)
+	}
 	fallbackErr := runGitWorktreeAdd(
 		ctx, cloneDir, ws.WorktreePath,
 		"-b", fallbackBranch, startRef,
@@ -1175,9 +1490,29 @@ func workspaceStartRef(ws *Workspace) string {
 		return "origin/HEAD"
 	}
 	if ws.MRHeadRepo != nil {
-		return fmt.Sprintf("refs/pull/%d/head", ws.ItemNumber)
+		return workspaceMergeRequestHeadRef(ws)
 	}
 	return "origin/" + ws.GitHeadRef
+}
+
+func workspaceFallbackStartRef(
+	ctx context.Context, cloneDir string, ws *Workspace, useMergeRequestHeadRef bool,
+) (string, error) {
+	if useMergeRequestHeadRef && ws.ItemType == db.WorkspaceItemTypePullRequest {
+		ref := workspaceMergeRequestHeadRef(ws)
+		_, exists, err := gitRefSHA(ctx, cloneDir, ref)
+		if err != nil {
+			return "", fmt.Errorf("inspect merge request head ref %q: %w", ref, err)
+		}
+		if exists {
+			return ref, nil
+		}
+	}
+	return workspaceStartRef(ws), nil
+}
+
+func workspaceMergeRequestHeadRef(ws *Workspace) string {
+	return platform.MergeRequestHeadRef(platform.Kind(ws.Platform), ws.ItemNumber)
 }
 
 func syntheticPRWorktreeBranch(mrNumber int) string {
@@ -2683,6 +3018,41 @@ func (m *Manager) fetchWorkspaceBase(
 		}
 	}
 	return fetchWorkspaceBaseWithGit(ctx, run, dir, requireOriginHead)
+}
+
+func (m *Manager) fetchWorkspaceMergeRequestHeadRef(
+	ctx context.Context,
+	dir string,
+	ws *Workspace,
+) error {
+	run := runGitWithoutHooks
+	if m.clones != nil {
+		run = func(ctx context.Context, dir string, args ...string) error {
+			out, err := m.clones.RunGit(ctx, ws.PlatformHost, dir, args...)
+			if err != nil {
+				return fmt.Errorf(
+					"%w: %s", err, strings.TrimSpace(string(out)),
+				)
+			}
+			return nil
+		}
+	}
+	return fetchWorkspaceMergeRequestHeadRefWithGit(ctx, run, dir, ws)
+}
+
+func fetchWorkspaceMergeRequestHeadRefWithGit(
+	ctx context.Context,
+	run func(context.Context, string, ...string) error,
+	dir string,
+	ws *Workspace,
+) error {
+	ref := workspaceMergeRequestHeadRef(ws)
+	return run(
+		ctx, dir, gitArgsWithoutHooks(
+			"fetch", "--no-tags", "--recurse-submodules=no",
+			"origin", "+"+ref+":"+ref,
+		)...,
+	)
 }
 
 func fetchWorkspaceBaseWithGit(
