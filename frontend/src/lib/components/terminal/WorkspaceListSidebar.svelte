@@ -20,6 +20,7 @@
     type RepoLabelIdentity,
   } from "@middleman/ui/utils/repo-label";
   import ProviderIcon from "../provider/ProviderIcon.svelte";
+  import ConfirmDialog from "../shared/ConfirmDialog.svelte";
   import {
     defaultWorkspaceListDisplayOptions,
     defaultWorkspaceListSort,
@@ -119,6 +120,7 @@
     x: number;
     y: number;
   } | null>(null);
+  let deleteConfirmWorkspace = $state<Workspace | null>(null);
   let workspaceAction = $state<{
     workspaceKey: string;
     action: "push" | "pull" | "reveal" | "delete";
@@ -138,6 +140,10 @@
 
   const normalizedSearchQuery = $derived(
     searchQuery.trim().toLowerCase(),
+  );
+  const deleteConfirmBusy = $derived(
+    deleteConfirmWorkspace !== null &&
+      workspaceActionMatches(deleteConfirmWorkspace, "delete"),
   );
 
   const visibleWorkspaces = $derived.by(() => {
@@ -768,11 +774,19 @@
     }
   }
 
-  async function deleteWorkspaceFromList(ws: Workspace): Promise<void> {
-    const confirmed = window.confirm(
-      `Delete workspace "${displayName(ws)}"?\n\nThis removes its managed worktree and runtime sessions.`,
-    );
-    if (!confirmed || !startWorkspaceAction(ws, "delete")) return;
+  function openDeleteWorkspaceDialog(ws: Workspace): void {
+    deleteConfirmWorkspace = ws;
+    closeContextMenu();
+  }
+
+  function closeDeleteWorkspaceDialog(): void {
+    if (deleteConfirmWorkspace && workspaceActionMatches(deleteConfirmWorkspace, "delete")) return;
+    deleteConfirmWorkspace = null;
+  }
+
+  async function confirmDeleteWorkspaceFromList(): Promise<void> {
+    const ws = deleteConfirmWorkspace;
+    if (!ws || !startWorkspaceAction(ws, "delete")) return;
     try {
       const { error, response } = ws.fleet_host_key
         ? await client.DELETE("/fleet/hosts/{host_key}/workspaces/{id}", {
@@ -799,6 +813,7 @@
       showFlash(err instanceof Error ? err.message : "Delete failed.");
     } finally {
       finishWorkspaceAction(ws);
+      deleteConfirmWorkspace = null;
     }
   }
 
@@ -1302,7 +1317,7 @@
       type="button"
       disabled={actionBusy}
       onclick={() => {
-        void deleteWorkspaceFromList(menuWorkspace);
+        openDeleteWorkspaceDialog(menuWorkspace);
       }}
     >
       <span class="filter-dot filter-dot--danger"></span>
@@ -1310,6 +1325,22 @@
     </button>
   </div>
 {/if}
+
+<ConfirmDialog
+  open={deleteConfirmWorkspace !== null}
+  title="Delete workspace?"
+  message={deleteConfirmWorkspace
+    ? `Delete workspace "${displayName(deleteConfirmWorkspace)}"?`
+    : ""}
+  hint="This removes its managed worktree and runtime sessions."
+  confirmLabel="Delete workspace"
+  pendingLabel="Deleting…"
+  busy={deleteConfirmBusy}
+  tone="danger"
+  frameId="workspace-sidebar-delete"
+  onCancel={closeDeleteWorkspaceDialog}
+  onConfirm={() => void confirmDeleteWorkspaceFromList()}
+/>
 
 <style>
   .workspace-list-sidebar {
