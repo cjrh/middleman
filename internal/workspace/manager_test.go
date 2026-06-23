@@ -841,7 +841,6 @@ func TestValidateWorktreeBasePathRejectsExecutableLocalConfig(t *testing.T) {
 		{name: "alternate refs command", key: "core.alternateRefsCommand", value: "demo-alternates"},
 		{name: "askpass", key: "core.askPass", value: "demo-askpass"},
 		{name: "git proxy", key: "core.gitProxy", value: "demo-proxy"},
-		{name: "hooks path", key: "core.hooksPath", value: filepath.Join(t.TempDir(), "hooks")},
 		{name: "ssh command", key: "core.sshCommand", value: "demo-ssh"},
 		{name: "credential helper", key: "credential.helper", value: "!demo-helper"},
 		{name: "diff external", key: "diff.external", value: "demo-diff"},
@@ -879,25 +878,27 @@ func TestValidateWorktreeBasePathRejectsExecutableLocalConfig(t *testing.T) {
 	}
 }
 
-func TestValidateWorktreeBasePathRejectsExecutableGitHooks(t *testing.T) {
+func TestValidateWorktreeBasePathAcceptsConfiguredHooksPath(t *testing.T) {
 	assert := Assert.New(t)
 	require := require.New(t)
 
 	localRepo := setupLocalWorktreeBaseForWorkspaceGitTest(t, "feature/thing")
+	hooksPath := t.TempDir()
+	runWorkspaceTestGit(t, localRepo, "config", "core.hooksPath", hooksPath)
 	commonDir := strings.TrimSpace(string(runWorkspaceTestGit(
 		t, localRepo, "rev-parse", "--path-format=absolute", "--git-common-dir",
 	)))
-	hookPath := filepath.Join(commonDir, "hooks", "reference-transaction")
-	require.NoError(os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	hookPath := filepath.Join(commonDir, "hooks", "post-commit")
+	require.NoError(os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 
 	got, err := ValidateWorktreeBasePath(
 		t.Context(), localRepo, "github.com", "acme", "widget",
 	)
 
-	require.Empty(got)
-	require.Error(err)
-	assert.Contains(err.Error(), "reference-transaction")
-	assert.Contains(err.Error(), "must not be executable")
+	require.NoError(err)
+	canonicalLocalRepo, err := filepath.EvalSymlinks(localRepo)
+	require.NoError(err)
+	assert.Equal(canonicalLocalRepo, got)
 }
 
 func TestValidateWorktreeBasePathRejectsUnsafeOriginSchemes(t *testing.T) {
