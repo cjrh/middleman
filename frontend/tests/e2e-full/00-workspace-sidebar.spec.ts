@@ -540,6 +540,93 @@ test.describe("workspace sidebar full-stack", () => {
     }
   });
 
+  test("pending workspace delete stays locked after navigating away and back", async ({ page }) => {
+    let isolatedServer: IsolatedE2EServer | null = null;
+    let api: APIRequestContext | null = null;
+    try {
+      isolatedServer = await startIsolatedWorkspaceE2EServer();
+      api = await playwrightRequest.newContext({
+        baseURL: isolatedServer.info.base_url,
+      });
+
+      const deletingWorkspace = await createIssueWorkspace(api, 10);
+      const otherWorkspace = await createIssueWorkspace(api, 13);
+
+      let releaseDelete!: () => void;
+      const deleteMayContinue = new Promise<void>((resolve) => {
+        releaseDelete = resolve;
+      });
+      let markDeleteStarted!: () => void;
+      const deleteStarted = new Promise<void>((resolve) => {
+        markDeleteStarted = resolve;
+      });
+      let releaseOtherDelete!: () => void;
+      const otherDeleteMayContinue = new Promise<void>((resolve) => {
+        releaseOtherDelete = resolve;
+      });
+      let markOtherDeleteStarted!: () => void;
+      const otherDeleteStarted = new Promise<void>((resolve) => {
+        markOtherDeleteStarted = resolve;
+      });
+
+      await page.route(`**/api/v1/workspaces/${deletingWorkspace.id}`, async (route) => {
+        if (route.request().method() !== "DELETE") {
+          await route.continue();
+          return;
+        }
+        markDeleteStarted();
+        await deleteMayContinue;
+        await route.continue();
+      });
+      await page.route(`**/api/v1/workspaces/${otherWorkspace.id}`, async (route) => {
+        if (route.request().method() !== "DELETE") {
+          await route.continue();
+          return;
+        }
+        markOtherDeleteStarted();
+        await otherDeleteMayContinue;
+        await route.continue();
+      });
+
+      await page.goto(`${isolatedServer.info.base_url}/terminal/${deletingWorkspace.id}`);
+      await expect(page.locator(".workspace-list-sidebar .ws-row")).toHaveCount(2);
+
+      await page.locator(".header-bar").getByRole("button", { name: "Delete" }).click();
+      await deleteStarted;
+
+      const deleteButton = page.locator(".header-bar").getByRole("button", { name: "Delete" });
+      await expect(deleteButton).toBeDisabled();
+      await page.keyboard.press("Escape");
+
+      await page.locator(".workspace-list-sidebar .ws-row:not(.selected)").click();
+      await expect(page).not.toHaveURL(new RegExp(`/terminal/${deletingWorkspace.id}$`));
+      await expect(page).toHaveURL(new RegExp(`/terminal/${otherWorkspace.id}$`));
+
+      await page.locator(".header-bar").getByRole("button", { name: "Delete" }).click();
+      await otherDeleteStarted;
+      await expect(page.locator(".header-bar").getByRole("button", { name: "Delete" })).toBeDisabled();
+
+      await page.locator(".workspace-list-sidebar .ws-row.selected").click({ button: "right" });
+      await expect(page.getByRole("menuitem", { name: /Delete workspace|Deleting/ })).toBeDisabled();
+      await page.keyboard.press("Escape");
+
+      await page.locator(".workspace-list-sidebar .ws-row:not(.selected)").click();
+      await expect(page).toHaveURL(new RegExp(`/terminal/${deletingWorkspace.id}$`));
+      await expect(deleteButton).toBeDisabled();
+
+      await page.locator(".workspace-list-sidebar .ws-row.selected").click({ button: "right" });
+      await expect(page.getByRole("menuitem", { name: /Delete workspace|Deleting/ })).toBeDisabled();
+      await page.keyboard.press("Escape");
+
+      releaseOtherDelete();
+      releaseDelete();
+      await expect(page).toHaveURL(/\/workspaces$/);
+    } finally {
+      await api?.dispose();
+      await isolatedServer?.stop();
+    }
+  });
+
   test("ghostty shell terminal paints output and accepts browser keyboard input", async ({ page }) => {
     let isolatedServer: IsolatedE2EServer | null = null;
     let api: APIRequestContext | null = null;

@@ -16,6 +16,7 @@
     itemNumber: number;
     active?: boolean;
     refreshToken?: number;
+    disabled?: boolean;
   }
 
   const {
@@ -29,6 +30,7 @@
     itemNumber,
     active = false,
     refreshToken = 0,
+    disabled = false,
   }: Props = $props();
   const { diff } = getStores();
 
@@ -47,6 +49,7 @@
   });
 
   function selectBase(nextBase: WorkspaceDiffBase): void {
+    if (disabled) return;
     base = nextBase;
   }
 </script>
@@ -61,6 +64,7 @@
         aria-pressed={base === "head"}
         aria-label="Compare with HEAD"
         title="HEAD"
+        disabled={disabled}
         onclick={() => selectBase("head")}
       >
         HEAD
@@ -71,6 +75,7 @@
         aria-pressed={base === "pushed"}
         aria-label="Compare with pushed branch"
         title="Pushed branch"
+        disabled={disabled}
         onclick={() => selectBase("pushed")}
       >
         Branch
@@ -81,18 +86,20 @@
         aria-pressed={base === "merge-target"}
         aria-label="Compare with merge target"
         title="Merge target"
+        disabled={disabled}
         onclick={() => selectBase("merge-target")}
       >
         Target
       </button>
     </div>
-    <DiffScopePicker compact />
+    <DiffScopePicker compact {disabled} />
   </div>
   <DiffToolbar
     compact
     showRichPreview={false}
     showFileJump
     showScopePicker={false}
+    {disabled}
   />
   <div class="workspace-diff-layout">
     <div class="workspace-diff-main">
@@ -178,17 +185,31 @@
     white-space: nowrap;
   }
 
-  .scope-btn:hover {
+  .scope-btn:hover:not(:disabled) {
     color: var(--text-primary);
   }
 
-  .scope-btn--active {
+  .scope-btn--active:not(:disabled) {
     background: var(--accent-blue);
     color: #fff;
   }
 
-  .scope-btn--active:hover {
+  .scope-btn--active:hover:not(:disabled) {
     color: #fff;
+  }
+
+  .scope-btn:disabled {
+    cursor: not-allowed;
+    color: color-mix(in srgb, var(--text-muted) 75%, var(--bg-surface));
+    background: var(--bg-surface);
+    opacity: 1;
+  }
+
+  .scope-btn--active:disabled {
+    background: color-mix(in srgb, rgb(128 128 128) 28%, var(--bg-surface));
+    color: color-mix(in srgb, rgb(115 115 115) 80%, var(--text-primary));
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, rgb(128 128 128) 35%, var(--border-muted));
   }
 
   .workspace-diff-layout {

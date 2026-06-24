@@ -170,6 +170,11 @@
   let actionError = $state<string | null>(null);
   let retryingSetup = $state(false);
   let refreshingWorkspace = $state(false);
+  type DeletingWorkspaceTarget = {
+    id: string;
+    hostKey: string | undefined;
+  };
+  let deletingWorkspaceTargets = $state<DeletingWorkspaceTarget[]>([]);
   let sidebarRefreshToken = $state(0);
   let forcePromptMessage = $state<string | null>(null);
   let forcePromptForId = $state<string | null>(null);
@@ -183,11 +188,10 @@
   let renameInputValue = $state("");
   let renameSaving = $state(false);
   let renameInputEl = $state<HTMLInputElement | null>(null);
-  // Bumps on every workspace route change. Async delete callbacks
-  // capture this at request time and bail out if it has moved on,
-  // covering the case where the user leaves and returns to the same
-  // workspace before an in-flight response settles — an id check
-  // alone would let a stale 409 reopen the prompt.
+  // Bumps on every workspace route change so non-delete async
+  // callbacks can detect stale responses for the previous route.
+  // Delete requests track their own target separately because the
+  // same workspace must stay blocked across A -> B -> A navigation.
   let workspaceGen = 0;
   let runtimeError = $state<string | null>(null);
   let pollTimer = $state<ReturnType<
@@ -443,7 +447,12 @@
       (workspace.id !== workspaceId ||
         workspaceHostKey !== selectedWorkspaceHostKey(workspace)),
   );
-  const actionsBlocked = $derived(transitioning);
+  const deletingSelectedWorkspace = $derived(
+    deletingWorkspaceTargets.some((target) =>
+      isDeletingWorkspaceTarget(target, workspaceId, workspaceHostKey),
+    ),
+  );
+  const actionsBlocked = $derived(transitioning || deletingSelectedWorkspace || forceDeleting);
   const modalOpen = $derived(
     forcePromptMessage !== null ||
       stopPromptSession !== null ||
@@ -486,6 +495,7 @@
   });
 
   function handleSegmentClick(tab: SidebarTab): void {
+    if (actionsBlocked) return;
     if (sidebarOpen && sidebarTab === tab) {
       sidebarOpen = false;
     } else {
@@ -1317,6 +1327,7 @@
   }
 
   async function toggleTerminalPanel(): Promise<void> {
+    if (actionsBlocked) return;
     if (terminalLayout.open) {
       terminalLayout = normalizeLayoutForSessions(runtimeSessions, {
         ...terminalLayout,
@@ -1336,6 +1347,7 @@
   }
 
   function selectTerminalSession(sessionKey: string): void {
+    if (actionsBlocked) return;
     const group = terminalGroupForSession(terminalLayout.terminalGroups, sessionKey);
     const groups = terminalLayout.terminalGroups.map((candidate) =>
       candidate.id === group?.id
@@ -1359,6 +1371,7 @@
   }
 
   function selectTerminalGroup(groupID: string): void {
+    if (actionsBlocked) return;
     terminalLayout = normalizeLayoutForSessions(
       runtimeSessions,
       layoutWithTerminalGroups(
@@ -1373,6 +1386,7 @@
   }
 
   function moveSessionToTerminal(sessionKey: string): void {
+    if (actionsBlocked) return;
     const session = runtimeSessions.find((s) => s.key === sessionKey);
     if (!session) return;
     const groups = addTerminalGroup(terminalLayout.terminalGroups, sessionKey);
@@ -1398,6 +1412,7 @@
   }
 
   function moveSessionToWorkflow(sessionKey: string): void {
+    if (actionsBlocked) return;
     const terminalGroups = closeSessionInTerminalGroups(
       terminalLayout.terminalGroups,
       sessionKey,
@@ -1454,6 +1469,7 @@
     sourceTabKey: WorkflowTabKey,
     targetTabKey: WorkflowTabKey,
   ): void {
+    if (actionsBlocked) return;
     if (sourceTabKey === targetTabKey) return;
     const prepared = normalizeLayoutForSessions(
       runtimeSessions,
@@ -1474,6 +1490,7 @@
     sourceTabKey: WorkflowTabKey,
     leafID: string,
   ): void {
+    if (actionsBlocked) return;
     const prepared = normalizeLayoutForSessions(
       runtimeSessions,
       layoutWithWorkflowTab(sourceTabKey, terminalLayout),
@@ -1495,6 +1512,7 @@
     direction: SplitDirection,
     placement: "before" | "after",
   ): void {
+    if (actionsBlocked) return;
     const prepared = normalizeLayoutForSessions(
       runtimeSessions,
       layoutWithWorkflowTab(sourceTabKey, terminalLayout),
@@ -1513,6 +1531,7 @@
   }
 
   function closeWorkflowTab(tabKey: WorkflowTabKey): void {
+    if (actionsBlocked) return;
     if (tabKey === "terminal") {
       terminalLayout = normalizeLayoutForSessions(runtimeSessions, {
         ...terminalLayout,
@@ -1532,6 +1551,7 @@
   }
 
   function moveWorkflowTabToTerminal(tabKey: WorkflowTabKey): void {
+    if (actionsBlocked) return;
     const sessionKey = sessionKeyFromWorkflowTab(tabKey);
     if (sessionKey !== null) {
       moveSessionToTerminal(sessionKey);
@@ -1539,6 +1559,7 @@
   }
 
   function renameWorkflowTab(tabKey: WorkflowTabKey): void {
+    if (actionsBlocked) return;
     const sessionKey = sessionKeyFromWorkflowTab(tabKey);
     if (sessionKey === null) return;
     const session = runtimeSessions.find((s) => s.key === sessionKey);
@@ -1910,6 +1931,7 @@
   }
 
   function dockTerminalPanel(dock: TerminalDock): void {
+    if (actionsBlocked) return;
     terminalLayout = normalizeLayoutForSessions(runtimeSessions, {
       ...terminalLayout,
       dock,
@@ -1923,6 +1945,7 @@
   }
 
   function resizeTerminalPanel(height: number): void {
+    if (actionsBlocked) return;
     terminalLayout = {
       ...terminalLayout,
       height: clampTerminalHeight(height),
@@ -1930,6 +1953,7 @@
   }
 
   function updateActiveTerminalTree(tree: PaneNode | null): void {
+    if (actionsBlocked) return;
     const activeGroupID = terminalLayout.activeTerminalGroupID;
     terminalLayout = {
       ...terminalLayout,
@@ -1949,6 +1973,7 @@
   }
 
   function handleWorkflowDragOver(event: DragEvent): void {
+    if (actionsBlocked) return;
     if (readDroppedSession(event) === null) return;
     event.preventDefault();
     if (event.dataTransfer) {
@@ -1957,6 +1982,7 @@
   }
 
   function handleWorkflowDrop(event: DragEvent): void {
+    if (actionsBlocked) return;
     const sessionKey = readDroppedSession(event);
     if (sessionKey === null) return;
     event.preventDefault();
@@ -2126,7 +2152,6 @@
     actionError = null;
     const targetId = workspaceId;
     const targetHostKey = workspaceHostKey;
-    const targetGen = workspaceGen;
     // Capture the trigger synchronously: the click handler runs
     // before `inert` is applied to .terminal-view, so this is the
     // last point we can read the originating focused element. By
@@ -2136,44 +2161,74 @@
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    const { error, response } = targetHostKey
-      ? await client.DELETE("/fleet/hosts/{host_key}/workspaces/{id}", {
-          params: { path: { host_key: targetHostKey, id: targetId } },
-        })
-      : await client.DELETE("/workspaces/{id}", {
-          params: { path: { id: targetId } },
-        });
-    // Different workspace now: the user has moved on and nothing
-    // about this response applies.
-    if (!isCurrentWorkspace(targetId, targetHostKey)) return;
-    if (response.status === 409) {
-      // A 409 that lands after the user briefly left and returned
-      // to the same workspace would feel like an unrequested
-      // prompt; suppress it on a generation mismatch and let the
-      // user retry if they want.
-      if (targetGen !== workspaceGen) return;
-      previouslyFocusedEl = triggerEl;
-      forcePromptForId = targetId;
-      forcePromptMessage = apiErrorMessage(
-        error,
-        "Workspace has uncommitted changes.",
-      );
+    addDeletingWorkspaceTarget(targetId, targetHostKey);
+    try {
+      const { error, response } = targetHostKey
+        ? await client.DELETE("/fleet/hosts/{host_key}/workspaces/{id}", {
+            params: { path: { host_key: targetHostKey, id: targetId } },
+          })
+        : await client.DELETE("/workspaces/{id}", {
+            params: { path: { id: targetId } },
+          });
+      // Different workspace now: the user has moved on and nothing
+      // about this response applies.
+      if (!isCurrentWorkspace(targetId, targetHostKey)) return;
+      if (response.status === 409) {
+        previouslyFocusedEl = triggerEl;
+        forcePromptForId = targetId;
+        forcePromptMessage = apiErrorMessage(
+          error,
+          "Workspace has uncommitted changes.",
+        );
+        return;
+      }
+      if (!response.ok && response.status !== 204) {
+        actionError = apiErrorMessage(
+          error,
+          `Delete failed (${response.status})`,
+        );
+        return;
+      }
+      // Successful delete: the server destroyed this workspace and
+      // the user is still looking at it. Navigate away even after
+      // an A→B→A round trip — otherwise they'd be staring at a
+      // workspace that no longer exists.
+      if (!isCurrentTerminalRoute(targetId)) return;
+      navigate("/workspaces");
+    } finally {
+      removeDeletingWorkspaceTarget(targetId, targetHostKey);
+    }
+  }
+
+  function isDeletingWorkspaceTarget(
+    target: DeletingWorkspaceTarget,
+    id: string,
+    hostKey: string | undefined,
+  ): boolean {
+    return target.id === id && target.hostKey === hostKey;
+  }
+
+  function addDeletingWorkspaceTarget(
+    id: string,
+    hostKey: string | undefined,
+  ): void {
+    if (
+      deletingWorkspaceTargets.some((target) =>
+        isDeletingWorkspaceTarget(target, id, hostKey),
+      )
+    ) {
       return;
     }
-    if (!response.ok && response.status !== 204) {
-      if (targetGen !== workspaceGen) return;
-      actionError = apiErrorMessage(
-        error,
-        `Delete failed (${response.status})`,
-      );
-      return;
-    }
-    // Successful delete: the server destroyed this workspace and
-    // the user is still looking at it. Navigate away even after
-    // an A→B→A round trip — otherwise they'd be staring at a
-    // workspace that no longer exists.
-    if (!isCurrentTerminalRoute(targetId)) return;
-    navigate("/workspaces");
+    deletingWorkspaceTargets = [...deletingWorkspaceTargets, { id, hostKey }];
+  }
+
+  function removeDeletingWorkspaceTarget(
+    id: string,
+    hostKey: string | undefined,
+  ): void {
+    deletingWorkspaceTargets = deletingWorkspaceTargets.filter(
+      (target) => !isDeletingWorkspaceTarget(target, id, hostKey),
+    );
   }
 
   function isCurrentTerminalRoute(targetId: string): boolean {
@@ -2187,6 +2242,7 @@
     const targetHostKey = workspaceHostKey;
     const targetGen = workspaceGen;
     forceDeleting = true;
+    addDeletingWorkspaceTarget(targetId, targetHostKey);
     actionError = null;
     try {
       const { error, response } = targetHostKey
@@ -2226,6 +2282,7 @@
       if (!isCurrentTerminalRoute(targetId)) return;
       navigate("/workspaces");
     } finally {
+      removeDeletingWorkspaceTarget(targetId, targetHostKey);
       forceDeleting = false;
     }
   }
@@ -2543,13 +2600,14 @@
           </span>
           <button
             class="retry-btn"
-            disabled={retryingSetup}
+            disabled={actionsBlocked || retryingSetup}
             onclick={() => void handleRetrySetup()}
           >
             Retry
           </button>
           <button
             class="retry-btn danger"
+            disabled={actionsBlocked}
             onclick={(event) =>
               void handleDelete(event.currentTarget)}
           >
@@ -2575,6 +2633,7 @@
                 <button
                   class="seg-btn"
                   class:active={sidebarOpen && sidebarTab === "diff"}
+                  disabled={actionsBlocked}
                   onclick={() => handleSegmentClick("diff")}
                 >
                   Diff
@@ -2583,6 +2642,7 @@
                   <button
                     class="seg-btn"
                     class:active={sidebarOpen && sidebarTab === "issue"}
+                    disabled={actionsBlocked}
                     onclick={() => handleSegmentClick("issue")}
                   >
                     Issue
@@ -2592,6 +2652,7 @@
                   <button
                     class="seg-btn"
                     class:active={sidebarOpen && sidebarTab === "pr"}
+                    disabled={actionsBlocked}
                     onclick={() => handleSegmentClick("pr")}
                   >
                     PR
@@ -2601,6 +2662,7 @@
                   <button
                     class="seg-btn"
                     class:active={sidebarOpen && sidebarTab === "reviews"}
+                    disabled={actionsBlocked}
                     onclick={() => handleSegmentClick("reviews")}
                   >
                     Reviews
@@ -2655,11 +2717,13 @@
                     onUpdate={updateWorkflowPreset}
                     onApply={(presetId) => void applyWorkflowPreset(presetId)}
                     onDelete={deleteWorkflowPreset}
+                    disabled={actionsBlocked}
                   />
-                  <TerminalOptionsMenu />
+                  <TerminalOptionsMenu disabled={actionsBlocked} />
                   <LaunchMenu
                     launchTargets={launchTargets}
                     {launchingKey}
+                    disabled={actionsBlocked}
                     onLaunch={(key) => void handleLaunch(key)}
                   />
                 </div>
@@ -2691,6 +2755,7 @@
                       node={terminalLayout.workflowTree}
                       tabs={workflowTabDescriptors}
                       {activeTabKey}
+                      disabled={actionsBlocked}
                       onSelectTab={(tabKey) => {
                         if (tabKey === "terminal") {
                           terminalLayout = { ...terminalLayout, open: true };
@@ -2725,6 +2790,7 @@
                               sessions={runtimeSessions}
                               displayLabels={sessionDisplayLabels}
                               {launchingKey}
+                              readonly={actionsBlocked}
                               onLaunch={(key) => void handleLaunch(key)}
                               onOpenSession={openSession}
                             />
@@ -2741,6 +2807,7 @@
                             dock={terminalLayout.dock}
                             height={terminalLayout.height}
                             loading={terminalLaunching}
+                            disabled={actionsBlocked}
                             onToggle={() => void toggleTerminalPanel()}
                             onNewTerminal={() => void launchTerminalSession()}
                             onSplit={(direction) => void splitTerminal(direction)}
@@ -2777,6 +2844,7 @@
                                   workspaceHostKey,
                                 )}
                                 reconnectOnExit={false}
+                                disabled={actionsBlocked}
                                 {active}
                                 onExit={() => handleSessionExit(session)}
                                 initialStatus={session.status}
@@ -2801,6 +2869,7 @@
                   dock={terminalLayout.dock}
                   height={terminalLayout.height}
                   loading={terminalLaunching}
+                  disabled={actionsBlocked}
                   onToggle={() => void toggleTerminalPanel()}
                   onNewTerminal={() => void launchTerminalSession()}
                   onSplit={(direction) => void splitTerminal(direction)}
@@ -2852,6 +2921,7 @@
                 branch={workspace.git_head_ref}
                 roborevBaseUrl={basePath + "/api/roborev"}
                 refreshToken={sidebarRefreshToken}
+                disabled={actionsBlocked}
               />
             </div>
           {/if}
@@ -2881,6 +2951,17 @@
           onCollapseSidebar={onToggleSidebar}
           onOpenItemSidebar={openItemSidebar}
           onWorkspaceListStateChange={updateWorkspaceListState}
+          isWorkspaceActionDisabled={(id, hostKey) =>
+            deletingWorkspaceTargets.some((target) =>
+              isDeletingWorkspaceTarget(target, id, hostKey),
+            )}
+          onWorkspaceDeletePendingChange={(id, hostKey, pending) => {
+            if (pending) {
+              addDeletingWorkspaceTarget(id, hostKey);
+            } else {
+              removeDeletingWorkspaceTarget(id, hostKey);
+            }
+          }}
         />
       {/snippet}
       {@render terminalMainContent()}
@@ -3361,15 +3442,29 @@
     border-left: 1px solid var(--border-default);
   }
 
-  .seg-btn:hover:not(.active) {
+  .seg-btn:hover:not(.active):not(:disabled) {
     color: var(--text-primary);
     background: var(--bg-surface-hover);
   }
 
-  .seg-btn.active {
+  .seg-btn.active:not(:disabled) {
     background: var(--accent-blue);
     color: #fff;
     font-weight: 600;
+  }
+
+  .seg-btn:disabled {
+    cursor: not-allowed;
+    color: color-mix(in srgb, var(--text-muted) 75%, var(--bg-surface));
+    background: var(--bg-surface);
+    opacity: 1;
+  }
+
+  .seg-control .seg-btn.active:disabled {
+    background: color-mix(in srgb, rgb(128 128 128) 28%, var(--bg-surface)) !important;
+    color: color-mix(in srgb, rgb(115 115 115) 80%, var(--text-primary)) !important;
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, rgb(128 128 128) 35%, var(--border-muted));
   }
 
   .terminal-and-sidebar {
