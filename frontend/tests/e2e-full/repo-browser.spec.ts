@@ -162,15 +162,14 @@ test.describe("repository source browser", () => {
       await mainTreeLoaded;
 
       const browser = page.getByRole("region", { name: "Repository source browser" });
-      const refSelect = browser.getByLabel("Select repository ref");
-      const featureOption = await refSelect
-        .locator("option")
-        .filter({ hasText: "branch: feature/caching" })
-        .getAttribute("value");
-      expect(featureOption).toBeTruthy();
+      await browser.getByRole("button", { name: /Select repository ref: branch: main/ }).click();
+      await browser.getByRole("combobox", { name: "Search repository refs" }).fill("feature");
+      await expect(browser.getByRole("tab", { name: /Branches/ })).toHaveAttribute("aria-selected", "true");
+      await expect(browser.getByRole("option", { name: /branch: feature\/caching/ })).toBeVisible();
+      await expect(browser.getByRole("option", { name: /tag:/ })).toHaveCount(0);
 
       const featureTreeLoaded = treeResponse(page, "feature/caching");
-      await refSelect.selectOption(featureOption!);
+      await browser.getByRole("option", { name: /branch: feature\/caching/ }).click();
       await featureTreeLoaded;
       await expect(page).toHaveURL(/ref_name=feature%2Fcaching/);
 
@@ -182,6 +181,48 @@ test.describe("repository source browser", () => {
       expect(refsURLs).toHaveLength(1);
       expect(mainTreeURLs).toHaveLength(1);
       expect(featureTreeURLs).toHaveLength(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("does not reload repository data when the active ref is selected again", async ({ page }) => {
+    const server = await startIsolatedE2EServer();
+    try {
+      const refsURLs = collectRepoBrowserResponseURLs(page, "refs");
+      const treeURLs = collectRepoBrowserResponseURLs(page, "tree", "main");
+      const blobURLs = collectRepoBrowserResponseURLs(page, "blob", undefined, "README.md");
+      const refsLoaded = repoBrowserResponse(page, "refs");
+      const treeLoaded = treeResponse(page, "main");
+      const blobLoaded = blobResponse(page, "README.md");
+
+      await page.goto(
+        `${server.info.base_url}/repo/browser?provider=github&repo_path=acme%2Fwidgets&ref_type=branch&ref_name=main&path=README.md`,
+      );
+      await refsLoaded;
+      await treeLoaded;
+      await blobLoaded;
+
+      const browser = page.getByRole("region", { name: "Repository source browser" });
+      await expect(browser.getByRole("main", { name: "Selected file" }).locator(".repo-browser__path")).toContainText(
+        "README.md",
+      );
+      const routeBeforeReselect = page.url();
+
+      await browser.getByRole("button", { name: /Select repository ref: branch: main/ }).click();
+      await browser.getByRole("option", { name: /branch: main/ }).click();
+
+      await expect(browser.getByRole("combobox", { name: "Search repository refs" })).toHaveCount(0);
+      expect(page.url()).toBe(routeBeforeReselect);
+      expect(refsURLs).toHaveLength(1);
+      expect(treeURLs).toHaveLength(1);
+      expect(blobURLs).toHaveLength(1);
+      await expectNoMoreRepoBrowserResponses(page, "refs");
+      await expectNoMoreRepoBrowserResponses(page, "tree", "main");
+      await expectNoMoreRepoBrowserResponses(page, "blob");
+      expect(refsURLs).toHaveLength(1);
+      expect(treeURLs).toHaveLength(1);
+      expect(blobURLs).toHaveLength(1);
     } finally {
       await server.stop();
     }
