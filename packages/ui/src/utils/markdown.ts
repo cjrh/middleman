@@ -48,7 +48,7 @@ function renderItemRefToken(token: Tokens.Generic): string {
   return `<a ${itemReferenceAnchorAttributes(token)}>${token.text}</a>`;
 }
 
-function itemRefExtension(repo?: RepoContext): TokenizerAndRendererExtension {
+export function providerItemRefExtension(repo?: RepoContext): TokenizerAndRendererExtension {
   const supportsBangMR = canonicalProvider(repo?.provider ?? "") === "gitlab";
   return {
     name: "itemRef",
@@ -63,8 +63,12 @@ function itemRefExtension(repo?: RepoContext): TokenizerAndRendererExtension {
       const adjustedMR = mrBareIdx >= 0 && src[mrBareIdx] !== "!" ? mrBareIdx + 1 : mrBareIdx;
       return [crossIdx, adjusted, adjustedMR].filter((idx) => idx >= 0).sort((a, b) => a - b)[0];
     },
-    tokenizer(this: { lexer: { state: { inLink: boolean } } }, src: string): ItemRefToken | undefined {
-      if (this.lexer.state.inLink || !repo) return undefined;
+    tokenizer(
+      this: { lexer?: { state?: { inLink?: boolean; inRawBlock?: boolean } } },
+      src: string,
+    ): ItemRefToken | undefined {
+      const state = this.lexer?.state;
+      if (state?.inLink || state?.inRawBlock || !repo) return undefined;
 
       const crossMatch = src.match(/^([\w.-]+(?:\/[\w.-]+)+)([#!])(\d+)(?!\w)/);
       if (crossMatch) {
@@ -267,7 +271,7 @@ function getMarked(repo?: RepoContext): Marked {
   let instance = markedCache.get(key);
   if (!instance) {
     instance = new Marked({ breaks: true, gfm: true });
-    instance.use({ extensions: [itemRefExtension(repo)] });
+    instance.use({ extensions: [providerItemRefExtension(repo)] });
     instance.use({
       renderer: taskListRenderer,
     });

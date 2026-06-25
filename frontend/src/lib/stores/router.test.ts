@@ -229,6 +229,43 @@ describe("router basic routes", () => {
     expect(getRoute()).toEqual({ page: "repos" });
   });
 
+  it("parses repo browser routes with selected ref, path, and view mode", () => {
+    navigate(
+      "/repo/browser?provider=gitlab&platform_host=gitlab.example.com&repo_path=Group%2FSub%20Team%2FProject&ref_type=branch&ref_name=feature%2Frepo-browser&ref_sha=abc123&path=docs%2FREADME.md&mode=preview",
+    );
+
+    expect(getRoute()).toEqual({
+      page: "repo-browser",
+      provider: "gitlab",
+      platformHost: "gitlab.example.com",
+      repoPath: "Group/Sub Team/Project",
+      owner: "Group/Sub Team",
+      name: "Project",
+      refType: "branch",
+      refName: "feature/repo-browser",
+      refSHA: "abc123",
+      path: "docs/README.md",
+      mode: "preview",
+    });
+    expect(getPage()).toBe("repo-browser");
+  });
+
+  it("parses repo browser routes without letting URL fragments corrupt query params", () => {
+    navigate("/repo/browser?provider=github&repo_path=acme%2Fwidgets&path=docs%2Fguide.md&mode=preview#api-reference");
+
+    expect(getRoute()).toEqual({
+      page: "repo-browser",
+      provider: "github",
+      platformHost: "github.com",
+      repoPath: "acme/widgets",
+      owner: "acme",
+      name: "widgets",
+      path: "docs/guide.md",
+      mode: "preview",
+      anchor: "api-reference",
+    });
+  });
+
   it("parses /kata", () => {
     navigate("/kata");
     expect(getRoute()).toEqual({ page: "kata" });
@@ -664,6 +701,19 @@ describe("router navigation events", () => {
     expect(payload.page).toBe("messages");
     expect(payload.type).toBe("messages");
     expect(payload.view).toBe("/messages?q=from%3Aops");
+  });
+
+  it("maps repo browser routes to repos navigation events and preserves URL fragments", () => {
+    const spy = vi.fn();
+    installOnNavigate(spy);
+
+    navigate("/repo/browser?provider=github&repo_path=acme%2Fwidgets&path=README.md&mode=preview#install");
+
+    const payload = spy.mock.calls[spy.mock.calls.length - 1]![0];
+    expect(payload.type).toBe("repos");
+    expect(payload.view).toBe(
+      "/repo/browser?provider=github&repo_path=acme%2Fwidgets&path=README.md&mode=preview#install",
+    );
   });
 
   it("maps every embed-workspace route to a workspaces navigation event", () => {

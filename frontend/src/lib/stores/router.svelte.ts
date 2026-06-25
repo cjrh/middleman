@@ -27,6 +27,20 @@ export type Route =
   | { page: "kata"; issue?: string; view?: KataTaskViewName; scope?: string }
   | { page: "docs"; folder: string | null; doc: string | null }
   | { page: "messages"; q: string | null; message: string | null; view?: "linked" }
+  | {
+      page: "repo-browser";
+      provider: string;
+      platformHost?: string | undefined;
+      repoPath: string;
+      owner: string;
+      name: string;
+      refType?: string | undefined;
+      refName?: string | undefined;
+      refSHA?: string | undefined;
+      path?: string | undefined;
+      mode?: "source" | "preview" | undefined;
+      anchor?: string | undefined;
+    }
   | { page: "workspaces" }
   | {
       page: "pulls";
@@ -109,7 +123,7 @@ function stripBase(path: string): string {
 }
 
 function currentLocationPath(): string {
-  return window.location.pathname + window.location.search;
+  return window.location.pathname + window.location.search + window.location.hash;
 }
 
 const defaultPlatformHosts: Record<string, string> = {
@@ -130,6 +144,15 @@ function decodeRouteSegment(segment: string): string | undefined {
     return decodeURIComponent(segment);
   } catch {
     return undefined;
+  }
+}
+
+function decodeRouteHash(hash: string): string | undefined {
+  if (!hash) return undefined;
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
   }
 }
 
@@ -193,9 +216,12 @@ function splitRepoPath(repoPath: string): { owner: string; name: string } | unde
 }
 
 function parseRoute(fullPath: string): Route {
-  const qIdx = fullPath.indexOf("?");
-  const pathname = qIdx >= 0 ? fullPath.slice(0, qIdx) : fullPath;
-  const search = qIdx >= 0 ? fullPath.slice(qIdx + 1) : "";
+  const hashIdx = fullPath.indexOf("#");
+  const routePath = hashIdx >= 0 ? fullPath.slice(0, hashIdx) : fullPath;
+  const anchor = hashIdx >= 0 ? decodeRouteHash(fullPath.slice(hashIdx + 1)) : undefined;
+  const qIdx = routePath.indexOf("?");
+  const pathname = qIdx >= 0 ? routePath.slice(0, qIdx) : routePath;
+  const search = qIdx >= 0 ? routePath.slice(qIdx + 1) : "";
   const path = stripBase(pathname).replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
   if (path === "/m" || path === "/m/activity") {
@@ -264,6 +290,33 @@ function parseRoute(fullPath: string): Route {
   }
   if (path === "/repos") {
     return { page: "repos" };
+  }
+  if (path === "/repo/browser") {
+    const sp = new URLSearchParams(search);
+    const provider = emptyToNull(sp.get("provider"));
+    const repoPath = emptyToNull(sp.get("repo_path"))?.replace(/^\/+|\/+$/g, "");
+    const repo = repoPath ? splitRepoPath(repoPath) : undefined;
+    if (!provider || !repoPath || !repo) return { page: "repos" };
+    const platformHost = emptyToNull(sp.get("platform_host")) ?? defaultPlatformHost(provider);
+    const refType = parseRepoBrowserRefType(sp.get("ref_type"));
+    const refName = emptyToNull(sp.get("ref_name"));
+    const refSHA = emptyToNull(sp.get("ref_sha"));
+    const selectedPath = emptyToNull(sp.get("path"));
+    const mode = parseRepoBrowserViewMode(sp.get("mode"));
+    return {
+      page: "repo-browser",
+      provider,
+      ...(platformHost ? { platformHost } : {}),
+      repoPath,
+      owner: repo.owner,
+      name: repo.name,
+      ...(refType ? { refType } : {}),
+      ...(refName ? { refName } : {}),
+      ...(refSHA ? { refSHA } : {}),
+      ...(selectedPath ? { path: selectedPath } : {}),
+      ...(mode ? { mode } : {}),
+      ...(anchor ? { anchor } : {}),
+    };
   }
   if (path === "/kata") {
     const sp = new URLSearchParams(search);
@@ -568,7 +621,7 @@ function buildRouteEvent(r: Route): MiddlemanNavigateEvent {
     navType = r.view === "board" ? "board" : "pull";
   } else if (r.page === "issues") {
     navType = "issue";
-  } else if (r.page === "repos") {
+  } else if (r.page === "repos" || r.page === "repo-browser") {
     navType = "repos";
   } else if (r.page === "kata") {
     navType = "kata";
@@ -599,7 +652,7 @@ function buildRouteEvent(r: Route): MiddlemanNavigateEvent {
     page,
     type: navType,
     focus,
-    view: stripBase(window.location.pathname) + window.location.search,
+    view: stripBase(currentLocationPath()),
   };
 
   if (r.page === "focus" && "owner" in r) {
@@ -641,6 +694,14 @@ function emptyToNull(value: string | null): string | null {
 function parseKataView(value: string | null): KataTaskViewName | undefined {
   if (value === null) return undefined;
   return kataViewNames.has(value as KataTaskViewName) ? (value as KataTaskViewName) : undefined;
+}
+
+function parseRepoBrowserRefType(value: string | null): "branch" | "tag" | "commit" | undefined {
+  return value === "branch" || value === "tag" || value === "commit" ? value : undefined;
+}
+
+function parseRepoBrowserViewMode(value: string | null): "source" | "preview" | undefined {
+  return value === "source" || value === "preview" ? value : undefined;
 }
 
 export function isWorkspacePage(page: Page): boolean {
