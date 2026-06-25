@@ -665,6 +665,86 @@ describe("createRepoBrowserStore", () => {
     expect(store.getSelectedCommit()).toBeNull();
     expect(store.getError()).toBe("Path not found: missing.md");
   });
+
+  it("retains an explicit directory path without loading it as a blob", async () => {
+    const client = testClient();
+    const store = createRepoBrowserStore({ client });
+
+    await store.loadRepo(repo, { path: "src" });
+
+    expect(store.getSelectedPath()).toBe("src");
+    expect(store.getBlob()).toBeNull();
+    expect(store.getFileHistory()).toEqual([]);
+    expect(store.getSelectedCommit()).toBeNull();
+    expect(store.getError()).toBeNull();
+    expect(requestedURLs(client)).not.toContain(
+      "/repo/github/acme/widgets/browser/blob?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src",
+    );
+    expect(requestedURLs(client)).not.toContain(
+      "/repo/github/acme/widgets/browser/history?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src",
+    );
+  });
+
+  it("selects an implicit directory path without loading it as a blob", async () => {
+    const client = testClient();
+    const store = createRepoBrowserStore({ client });
+    await store.loadRepo(repo);
+
+    await store.selectPath("src");
+
+    expect(store.getSelectedPath()).toBe("src");
+    expect(store.getBlob()).toBeNull();
+    expect(store.getFileHistory()).toEqual([]);
+    expect(store.getSelectedCommit()).toBeNull();
+    expect(store.getError()).toBeNull();
+    expect(requestedURLs(client)).not.toContain(
+      "/repo/github/acme/widgets/browser/blob?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src",
+    );
+    expect(requestedURLs(client)).not.toContain(
+      "/repo/github/acme/widgets/browser/history?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src",
+    );
+  });
+
+  it("keeps unknown path selections loading while probing blob and history", async () => {
+    const base = testClient();
+    const missingBlob = deferredResponse();
+    const missingHistory = deferredResponse();
+    const client = {
+      GET: vi.fn((path: string, options?: TestGetOptions) => {
+        const url = testURL(path, options);
+        if (
+          url ===
+          "/repo/github/acme/widgets/browser/blob?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=missing.md"
+        ) {
+          return missingBlob.promise;
+        }
+        if (
+          url ===
+          "/repo/github/acme/widgets/browser/history?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=missing.md"
+        ) {
+          return missingHistory.promise;
+        }
+        return base.GET(path, options);
+      }),
+    } as unknown as TestClient;
+    const store = createRepoBrowserStore({ client });
+    await store.loadRepo(repo);
+
+    const pending = store.selectPath("missing.md");
+
+    expect(store.getSelectedPath()).toBe("missing.md");
+    expect(store.isBlobLoading()).toBe(true);
+
+    missingBlob.resolve({
+      error: { detail: "git object not found" },
+      response: new Response(null, { status: 404 }),
+    });
+    missingHistory.resolve(historyResponse("missing.md", "unreachable"));
+    await pending;
+
+    expect(store.isBlobLoading()).toBe(false);
+    expect(store.getError()).toBe("git object not found");
+  });
 });
 
 function testURL(path: string, options?: TestGetOptions): string {
@@ -675,6 +755,12 @@ function testURL(path: string, options?: TestGetOptions): string {
   const serializer = createQuerySerializer(options?.querySerializer ?? runtimeQuerySerializerOptions);
   const qs = serializer(options?.params?.query ?? {});
   return qs ? `${url}?${qs}` : url;
+}
+
+function requestedURLs(client: TestClient): string[] {
+  return (client.GET as unknown as { mock: { calls: Array<[string, TestGetOptions | undefined]> } }).mock.calls.map(
+    ([path, options]) => testURL(path, options),
+  );
 }
 
 function commit(subject: string) {
