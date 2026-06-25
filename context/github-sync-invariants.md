@@ -61,6 +61,26 @@ For pull requests, that means:
   persisted activity, not just one subset of the detail payload.
 - Background sync cooldowns are allowed, but user-initiated refreshes must still
   be able to promote a stronger sync intent over an in-flight background fetch.
+- Recently active open PRs in the fast-sync lane are cadence-gated by activity
+  age, not just by membership in `active_pr_window`
+  (`internal/github/sync.go::activeMRRefreshInterval`). Hot PRs use
+  `active_pr_refresh_interval`; older PRs still inside the window fall back to
+  a slower cadence so the Activity view stays fresh without spending the same
+  request rate on hours-old rows. A missing `detail_fetched_at` remains due
+  immediately (`internal/github/sync.go::activeMRDueForFastSync`).
+- GitHub detail ETags reduce both payload work and middleman's eager-refresh
+  budget spend for unchanged PRs; the sync budget transport does not count
+  `304 Not Modified` responses (`internal/github/budget_transport.go::budgetTransport`).
+  Active watched-PR sync must use the same persisted pull-request ETag path as
+  detail drain (`internal/github/sync.go::syncMRForRepo`,
+  `internal/github/sync.go::getPullRequestForDetail`,
+  `internal/github/sync.go::markUnchangedMRDetailFetched`). Manual/API PR
+  refreshes must bypass that PR ETag gate so rerun checks, workflow approval,
+  comments, reviews, and commits can refresh even when GitHub's PR resource is
+  unchanged (`internal/github/sync.go::SyncMR`,
+  `internal/server/huma_routes.go::syncPR`). Cadence control is still required
+  because changed PRs correctly fall through to comments, reviews, commits, CI,
+  and workflow approval refreshes.
 
 ## Timeline Event Rules
 

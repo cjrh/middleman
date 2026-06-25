@@ -6868,6 +6868,65 @@ func TestWatchedMRsIncludeRecentlyActiveOpenPRs(t *testing.T) {
 	}, got)
 }
 
+func TestWatchedMRsThrottleRecentlyActiveOpenPRsByActivityAge(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	d := openTestDB(t)
+	ctx := t.Context()
+	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+
+	repoID, err := d.UpsertRepo(ctx, db.RepoIdentity{
+		Platform:     "github",
+		PlatformHost: "github.com",
+		Owner:        "acme",
+		Name:         "app",
+	})
+	require.NoError(err)
+
+	seedMR := func(number int, lastActivity time.Time, detailFetchedAt *time.Time) {
+		_, upsertErr := d.UpsertMergeRequest(ctx, &db.MergeRequest{
+			RepoID: repoID, PlatformID: int64(number), Number: number,
+			Title: "PR", Author: "octo", State: db.MergeRequestStateOpen,
+			HeadBranch: "feature", BaseBranch: "main",
+			CreatedAt: now.Add(-24 * time.Hour),
+			UpdatedAt: lastActivity, LastActivityAt: lastActivity,
+			DetailFetchedAt: detailFetchedAt,
+		})
+		require.NoError(upsertErr)
+	}
+	hotNotDue := now.Add(-1 * time.Minute)
+	hotDue := now.Add(-2 * time.Minute)
+	warmNotDue := now.Add(-4 * time.Minute)
+	warmDue := now.Add(-5 * time.Minute)
+	seedMR(1, now.Add(-10*time.Minute), &hotNotDue)
+	seedMR(2, now.Add(-10*time.Minute), &hotDue)
+	seedMR(3, now.Add(-45*time.Minute), &warmNotDue)
+	seedMR(4, now.Add(-45*time.Minute), &warmDue)
+
+	syncer := NewSyncer(
+		map[string]Client{}, d, nil,
+		[]RepoRef{{
+			Platform: platform.KindGitHub, PlatformHost: "github.com",
+			Owner: "acme", Name: "app",
+		}},
+		time.Hour, nil, nil,
+	)
+	syncer.SetWatchInterval(2 * time.Minute)
+	syncer.SetActiveMRWindow(4 * time.Hour)
+
+	got := syncer.watchedMRsForFastSync(ctx, now)
+	assert.ElementsMatch([]WatchedMR{
+		{
+			Platform: platform.KindGitHub, PlatformHost: "github.com",
+			Owner: "acme", Name: "app", Number: 2,
+		},
+		{
+			Platform: platform.KindGitHub, PlatformHost: "github.com",
+			Owner: "acme", Name: "app", Number: 4,
+		},
+	}, got)
+}
+
 func TestWatchedMRsNotifyOnceAfterFastSync(t *testing.T) {
 	assert := Assert.New(t)
 	d := openTestDB(t)
@@ -7410,6 +7469,114 @@ func TestFetchMRDetailUsesPersistedPullRequestETag(t *testing.T) {
 		"304 should skip the unconditional PR detail fetch")
 	assert.Zero(int(mc.listIssueCommentsCalled.Load()),
 		"304 should skip timeline/comment refresh")
+}
+
+func TestWatchedSyncMRUsesPersistedPullRequestETag(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	ctx := t.Context()
+	d := openTestDB(t)
+
+	repo := RepoRef{Owner: "owner", Name: "repo", PlatformHost: "github.com"}
+	repoID, err := d.UpsertRepo(ctx, db.GitHubRepoIdentity("github.com", repo.Owner, repo.Name))
+	require.NoError(err)
+	updatedAt := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	detailFetchedAt := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC)
+	_, err = d.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID:          repoID,
+		PlatformID:      1000,
+		Number:          1,
+		URL:             "https://github.com/owner/repo/pull/1",
+		Title:           "test PR",
+		Author:          "alice",
+		State:           "open",
+		HeadBranch:      "feature-branch",
+		BaseBranch:      "main",
+		PlatformHeadSHA: "abc123def456",
+		CreatedAt:       updatedAt,
+		UpdatedAt:       updatedAt,
+		LastActivityAt:  updatedAt,
+		DetailFetchedAt: &detailFetchedAt,
+	})
+	require.NoError(err)
+	require.NoError(d.UpsertHTTPEtag(
+		ctx, "github", "github.com", "owner", "repo",
+		"pull_request", 1, `"etag-v1"`,
+	))
+
+	mc := &conditionalPRTrackingClient{notModified: true}
+	mc.singlePR = buildOpenPR(1, updatedAt)
+	mc.comments = []*gh.IssueComment{{ID: new(int64)}}
+	mc.reviews = []*gh.PullRequestReview{{ID: new(int64)}}
+	mc.commits = []*gh.RepositoryCommit{{SHA: new(string)}}
+	syncer := NewSyncer(
+		map[string]Client{"github.com": mc}, d, nil,
+		[]RepoRef{repo},
+		time.Minute, nil, testBudget(1000),
+	)
+
+	require.NoError(syncer.syncMRWithWatchedRef(ctx, WatchedMR{
+		Owner: "owner", Name: "repo", Number: 1, PlatformHost: "github.com",
+	}))
+
+	assert.Equal(int32(1), mc.conditionalCalls.Load())
+	assert.Equal(`"etag-v1"`, mc.receivedETag)
+	assert.Zero(int(mc.getPRCalls.Load()),
+		"304 should skip the unconditional PR detail fetch")
+	assert.Zero(int(mc.listIssueCommentsCalled.Load()),
+		"304 should skip timeline/comment refresh")
+}
+
+func TestSyncMRBypassesPersistedPullRequestETag(t *testing.T) {
+	assert := Assert.New(t)
+	require := require.New(t)
+	ctx := t.Context()
+	d := openTestDB(t)
+
+	repo := RepoRef{Owner: "owner", Name: "repo", PlatformHost: "github.com"}
+	repoID, err := d.UpsertRepo(ctx, db.GitHubRepoIdentity("github.com", repo.Owner, repo.Name))
+	require.NoError(err)
+	updatedAt := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+	detailFetchedAt := time.Date(2024, 6, 1, 9, 0, 0, 0, time.UTC)
+	_, err = d.UpsertMergeRequest(ctx, &db.MergeRequest{
+		RepoID: repoID, PlatformID: 1000, Number: 1,
+		URL:             "https://github.com/owner/repo/pull/1",
+		Title:           "test PR",
+		Author:          "alice",
+		State:           "open",
+		HeadBranch:      "feature-branch",
+		BaseBranch:      "main",
+		PlatformHeadSHA: "abc123def456",
+		CreatedAt:       updatedAt,
+		UpdatedAt:       updatedAt,
+		LastActivityAt:  updatedAt,
+		DetailFetchedAt: &detailFetchedAt,
+	})
+	require.NoError(err)
+	require.NoError(d.UpsertHTTPEtag(
+		ctx, "github", "github.com", "owner", "repo",
+		"pull_request", 1, `"etag-v1"`,
+	))
+
+	ciState := "success"
+	mc := &conditionalPRTrackingClient{notModified: true}
+	mc.singlePR = buildOpenPR(1, updatedAt)
+	mc.comments = []*gh.IssueComment{}
+	mc.reviews = []*gh.PullRequestReview{}
+	mc.commits = []*gh.RepositoryCommit{}
+	mc.ciStatus = &gh.CombinedStatus{State: &ciState}
+	syncer := NewSyncer(
+		map[string]Client{"github.com": mc}, d, nil,
+		[]RepoRef{repo},
+		time.Minute, nil, testBudget(1000),
+	)
+
+	require.NoError(syncer.SyncMR(ctx, "owner", "repo", 1))
+
+	assert.Zero(int(mc.conditionalCalls.Load()))
+	assert.Equal(1, int(mc.getPRCalls.Load()))
+	assert.Equal(int32(1), mc.listIssueCommentsCalled.Load(),
+		"manual SyncMR should refresh timeline/comments")
 }
 
 func TestFetchMRDetailPersistsPullRequestETag(t *testing.T) {
