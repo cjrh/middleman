@@ -83,6 +83,7 @@
         "marked": "17.0.6",
         "openapi-fetch": "^0.17.0",
         "prosemirror-state": "^1.4.4",
+        "shiki": "3.23.0",
         "svelte-tiptap": "3.0.1",
       },
       "devDependencies": {
