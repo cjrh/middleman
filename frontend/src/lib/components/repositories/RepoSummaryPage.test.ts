@@ -394,6 +394,34 @@ describe("RepoSummaryPage", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/issues");
   });
 
+  it("opens the source browser from repository cards", async () => {
+    mockGet.mockResolvedValue({
+      data: [
+        repoSummaryFixture({
+          provider: "github",
+          platformHost: "github.com",
+          owner: "acme",
+          name: "widgets",
+        }),
+      ],
+      error: undefined,
+    });
+
+    render(RepoSummaryPage);
+
+    await screen.findByRole("button", { name: /acme\s*\/\s*widgets/ });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: "View repository source for acme widgets on github.com",
+      }),
+    );
+
+    expect(mockSetGlobalRepo).toHaveBeenCalledWith("github|github.com/acme/widgets");
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/repo/browser?provider=github&platform_host=github.com&repo_path=acme%2Fwidgets",
+    );
+  });
+
   it("filters repositories by search and stale release state", async () => {
     mockGet.mockResolvedValue({
       data: [

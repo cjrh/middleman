@@ -238,12 +238,123 @@ describe("createRepoBrowserStore", () => {
 
     expect(store.getDefaultRef()?.name).toBe("main");
     expect(store.getSelectedPath()).toBe("README.md");
-    expect(store.getFileEntries().map((entry) => [entry.path, entry.lastChanged?.subject])).toEqual([
-      ["README.md", "readme changed"],
-      ["src/app.ts", "app changed"],
-    ]);
     expect(store.getBlob()?.content).toBe("# Widgets\n");
     expect(store.getFileHistory().map((item) => item.subject)).toEqual(["readme changed"]);
+    await vi.waitFor(() => {
+      expect(store.getFileEntries().map((entry) => [entry.path, entry.lastChanged?.subject])).toEqual([
+        ["README.md", "readme changed"],
+        ["src/app.ts", "app changed"],
+      ]);
+    });
+  });
+
+  it("loads last-changed metadata for file trees larger than one backend batch", async () => {
+    const entries = Array.from({ length: 251 }, (_, index) => ({
+      path: `src/file-${index.toString().padStart(3, "0")}.ts`,
+      type: "blob",
+      size: 10,
+    }));
+    const lastChangedBatches: string[][] = [];
+    const base = testClient();
+    const client = {
+      GET: vi.fn((path: string, options?: TestGetOptions) => {
+        const url = testURL(path, options);
+        if (
+          url ===
+          "/repo/github/acme/widgets/browser/tree?repo_path=acme%2Fwidgets&ref_type=branch&ref_name=main&ref_sha=main-sha"
+        ) {
+          return Promise.resolve({
+            data: {
+              repo,
+              ref: { type: "branch", name: "main", sha: "main-sha", stale: false },
+              entries,
+              truncated: false,
+            },
+            response: new Response(null, { status: 200 }),
+          });
+        }
+        if (url.startsWith("/repo/github/acme/widgets/browser/last-changed?")) {
+          const params = new URL(`http://middleman.test${url}`).searchParams;
+          const paths = params.getAll("path");
+          lastChangedBatches.push(paths);
+          return Promise.resolve({
+            data: {
+              repo,
+              ref: { type: "branch", name: "main", sha: "main-sha", stale: false },
+              commits: Object.fromEntries(paths.map((filePath) => [filePath, commit(`changed ${filePath}`)])),
+            },
+            response: new Response(null, { status: 200 }),
+          });
+        }
+        if (
+          url ===
+          "/repo/github/acme/widgets/browser/blob?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src%2Ffile-250.ts"
+        ) {
+          return Promise.resolve(blobResponse("src/file-250.ts", "export const selected = true;\n"));
+        }
+        if (
+          url ===
+          "/repo/github/acme/widgets/browser/history?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src%2Ffile-250.ts"
+        ) {
+          return Promise.resolve(historyResponse("src/file-250.ts", "changed src/file-250.ts"));
+        }
+        return base.GET(path, options);
+      }),
+    } as unknown as TestClient;
+    const store = createRepoBrowserStore({ client });
+
+    await store.loadRepo(repo, { path: "src/file-250.ts" });
+
+    expect(store.getBlob()?.path).toBe("src/file-250.ts");
+    await vi.waitFor(() => {
+      expect(lastChangedBatches.map((batch) => batch.length)).toEqual([250, 1]);
+      expect(lastChangedBatches[0]?.[0]).toBe("src/file-250.ts");
+      expect(store.getFileEntries()[0]?.lastChanged?.subject).toBe("changed src/file-000.ts");
+      expect(store.getFileEntries()[250]?.lastChanged?.subject).toBe("changed src/file-250.ts");
+    });
+  });
+
+  it("loads the selected blob before delayed last-changed metadata", async () => {
+    const base = testClient();
+    const lastChanged = deferredResponse();
+    const client = {
+      GET: vi.fn((path: string, options?: TestGetOptions) => {
+        const url = testURL(path, options);
+        if (
+          url ===
+          "/repo/github/acme/widgets/browser/last-changed?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=main-sha&path=src%2Fapp.ts&path=README.md"
+        ) {
+          return lastChanged.promise;
+        }
+        return base.GET(path, options);
+      }),
+    } as unknown as TestClient;
+    const store = createRepoBrowserStore({ client });
+
+    await store.loadRepo(repo, { path: "src/app.ts" });
+
+    expect(store.getSelectedPath()).toBe("src/app.ts");
+    expect(store.getBlob()?.path).toBe("src/app.ts");
+    expect(store.getFileHistory().map((item) => item.subject)).toEqual(["app changed"]);
+    expect(store.getFileEntries().map((entry) => entry.lastChanged)).toEqual([undefined, undefined]);
+
+    lastChanged.resolve({
+      data: {
+        repo,
+        ref: { type: "branch", name: "main", sha: "main-sha", stale: false },
+        commits: {
+          "README.md": commit("readme changed"),
+          "src/app.ts": commit("app changed"),
+        },
+      },
+      response: new Response(null, { status: 200 }),
+    });
+    await vi.waitFor(() => {
+      expect(store.getFileEntries().map((entry) => entry.lastChanged?.subject)).toEqual([
+        "readme changed",
+        "app changed",
+      ]);
+    });
   });
 
   it("persists source and preview view mode", () => {

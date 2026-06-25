@@ -655,27 +655,32 @@ function buildRouteEvent(r: Route): MiddlemanNavigateEvent {
     view: stripBase(currentLocationPath()),
   };
 
-  if (r.page === "focus" && "owner" in r) {
-    event.owner = r.owner;
-    event.name = r.name;
+  if (r.page === "focus" && "repoPath" in r) {
+    applyRouteRepoIdentity(event, r);
     event.number = r.number;
   } else if (r.page === "pulls" && "selected" in r && r.selected) {
-    event.owner = r.selected.owner;
-    event.name = r.selected.name;
+    applyRouteRepoIdentity(event, r.selected);
     event.number = r.selected.number;
   } else if (r.page === "issues" && "selected" in r && r.selected) {
-    event.owner = r.selected.owner;
-    event.name = r.selected.name;
+    applyRouteRepoIdentity(event, r.selected);
     event.number = r.selected.number;
+  } else if ("repoPath" in r) {
+    applyRouteRepoIdentity(event, r);
   }
 
   // Populate repo from focus list route or global config.
   if (r.page === "focus" && "repo" in r && r.repo) {
-    event.repo = r.repo;
-  } else {
+    const repoIdentity = parseFocusListRepoIdentity(r.repo);
+    if (repoIdentity) {
+      applyRouteRepoIdentity(event, repoIdentity);
+    } else {
+      event.repo = r.repo;
+    }
+  } else if (!event.repo_path) {
     const cfgRepo = getEmbedUIConfig().repo;
     if (cfgRepo) {
-      event.repo = `${cfgRepo.owner}/${cfgRepo.name}`;
+      const repo = embedConfigRepoName(cfgRepo);
+      if (repo) event.repo = repo;
     }
   }
 
@@ -685,6 +690,48 @@ function buildRouteEvent(r: Route): MiddlemanNavigateEvent {
   }
 
   return event;
+}
+
+function applyRouteRepoIdentity(event: MiddlemanNavigateEvent, ref: RepoRef): void {
+  event.provider = ref.provider;
+  if (ref.platformHost) event.platform_host = ref.platformHost;
+  event.repo_path = ref.repoPath;
+  event.repo = ref.repoPath;
+  event.owner = ref.owner;
+  event.name = ref.name;
+}
+
+function parseFocusListRepoIdentity(repo: string): RepoRef | undefined {
+  const raw = repo.trim();
+  if (!raw || raw.includes(",")) return undefined;
+  const pipeIndex = raw.indexOf("|");
+  if (pipeIndex <= 0) return undefined;
+  const provider = raw.slice(0, pipeIndex).trim();
+  const hostAndPath = raw.slice(pipeIndex + 1);
+  const slashIndex = hostAndPath.indexOf("/");
+  if (!provider || slashIndex <= 0) return undefined;
+  const platformHost = hostAndPath.slice(0, slashIndex).trim();
+  const repoPath = hostAndPath
+    .slice(slashIndex + 1)
+    .trim()
+    .replace(/^\/+|\/+$/g, "");
+  const repoParts = repoPath ? splitRepoPath(repoPath) : undefined;
+  if (!platformHost || !repoPath || !repoParts) return undefined;
+  return {
+    provider,
+    platformHost,
+    repoPath,
+    owner: repoParts.owner,
+    name: repoParts.name,
+  };
+}
+
+function embedConfigRepoName(repo: NonNullable<ReturnType<typeof getEmbedUIConfig>["repo"]>): string | undefined {
+  const repoPath = repo.repo_path?.trim().replace(/^\/+|\/+$/g, "");
+  if (repoPath) return repoPath;
+  const owner = repo.owner?.trim().replace(/^\/+|\/+$/g, "");
+  const name = repo.name?.trim().replace(/^\/+|\/+$/g, "");
+  return owner && name ? `${owner}/${name}` : undefined;
 }
 
 function emptyToNull(value: string | null): string | null {

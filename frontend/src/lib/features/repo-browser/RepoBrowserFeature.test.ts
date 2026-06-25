@@ -5,6 +5,11 @@ import { createQuerySerializer, type QuerySerializerOptions } from "openapi-fetc
 import { tick } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { MiddlemanClient } from "@middleman/ui";
+
+vi.mock("./PierreFileContents.svelte", async () => ({
+  default: (await import("./RepoBrowserFeatureTestPierreFileContents.svelte")).default,
+}));
+
 import RepoBrowserFeature from "./RepoBrowserFeature.svelte";
 
 const repo = {
@@ -28,6 +33,13 @@ const route = {
 type TestGetOptions = {
   params?: { path?: Record<string, string>; query?: Record<string, unknown> };
   querySerializer?: QuerySerializerOptions;
+};
+
+type TestClientOptions = {
+  sourceFile?: {
+    path: string;
+    content: string;
+  };
 };
 
 const runtimeQuerySerializerOptions: QuerySerializerOptions = {
@@ -85,6 +97,23 @@ describe("RepoBrowserFeature", () => {
     expect(issueLink.getAttribute("data-provider")).toBe("github");
     expect(issueLink.getAttribute("data-repo-path")).toBe("acme/widgets");
     expect(issueLink.getAttribute("data-external-url")).toBe("https://github.com/acme/widgets/issues/12");
+  });
+
+  it("hides zero-count file category filters", async () => {
+    render(RepoBrowserFeature, {
+      props: {
+        client: testClient(),
+        route,
+        onRouteChange: vi.fn(),
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: "Plans/docs 2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All 2" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Code 0" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Tests 0" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Other 0" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Generated 0" })).toBeNull();
   });
 
   it("applies route anchor changes for the selected markdown file", async () => {
@@ -291,6 +320,29 @@ describe("RepoBrowserFeature", () => {
     await tick();
     expect(client.GET).toHaveBeenCalledTimes(9);
   });
+
+  it("renders source files through Pierre file contents", async () => {
+    const sourceFile = {
+      path: "internal/main.go",
+      content: "package main\n\nfunc main() {}\n",
+    };
+    render(RepoBrowserFeature, {
+      props: {
+        client: testClient({ sourceFile }),
+        route: {
+          ...route,
+          path: sourceFile.path,
+          mode: "source",
+        },
+        onRouteChange: vi.fn(),
+      },
+    });
+
+    const viewer = await screen.findByTestId("repo-browser-pierre-file-contents");
+
+    expect(viewer.getAttribute("data-path")).toBe(sourceFile.path);
+    expect(viewer.textContent).toContain("package main");
+  });
 });
 
 function scrolledHeadingIDs(scrollIntoView: ReturnType<typeof vi.fn>): string[] {
@@ -300,10 +352,11 @@ function scrolledHeadingIDs(scrollIntoView: ReturnType<typeof vi.fn>): string[] 
   });
 }
 
-function testClient(): MiddlemanClient {
+function testClient(clientOptions: TestClientOptions = {}): MiddlemanClient {
   return {
     GET: vi.fn(async (path: string, options?: TestGetOptions) => {
       const url = testURL(path, options);
+      const treeEntries = testTreeEntries(clientOptions);
       if (url === "/repo/github/acme/widgets/browser/refs?repo_path=acme%2Fwidgets") {
         return {
           data: {
@@ -325,10 +378,7 @@ function testClient(): MiddlemanClient {
           data: {
             repo,
             ref: { type: "branch", name: "main", sha: "main-sha", stale: false },
-            entries: [
-              { path: "README.md", type: "blob", size: 31 },
-              { path: "docs/guide.md", type: "blob", size: 18 },
-            ],
+            entries: treeEntries,
             truncated: false,
           },
           response: new Response(null, { status: 200 }),
@@ -342,10 +392,7 @@ function testClient(): MiddlemanClient {
           data: {
             repo,
             ref: { type: "branch", name: "main", sha: "main-next-sha", stale: false },
-            entries: [
-              { path: "README.md", type: "blob", size: 13 },
-              { path: "docs/guide.md", type: "blob", size: 18 },
-            ],
+            entries: treeEntries,
             truncated: false,
           },
           response: new Response(null, { status: 200 }),
@@ -359,14 +406,20 @@ function testClient(): MiddlemanClient {
           data: {
             repo,
             ref: { type: "tag", name: "v1.0.0", sha: "tag-sha", stale: false },
-            entries: [
-              { path: "README.md", type: "blob", size: 31 },
-              { path: "docs/guide.md", type: "blob", size: 18 },
-            ],
+            entries: treeEntries,
             truncated: false,
           },
           response: new Response(null, { status: 200 }),
         };
+      }
+      if (url === lastChangedURL("main-sha", treeEntries)) {
+        return lastChangedResponse("main-sha");
+      }
+      if (url === lastChangedURL("main-next-sha", treeEntries)) {
+        return lastChangedResponse("main-next-sha");
+      }
+      if (url === lastChangedURL("tag-sha", treeEntries)) {
+        return lastChangedResponse("tag-sha");
       }
       if (
         url ===
@@ -455,12 +508,38 @@ function testClient(): MiddlemanClient {
       ) {
         return historyResponse("docs/guide.md");
       }
+      if (clientOptions.sourceFile && url === sourceEndpointURL("blob", "main-sha", clientOptions.sourceFile.path)) {
+        const file = clientOptions.sourceFile;
+        return blobResponse(file.path, file.content);
+      }
+      if (clientOptions.sourceFile && url === sourceEndpointURL("history", "main-sha", clientOptions.sourceFile.path)) {
+        return historyResponse(clientOptions.sourceFile.path);
+      }
       return {
         error: { detail: `unexpected ${url}` },
         response: new Response(null, { status: 404 }),
       };
     }),
   } as unknown as MiddlemanClient;
+}
+
+function testTreeEntries(options: TestClientOptions) {
+  return [
+    { path: "README.md", type: "blob", size: 31 },
+    { path: "docs/guide.md", type: "blob", size: 18 },
+    ...(options.sourceFile
+      ? [{ path: options.sourceFile.path, type: "blob", size: options.sourceFile.content.length }]
+      : []),
+  ];
+}
+
+function lastChangedURL(refSHA: string, entries: ReturnType<typeof testTreeEntries>): string {
+  const paths = entries.map((entry) => `path=${encodeURIComponent(entry.path)}`).join("&");
+  return `/repo/github/acme/widgets/browser/last-changed?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=${refSHA}&${paths}`;
+}
+
+function sourceEndpointURL(endpoint: "blob" | "history", refSHA: string, path: string): string {
+  return `/repo/github/acme/widgets/browser/${endpoint}?repo_path=acme%2Fwidgets&ref_type=commit&ref_sha=${refSHA}&path=${encodeURIComponent(path)}`;
 }
 
 function testURL(path: string, options?: TestGetOptions): string {
@@ -500,6 +579,17 @@ function historyResponse(path: string) {
       ref: { type: "branch", name: "main", sha: "main-sha", stale: false },
       path,
       commits: [],
+    },
+    response: new Response(null, { status: 200 }),
+  };
+}
+
+function lastChangedResponse(refSHA: string) {
+  return {
+    data: {
+      repo,
+      ref: { type: "branch", name: "main", sha: refSHA, stale: false },
+      commits: {},
     },
     response: new Response(null, { status: 200 }),
   };
