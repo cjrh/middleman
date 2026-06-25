@@ -29,6 +29,16 @@ export type FocusListRouteRef = {
   repo?: string | undefined;
 };
 
+export type RepoBrowserViewMode = "source" | "preview";
+
+export type RepoBrowserRouteRef = RepositoryRouteRef & {
+  refType?: string | undefined;
+  refName?: string | undefined;
+  refSHA?: string | undefined;
+  path?: string | undefined;
+  viewMode?: RepoBrowserViewMode | undefined;
+};
+
 export function buildPullRequestRoute(ref: PullRequestRouteRef): string {
   return buildProviderPullRequestRoute(providerRouteRef(ref));
 }
