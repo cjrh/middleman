@@ -1367,6 +1367,17 @@
     width: 100%;
   }
 
+  /* Wrap long lines inside fenced code blocks at all widths (see
+     PullDetail): scope to <pre> only so the wrap inherits to the inner
+     <code> without touching inline code, which must keep the table-cell
+     reset in app.css. */
+  .issue-detail :global(.markdown-body pre) {
+    max-width: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .issue-detail-content {
     container: issue-detail / inline-size;
     display: flex;

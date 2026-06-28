@@ -2381,6 +2381,21 @@
     width: 100%;
   }
 
+  /* Wrap long lines inside fenced code blocks at all widths. The detail
+     panel clips horizontal overflow (overflow-x: hidden above), so an
+     unwrapped <pre> line in a PR body or comment gets cut off; this view
+     also renders in the desktop-width yet equally narrow workspace
+     sidebar. Scope to <pre> only -- white-space/overflow-wrap/word-break
+     all inherit to the inner <code> -- so inline code keeps the
+     table-cell reset in app.css that lets wide tables scroll instead of
+     squeezing columns. */
+  .pull-detail :global(.markdown-body pre) {
+    max-width: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .pull-detail-content {
     container: pull-detail / inline-size;
     display: flex;
