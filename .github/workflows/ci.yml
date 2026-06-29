@@ -18,10 +18,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect_changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' || steps.filter.outputs.ci == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' || steps.filter.outputs.ci == 'true' }}
+      rust: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' || steps.filter.outputs.ci == 'true' }}
+      e2e: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.e2e == 'true' || steps.filter.outputs.ci == 'true' }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+        id: filter
+        with:
+          filters: |
+            backend:
+              - '**/*.go'
+              - go.mod
+              - go.sum
+              - internal/apiclient/generated/**
+              - internal/db/migrations/**
+              - internal/web/**
+              - tests/integration/**
+            frontend:
+              - frontend/**
+              - packages/**
+              - package.json
+              - bun.lock
+              - vite.config.ts
+            rust:
+              - Cargo.toml
+              - Cargo.lock
+              - rust/**
+            e2e:
+              - frontend/playwright*.config.ts
+              - frontend/tests/e2e/**
+              - frontend/tests/e2e-full/**
+              - packages/github-app-ui/playwright.config.ts
+              - packages/github-app-ui/tests/**
+              - scripts/e2e/**
+              - scripts/run-roborev-e2e.sh
+              - tests/integration/**
+            ci:
+              - .github/workflows/ci.yml
+              - Makefile
+
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -62,8 +111,10 @@ jobs:
   test_go:
     name: Go tests
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true'
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -125,8 +176,10 @@ jobs:
   test_frontend:
     name: Frontend unit tests
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true' || needs.detect_changes.outputs.frontend == 'true'
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -143,8 +196,10 @@ jobs:
   pty-windows:
     name: PTY tests (windows)
     runs-on: windows-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true' || needs.detect_changes.outputs.rust == 'true'
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -173,8 +228,10 @@ jobs:
   race:
     name: go test -race
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true'
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -242,7 +299,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -270,6 +327,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true' || needs.detect_changes.outputs.frontend == 'true' || needs.detect_changes.outputs.e2e == 'true'
     # Run inside the official Playwright image: browsers and their OS deps are
     # pre-baked at $PLAYWRIGHT_BROWSERS_PATH, so there is no apt download to
     # time out on (the firefox `--with-deps` install repeatedly flirted with the
@@ -283,7 +342,7 @@ jobs:
         browser: [chromium, firefox]
     name: e2e (${{ matrix.browser }})
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -359,16 +418,18 @@ jobs:
 
   e2e-roborev:
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true' || needs.detect_changes.outputs.frontend == 'true' || needs.detect_changes.outputs.e2e == 'true'
     env:
       # Pin to post-v0.50.0 commit with OpenAPI/Huma support.
       # Update to next release tag when available.
       ROBOREV_REF: 34091063a7d9c415c35a0faba18d41952b331b0f
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: roborev-dev/roborev
           ref: ${{ env.ROBOREV_REF }}
@@ -402,12 +463,14 @@ jobs:
   test_browser:
     name: frontend browser tests
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.backend == 'true' || needs.detect_changes.outputs.frontend == 'true'
     # Keep browser-component tests on the same Playwright image as the full e2e
     # suite so Chromium and its OS dependencies are preinstalled instead of
     # depending on apt during the workflow.
     container: mcr.microsoft.com/playwright@sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a  # v1.61.0-noble
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
