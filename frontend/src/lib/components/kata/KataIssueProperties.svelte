@@ -3,6 +3,7 @@
   import ClockIcon from "@lucide/svelte/icons/clock-3";
   import FlagIcon from "@lucide/svelte/icons/flag";
   import UserIcon from "@lucide/svelte/icons/user-round";
+  import XIcon from "@lucide/svelte/icons/x";
   import { ActionButton, Chip } from "@middleman/ui";
   import type { KataTaskDetail } from "../../api/kata/taskTypes.js";
   import DatePicker from "../shared/DatePicker.svelte";
@@ -45,6 +46,7 @@
   let scheduledDraft = $state("");
   let dueDraft = $state("");
   let addingLabel = $state(false);
+  let editingLabels = $state(false);
   let labelDraft = $state("");
   let trackedUID = $state<string | null>(null);
 
@@ -55,6 +57,7 @@
     scheduledDraft = "";
     dueDraft = "";
     addingLabel = false;
+    editingLabels = false;
     labelDraft = "";
   });
 
@@ -149,6 +152,14 @@
     }
     const ok = await onAddLabel(uid(), label);
     if (ok) {
+      labelDraft = "";
+      addingLabel = false;
+    }
+  }
+
+  function toggleLabelEditing(): void {
+    editingLabels = !editingLabels;
+    if (!editingLabels) {
       labelDraft = "";
       addingLabel = false;
     }
@@ -271,23 +282,30 @@
     <div>
       <dt>Labels</dt>
       <dd>
-        <div class="label-row">
+        <ul class="label-list" aria-label="Labels">
           {#each issue.labels as label (label.label)}
-            <Chip
-              size="sm"
-              tone="muted"
-              interactive
-              uppercase={false}
-              ariaLabel={`Remove ${label.label}`}
-              title={`Remove ${label.label}`}
-              onclick={() => {
-                void onRemoveLabel(uid(), label.label);
-              }}
-            >
-              {label.label} x
-            </Chip>
+            <li class={["label-token", editingLabels && "label-token--editing"]}>
+              {#if editingLabels}
+                <span class="label-token-name">{label.label}</span>
+                <button
+                  type="button"
+                  class="label-remove"
+                  aria-label={`Remove label ${label.label}`}
+                  title={`Remove label ${label.label}`}
+                  onclick={() => {
+                    void onRemoveLabel(uid(), label.label);
+                  }}
+                >
+                  <XIcon size={11} strokeWidth={2.2} aria-hidden="true" />
+                </button>
+              {:else}
+                <Chip size="sm" tone="muted" uppercase={false} class="kata-label-chip">
+                  {label.label}
+                </Chip>
+              {/if}
+            </li>
           {/each}
-        </div>
+        </ul>
       </dd>
     </div>
   {/if}
@@ -305,7 +323,18 @@
       }}
     />
   {:else}
-    <ActionButton size="sm" surface="outline" label="Add label" onclick={() => { addingLabel = true; }} />
+    <div class="label-actions">
+      <ActionButton size="sm" surface="outline" label="Add label" onclick={() => { addingLabel = true; }} />
+      {#if issue.labels.length > 0}
+        <ActionButton
+          size="sm"
+          surface="outline"
+          label={editingLabels ? "Done" : "Edit labels"}
+          ariaLabel={editingLabels ? "Done editing labels" : undefined}
+          onclick={toggleLabelEditing}
+        />
+      {/if}
+    </div>
   {/if}
 </section>
 
@@ -424,14 +453,83 @@
     font-size: var(--font-size-sm);
   }
 
-  .label-row {
+  .label-list {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .label-token {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .label-token--editing {
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    border-radius: 999px;
+    background: var(--bg-inset);
+    color: var(--text-muted);
+  }
+
+  .label-token :global(.kata-label-chip) {
+    max-width: min(220px, 100%);
+  }
+
+  .label-token-name {
+    max-width: min(220px, 100%);
+    min-height: 18px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 7px;
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .label-remove {
+    width: 19px;
+    height: 18px;
+    border: 0;
+    border-left: 1px solid var(--border-default);
+    background: transparent;
+    color: inherit;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .label-remove:hover {
+    background: color-mix(in srgb, var(--accent-red) 10%, var(--bg-surface-hover));
+    color: var(--text-primary);
+  }
+
+  .label-remove:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
   }
 
   .label-editor {
     margin: 0 0 22px;
+  }
+
+  .label-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
   .label-input {
