@@ -534,6 +534,16 @@ type BulkAddReposRequest struct {
 	Repos  []BulkAddRepoRequest `json:"repos"`
 }
 
+// CICheck defines model for CICheck.
+type CICheck struct {
+	App             string `json:"app"`
+	Conclusion      string `json:"conclusion"`
+	DurationSeconds *int64 `json:"duration_seconds,omitempty"`
+	Name            string `json:"name"`
+	Status          string `json:"status"`
+	Url             string `json:"url"`
+}
+
 // Capabilities defines model for Capabilities.
 type Capabilities struct {
 	Commands     CommandCapabilities    `json:"commands"`
@@ -1583,6 +1593,7 @@ type MergeRequestState string
 type MergeRequestDetailResponse struct {
 	// Schema A URL to the JSON Schema for this object.
 	Schema           *string                      `json:"$schema,omitempty"`
+	Checks           *[]CICheck                   `json:"checks,omitempty"`
 	DetailFetchedAt  *string                      `json:"detail_fetched_at,omitempty"`
 	DetailLoaded     bool                         `json:"detail_loaded"`
 	DiffHeadSha      string                       `json:"diff_head_sha"`
@@ -2224,6 +2235,11 @@ type RawWorktree struct {
 	LinkedPRNumber     *int64         `json:"linkedPRNumber,omitempty"`
 	Name               string         `json:"name"`
 	Path               string         `json:"path"`
+	PrAdditions        *int64         `json:"prAdditions,omitempty"`
+	PrCommentCount     *int64         `json:"prCommentCount,omitempty"`
+	PrDeletions        *int64         `json:"prDeletions,omitempty"`
+	PrMergeable        *string        `json:"prMergeable,omitempty"`
+	PrReviewDecision   *string        `json:"prReviewDecision,omitempty"`
 	PrState            *string        `json:"prState,omitempty"`
 	PrTitle            *string        `json:"prTitle,omitempty"`
 	PrURL              *string        `json:"prURL,omitempty"`
@@ -3099,6 +3115,11 @@ type WorktreeSummary struct {
 	LinkedPRNumber     *int64         `json:"linkedPRNumber,omitempty"`
 	Name               string         `json:"name"`
 	Path               string         `json:"path"`
+	PrAdditions        *int64         `json:"prAdditions,omitempty"`
+	PrCommentCount     *int64         `json:"prCommentCount,omitempty"`
+	PrDeletions        *int64         `json:"prDeletions,omitempty"`
+	PrMergeable        *string        `json:"prMergeable,omitempty"`
+	PrReviewDecision   *string        `json:"prReviewDecision,omitempty"`
 	PrState            *string        `json:"prState,omitempty"`
 	PrTitle            *string        `json:"prTitle,omitempty"`
 	PrURL              *string        `json:"prURL,omitempty"`

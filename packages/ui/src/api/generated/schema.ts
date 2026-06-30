@@ -4280,6 +4280,15 @@ export interface components {
             readonly $schema?: string;
             repos: components["schemas"]["BulkAddRepoRequest"][];
         };
+        CICheck: {
+            app: string;
+            conclusion: string;
+            /** Format: int64 */
+            duration_seconds?: number;
+            name: string;
+            status: string;
+            url: string;
+        };
         Capabilities: {
             commands: components["schemas"]["CommandCapabilities"];
             dependencies: components["schemas"]["DependencyCapabilities"];
@@ -5488,6 +5497,7 @@ export interface components {
              * @example /api/v1/schemas/MergeRequestDetailResponse.json
              */
             readonly $schema?: string;
+            checks?: components["schemas"]["CICheck"][] | null;
             detail_fetched_at?: string;
             detail_loaded: boolean;
             diff_head_sha: string;
@@ -6216,6 +6226,14 @@ export interface components {
             linkedPRNumber?: number;
             name: string;
             path: string;
+            /** Format: int64 */
+            prAdditions?: number;
+            /** Format: int64 */
+            prCommentCount?: number;
+            /** Format: int64 */
+            prDeletions?: number;
+            prMergeable?: string;
+            prReviewDecision?: string;
             prState?: string;
             prTitle?: string;
             prURL?: string;
@@ -7201,6 +7219,14 @@ export interface components {
             linkedPRNumber?: number;
             name: string;
             path: string;
+            /** Format: int64 */
+            prAdditions?: number;
+            /** Format: int64 */
+            prCommentCount?: number;
+            /** Format: int64 */
+            prDeletions?: number;
+            prMergeable?: string;
+            prReviewDecision?: string;
             prState?: string;
             prTitle?: string;
             prURL?: string;
